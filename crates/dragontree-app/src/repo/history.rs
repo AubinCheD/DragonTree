@@ -5,7 +5,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, Frame, Key, Rect, RichText, Sense, Ui};
 
 use super::graph_paint::{self, GraphGeom};
-use super::scope::LabelVisibility;
+use super::scope::{LabelVisibility, display_name};
 use super::{RepoTab, RepoView};
 use crate::app::Shared;
 use crate::icons;
@@ -58,6 +58,39 @@ impl RepoTab {
         self.history.filtered = Some(filtered);
     }
 
+    /// Bandeau « Filtré par : … » au-dessus de l'historique quand il est filtré sur des branches choisies :
+    /// chaque élément se retire par son ✕, « Tout afficher » retire tout le filtre.
+    fn filter_banner(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
+        if self.history.filter_refs.is_empty() {
+            return;
+        }
+        let mut remove = None;
+        let mut clear = false;
+        Frame::new().fill(p.panel).inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("{} {}", icons::FUNNEL, tr!("Filtré par :"))).color(p.weak).size(12.5));
+                for pattern in &self.history.filter_refs {
+                    let name = display_name(pattern);
+                    let chip = RichText::new(format!("{name}  {}", icons::X)).size(12.5);
+                    let resp = ui.add(egui::Button::new(chip).small());
+                    widgets::a11y(&resp, &tr!("Retirer du filtre : {name}", name), true);
+                    if resp.on_hover_text(tr!("Retirer du filtre : {name}", name)).clicked() {
+                        remove = Some(pattern.clone());
+                    }
+                }
+                if ui.add(egui::Button::new(RichText::new(tr!("Tout afficher")).size(12.5)).small()).clicked() {
+                    clear = true;
+                }
+            });
+        });
+        if clear {
+            self.clear_filter_refs(shared);
+        } else if let Some(pattern) = remove {
+            self.toggle_filter_ref(shared, &pattern);
+        }
+    }
+
     fn commit_table(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
         // Barre de filtre.
         ui.horizontal(|ui| {
@@ -79,8 +112,13 @@ impl RepoTab {
                     ui.add(egui::Spinner::new().size(12.0));
                 }
                 ui.add_space(6.0);
-                let label =
-                    if self.history.current_branch_only { tr!("Branche courante") } else { tr!("Toutes les branches") };
+                let label = if self.history.current_branch_only {
+                    tr!("Branche courante")
+                } else if !self.history.filter_refs.is_empty() {
+                    tr!("Branches filtrées")
+                } else {
+                    tr!("Toutes les branches")
+                };
                 if ui
                     .selectable_label(
                         self.history.current_branch_only,
@@ -91,8 +129,7 @@ impl RepoTab {
                     ))
                     .clicked()
                 {
-                    self.history.current_branch_only = !self.history.current_branch_only;
-                    self.load_log(shared);
+                    self.set_current_branch_only(shared, !self.history.current_branch_only);
                 }
                 ui.add_space(6.0);
                 ui.allocate_ui(egui::vec2(ui.available_width().min(420.0), 26.0), |ui| {
@@ -105,6 +142,7 @@ impl RepoTab {
                 });
             });
         });
+        self.filter_banner(ui, shared, p);
         self.apply_filter();
 
         if let Some(err) = &self.history.error {

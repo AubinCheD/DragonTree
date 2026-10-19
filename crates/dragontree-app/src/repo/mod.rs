@@ -123,6 +123,10 @@ pub struct HistoryState {
     pub viewport_height: f32,
     /// N'afficher que l'historique de HEAD (sinon toutes les branches, distantes et tags).
     pub current_branch_only: bool,
+    /// Filtre de l'historique sur des branches choisies : noms complets ou motifs (`refs/heads/x`,
+    /// `refs/heads/feature/*`, `refs/remotes/origin/*`, `refs/tags/v1`) ; vide : pas de filtre. Propre à l'onglet
+    /// et à la session ; exclusif avec `current_branch_only`.
+    pub filter_refs: Vec<String>,
 }
 
 impl Default for HistoryState {
@@ -152,6 +156,7 @@ impl Default for HistoryState {
             log_cancel: None,
             viewport_height: 400.0,
             current_branch_only: false,
+            filter_refs: Vec::new(),
         }
     }
 }
@@ -531,6 +536,8 @@ impl RepoTab {
             RepoEvent::Opened(Err(e)) => self.open_error = Some(e),
             RepoEvent::Refs(g, res) if g == self.gens.refs => match res {
                 Ok(refs) => {
+                    // Une branche filtrée qui a disparu sort du filtre avant que le journal soit relu.
+                    self.prune_filter_refs(&refs);
                     let sig = Self::tips_signature(&refs);
                     if sig != self.history.tips_signature {
                         let first_load = self.history.tips_signature == 0;

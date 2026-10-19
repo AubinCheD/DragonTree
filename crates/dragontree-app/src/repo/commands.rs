@@ -62,8 +62,7 @@ impl RepoTab {
             Command::ShowHistory => self.view = RepoView::History,
             Command::RevealHead => self.reveal_head(shared),
             Command::CurrentBranchOnly => {
-                self.history.current_branch_only = !self.history.current_branch_only;
-                self.load_log(shared);
+                self.set_current_branch_only(shared, !self.history.current_branch_only);
             }
             Command::ShowHiddenRefs => self.show_all_hidden(shared),
             Command::Refresh => self.refresh(shared, Refresh::ALL),

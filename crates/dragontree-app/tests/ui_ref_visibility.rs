@@ -137,7 +137,7 @@ fn the_eye_hides_a_branch_and_the_choice_is_kept_when_the_repo_is_reopened() {
     branches_repo(tmp.path());
     let mut h = open_branches(tmp.path());
 
-    h.get_by_label("Masquer du graphe : autre").click();
+    click_label(&mut h, "Masquer du graphe : autre");
     wait_until(&mut h, "commit de autre masqué", |h| h.query_by_label("Commit de autre").is_none());
     assert!(h.query_by_label("Commit de feature a").is_some(), "les autres branches restent");
     // L'œil devient barré et permanent : il propose maintenant de réafficher.
@@ -155,7 +155,7 @@ fn the_eye_hides_a_branch_and_the_choice_is_kept_when_the_repo_is_reopened() {
     wait_until(&mut h, "branche encore masquée", |h| h.query_by_label("Afficher dans le graphe : autre").is_some());
     assert!(h.query_by_label("Commit de autre").is_none());
 
-    h.get_by_label("Afficher dans le graphe : autre").click();
+    click_label(&mut h, "Afficher dans le graphe : autre");
     wait_until(&mut h, "commit de autre réaffiché", |h| h.query_by_label("Commit de autre").is_some());
 }
 
@@ -171,7 +171,7 @@ fn hiding_a_folder_then_showing_all_hidden_branches() {
     assert!(menu_item_disabled(&h, entry), "rien n'est masqué : entrée grisée");
     h.key_press(egui::Key::Escape);
 
-    h.get_by_label("Masquer du graphe : feature").click();
+    click_label(&mut h, "Masquer du graphe : feature");
     wait_until(&mut h, "commits du dossier masqués", |h| {
         h.query_by_label("Commit de feature a").is_none() && h.query_by_label("Commit de feature b").is_none()
     });
@@ -191,7 +191,7 @@ fn hiding_a_remote_removes_its_branches_commits() {
     let tmp = tempfile::tempdir().unwrap();
     branches_repo(tmp.path());
     let mut h = open_branches(tmp.path());
-    h.get_by_label("Masquer du graphe : origin").click();
+    click_label(&mut h, "Masquer du graphe : origin");
     wait_until(&mut h, "commit distant masqué", |h| h.query_by_label("Commit de dev distant").is_none());
     assert!(h.query_by_label("Commit de autre").is_some());
 }
@@ -201,10 +201,10 @@ fn hiding_the_current_branch_keeps_head_in_the_graph() {
     let tmp = tempfile::tempdir().unwrap();
     branches_repo(tmp.path());
     let mut h = open_branches(tmp.path());
-    h.get_by_label("Masquer du graphe : main").click();
+    click_label(&mut h, "Masquer du graphe : main");
     wait_until(&mut h, "œil barré sur main", |h| h.query_by_label("Afficher dans le graphe : main").is_some());
     // Masquer aussi `autre` : quand son commit disparaît, le journal a été relu avec `main` déjà masquée.
-    h.get_by_label("Masquer du graphe : autre").click();
+    click_label(&mut h, "Masquer du graphe : autre");
     wait_until(&mut h, "commit de autre masqué", |h| h.query_by_label("Commit de autre").is_none());
     // HEAD (donc le commit de main) reste parcourue malgré le masquage de sa branche.
     assert!(h.query_all_by_label("Commit principal").next().is_some());

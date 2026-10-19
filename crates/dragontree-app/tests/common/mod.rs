@@ -265,3 +265,11 @@ pub fn menu_item_checked(h: &Harness<'static, DragonTreeApp>, label: &str) -> Op
 pub fn close_requested(h: &Harness<'static, DragonTreeApp>) -> bool {
     h.output().viewport_output.values().any(|v| v.commands.iter().any(|c| matches!(c, egui::ViewportCommand::Close)))
 }
+
+/// Attend qu'un élément de libellé exactement `label` soit affiché et utilisable, puis le clique en une image (la
+/// barre latérale se remplit après l'historique).
+pub fn click_label(h: &mut Harness<'static, DragonTreeApp>, label: &str) {
+    click_by(h, &format!("élément « {label} » utilisable"), egui::PointerButton::Primary, |n| {
+        text_of(n).as_deref() == Some(label)
+    });
+}

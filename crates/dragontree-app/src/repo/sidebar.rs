@@ -30,12 +30,29 @@ impl Default for SidebarState {
 }
 
 const ROW_H: f32 = 22.0;
-/// Largeur réservée à droite d'une ligne pour l'icône œil.
+/// Largeur d'une icône à droite d'une ligne (œil, entonnoir).
 const TOOL_W: f32 = 22.0;
 
-/// Place prise à droite de la ligne par les icônes quand elles sont dessinées.
-fn reserved(tools: bool) -> f32 {
-    if tools { TOOL_W } else { 0.0 }
+/// Icônes d'une ligne : œil (masquer du graphe, absent pour les tags) et entonnoir (filtrer l'historique).
+#[derive(Clone, Copy)]
+struct Tools {
+    /// État de l'œil ; `None` : la ligne n'en a pas.
+    eye: Option<Visibility>,
+    /// L'élément fait partie du filtre de l'historique.
+    picked: bool,
+}
+
+impl Tools {
+    /// Ligne atténuée : l'élément est masqué du graphe.
+    fn dim(self) -> bool {
+        self.eye.is_some_and(|state| state != Visibility::Shown)
+    }
+
+    /// Place prise à droite de la ligne : les icônes sont dessinées au survol, et en permanence quand l'élément
+    /// est masqué ou filtré.
+    fn reserved(self, hovered: bool) -> f32 {
+        if hovered || self.dim() || self.picked { (1 + usize::from(self.eye.is_some())) as f32 * TOOL_W } else { 0.0 }
+    }
 }
 
 /// Nœud d'arbre de noms `a/b/c`.
@@ -128,11 +145,12 @@ impl RepoTab {
                     let open = !self.sidebar.open_folders.contains(&key) || !filter.is_empty();
                     let pattern = remote_pattern(&remote);
                     let state = visibility(shared.settings.hidden_refs_of(&self.path), &pattern);
-                    let resp = folder_row(ui, &key, &remote, icons::CLOUD, branches.len(), open, 0, Some(state), p);
+                    let tools = self.tools(Some(state), &pattern);
+                    let resp = folder_row(ui, &key, &remote, icons::CLOUD, branches.len(), open, 0, tools, p);
                     if resp.clicked() {
                         toggle(&mut self.sidebar.open_folders, &key);
                     }
-                    self.eye_button(ui, shared, &resp, &remote, &pattern, state, p);
+                    self.row_tools(ui, shared, &resp, &remote, Some((&pattern, state)), &pattern, p);
                     let remote_name = remote.clone();
                     resp.context_menu(|ui| {
                         if ui.button(format!("{} Fetch {remote_name}", icons::CLOUD_ARROW_DOWN)).clicked() {
@@ -147,6 +165,7 @@ impl RepoTab {
                         }
                         ui.separator();
                         self.hide_menu_entry(ui, shared, &pattern);
+                        self.filter_menu_entry(ui, shared, &pattern);
                         if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer le remote…"))).clicked() {
                             self.dialog = Some(Dialog::RemoveRemote { name: remote_name.clone() });
                             ui.close();
@@ -366,21 +385,22 @@ impl RepoTab {
             if !child.children.is_empty() {
                 let key = format!("{prefix}:{full}");
                 let open = self.sidebar.open_folders.contains(&key);
+                let pattern = folder_pattern(prefix, &full);
                 // Les tags ne se masquent pas par l'œil : l'option « Afficher les tags » les couvre.
-                let hide = (prefix != "tag").then(|| {
-                    let pattern = folder_pattern(prefix, &full);
-                    let state = visibility(shared.settings.hidden_refs_of(&self.path), &pattern);
-                    (pattern, state)
-                });
-                let state = hide.as_ref().map(|(_, state)| *state);
-                let resp = folder_row(ui, &key, name, icons::FOLDER_SIMPLE, child.count(), open, indent, state, p);
+                let hide = (prefix != "tag")
+                    .then(|| (pattern.as_str(), visibility(shared.settings.hidden_refs_of(&self.path), &pattern)));
+                let tools = self.tools(hide.map(|(_, state)| state), &pattern);
+                let resp = folder_row(ui, &key, name, icons::FOLDER_SIMPLE, child.count(), open, indent, tools, p);
                 if resp.clicked() {
                     toggle(&mut self.sidebar.open_folders, &key);
                 }
-                if let Some((pattern, state)) = &hide {
-                    self.eye_button(ui, shared, &resp, &full, pattern, *state, p);
-                    resp.context_menu(|ui| self.hide_menu_entry(ui, shared, pattern));
-                }
+                self.row_tools(ui, shared, &resp, &full, hide, &pattern, p);
+                resp.context_menu(|ui| {
+                    if hide.is_some() {
+                        self.hide_menu_entry(ui, shared, &pattern);
+                    }
+                    self.filter_menu_entry(ui, shared, &pattern);
+                });
                 if open {
                     self.node_ui(ui, shared, prefix, &full, child, indent + 1, p);
                 }
@@ -429,17 +449,19 @@ impl RepoTab {
         let (rect, resp) = widgets::row_response(ui, id_salt, ROW_H, selected, Sense::click());
         widgets::a11y(&resp, full, true);
         // Œil : au survol, ou en permanence quand l'élément est masqué du graphe (ligne atténuée).
-        let hide_pattern = match leaf {
-            Leaf::Local(b) => Some(branch_pattern(&b.name)),
-            Leaf::Remote(b) => Some(remote_branch_pattern(&b.full)),
-            Leaf::Tag(_) => None,
+        let pattern = match leaf {
+            Leaf::Local(b) => branch_pattern(&b.name),
+            Leaf::Remote(b) => remote_branch_pattern(&b.full),
+            Leaf::Tag(t) => format!("refs/tags/{}", t.name),
         };
-        let state = hide_pattern
-            .as_deref()
-            .map_or(Visibility::Shown, |pattern| visibility(shared.settings.hidden_refs_of(&self.path), pattern));
-        let tools = hide_pattern.is_some() && (ui.rect_contains_pointer(rect) || state != Visibility::Shown);
-        let content = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x - reserved(tools), rect.max.y));
-        let color = if state == Visibility::Shown { color } else { p.weak };
+        let hide = (!matches!(leaf, Leaf::Tag(_)))
+            .then(|| (pattern.as_str(), visibility(shared.settings.hidden_refs_of(&self.path), &pattern)));
+        let tools = self.tools(hide.map(|(_, state)| state), &pattern);
+        let content = egui::Rect::from_min_max(
+            rect.min,
+            egui::pos2(rect.max.x - tools.reserved(ui.rect_contains_pointer(rect)), rect.max.y),
+        );
+        let color = if tools.dim() { p.weak } else { color };
         let text_right = paint_ahead_behind(ui, content, leaf, p);
         paint_row(
             ui,
@@ -451,9 +473,7 @@ impl RepoTab {
             color,
             p,
         );
-        if let Some(pattern) = &hide_pattern {
-            self.eye_button(ui, shared, &resp, full, pattern, state, p);
-        }
+        self.row_tools(ui, shared, &resp, full, hide, &pattern, p);
 
         let resp = resp.on_hover_text(match leaf {
             Leaf::Local(b) => match &b.upstream {
@@ -493,24 +513,58 @@ impl RepoTab {
         let _ = full;
     }
 
-    /// Icône œil d'une ligne (dossier, branche, remote) : masque l'élément du graphe ou le réaffiche. Dessinée
-    /// au survol de la ligne, en permanence (œil barré) quand l'élément est masqué ; toujours cliquable et
-    /// exposée à l'accessibilité. Un élément masqué par un dossier se réaffiche par ce dossier.
+    /// Icônes d'une ligne pour l'élément `pattern` ; `eye` : état de l'œil si la ligne en a un.
+    fn tools(&self, eye: Option<Visibility>, pattern: &str) -> Tools {
+        Tools { eye, picked: self.history.filter_refs.iter().any(|p| p == pattern) }
+    }
+
+    /// Icônes à droite d'une ligne (dossier, branche, remote, tag) : l'œil, qui masque l'élément du graphe ou
+    /// le réaffiche (`hide` : motif et état), puis l'entonnoir, qui l'ajoute au filtre de l'historique ou l'en
+    /// retire (`pick` : motif). Dessinées au survol de la ligne et en permanence quand l'élément est masqué
+    /// (œil barré) ou filtré ; toujours cliquables et exposées à l'accessibilité.
+    #[allow(clippy::too_many_arguments)]
+    fn row_tools(
+        &mut self,
+        ui: &mut Ui,
+        shared: &mut Shared,
+        row: &egui::Response,
+        name: &str,
+        hide: Option<(&str, Visibility)>,
+        pick: &str,
+        p: &Palette,
+    ) {
+        let hovered = ui.rect_contains_pointer(row.rect);
+        let mut slot = 0;
+        if let Some((pattern, state)) = hide {
+            self.eye_button(ui, shared, row, slot, hovered, name, pattern, state, p);
+            slot += 1;
+        }
+        self.funnel_button(ui, shared, row, slot, hovered, name, pick, p);
+    }
+
+    /// Zone cliquable de la `slot`-ième icône à partir de la droite de la ligne.
+    fn tool_rect(row: &egui::Response, slot: usize) -> egui::Rect {
+        egui::Rect::from_center_size(
+            egui::pos2(row.rect.right() - TOOL_W / 2.0 - slot as f32 * TOOL_W, row.rect.center().y),
+            egui::vec2(TOOL_W - 2.0, ROW_H - 4.0),
+        )
+    }
+
+    /// Œil : un élément masqué par un dossier se réaffiche par ce dossier (icône non cliquable).
     #[allow(clippy::too_many_arguments)]
     fn eye_button(
         &mut self,
         ui: &mut Ui,
         shared: &mut Shared,
         row: &egui::Response,
+        slot: usize,
+        hovered: bool,
         name: &str,
         pattern: &str,
         state: Visibility,
         p: &Palette,
     ) {
-        let rect = egui::Rect::from_center_size(
-            egui::pos2(row.rect.right() - TOOL_W / 2.0, row.rect.center().y),
-            egui::vec2(TOOL_W - 2.0, ROW_H - 4.0),
-        );
+        let rect = Self::tool_rect(row, slot);
         let usable = state != Visibility::HiddenByFolder;
         let resp = ui.interact(rect, row.id.with("eye"), if usable { Sense::click() } else { Sense::hover() });
         let label = if state == Visibility::Shown {
@@ -519,7 +573,7 @@ impl RepoTab {
             tr!("Afficher dans le graphe : {name}", name)
         };
         widgets::a11y(&resp, &label, usable);
-        if ui.rect_contains_pointer(row.rect) || state != Visibility::Shown {
+        if hovered || state != Visibility::Shown {
             let (icon, color) = match (state, resp.hovered()) {
                 (_, true) => (if state == Visibility::Shown { icons::EYE } else { icons::EYE_SLASH }, p.text),
                 (Visibility::Shown, false) => (icons::EYE, p.weak),
@@ -536,6 +590,43 @@ impl RepoTab {
         }
     }
 
+    /// Entonnoir : ajoute l'élément au filtre de l'historique (plusieurs à la fois) ou l'en retire.
+    #[allow(clippy::too_many_arguments)]
+    fn funnel_button(
+        &mut self,
+        ui: &mut Ui,
+        shared: &mut Shared,
+        row: &egui::Response,
+        slot: usize,
+        hovered: bool,
+        name: &str,
+        pattern: &str,
+        p: &Palette,
+    ) {
+        let rect = Self::tool_rect(row, slot);
+        let picked = self.history.filter_refs.iter().any(|f| f == pattern);
+        let resp = ui.interact(rect, row.id.with("funnel"), Sense::click());
+        let label = if picked {
+            tr!("Ne plus filtrer l'historique sur : {name}", name)
+        } else {
+            tr!("Filtrer l'historique sur : {name}", name)
+        };
+        widgets::a11y(&resp, &label, true);
+        if hovered || picked {
+            let color = if picked {
+                p.accent
+            } else if resp.hovered() {
+                p.text
+            } else {
+                p.weak
+            };
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, icons::FUNNEL, FontId::proportional(13.0), color);
+        }
+        if resp.on_hover_text(label).clicked() {
+            self.toggle_filter_ref(shared, pattern);
+        }
+    }
+
     /// Entrée « Masquer du graphe / Afficher dans le graphe » des menus contextuels.
     fn hide_menu_entry(&mut self, ui: &mut Ui, shared: &mut Shared, pattern: &str) {
         let (icon, text) = match visibility(shared.settings.hidden_refs_of(&self.path), pattern) {
@@ -545,6 +636,19 @@ impl RepoTab {
         };
         if ui.button(format!("{icon} {text}")).clicked() {
             self.toggle_hidden(shared, pattern);
+            ui.close();
+        }
+    }
+
+    /// Entrée « Filtrer l'historique sur cet élément » des menus contextuels (ou « Ne plus filtrer… »).
+    fn filter_menu_entry(&mut self, ui: &mut Ui, shared: &mut Shared, pattern: &str) {
+        let text = if self.history.filter_refs.iter().any(|f| f == pattern) {
+            tr!("Ne plus filtrer l'historique sur cet élément")
+        } else {
+            tr!("Filtrer l'historique sur cet élément")
+        };
+        if ui.button(format!("{} {text}", icons::FUNNEL)).clicked() {
+            self.toggle_filter_ref(shared, pattern);
             ui.close();
         }
     }
@@ -616,6 +720,7 @@ impl RepoTab {
             ui.close();
         }
         self.hide_menu_entry(ui, shared, &branch_pattern(&name));
+        self.filter_menu_entry(ui, shared, &branch_pattern(&name));
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le nom"))).clicked() {
             ui.ctx().copy_text(name.clone());
             ui.close();
@@ -654,6 +759,7 @@ impl RepoTab {
             ui.close();
         }
         self.hide_menu_entry(ui, shared, &remote_branch_pattern(&b.full));
+        self.filter_menu_entry(ui, shared, &remote_branch_pattern(&b.full));
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le nom"))).clicked() {
             ui.ctx().copy_text(b.full.clone());
             ui.close();
@@ -685,6 +791,7 @@ impl RepoTab {
             });
             ui.close();
         }
+        self.filter_menu_entry(ui, shared, &format!("refs/tags/{name}"));
         ui.separator();
         if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer…"))).clicked() {
             self.dialog = Some(Dialog::DeleteTag { name: name.clone(), remote_too: false });
@@ -821,13 +928,12 @@ fn folder_row(
     count: usize,
     open: bool,
     indent: usize,
-    hide: Option<Visibility>,
+    tools: Tools,
     p: &Palette,
 ) -> egui::Response {
     let (rect, resp) = widgets::row_response(ui, ("folder", key), ROW_H, false, Sense::click());
     widgets::a11y(&resp, name, true);
-    let dim = hide.is_some_and(|state| state != Visibility::Shown);
-    let tools = hide.is_some() && (dim || ui.rect_contains_pointer(rect));
+    let dim = tools.dim();
     let x = rect.left() + 6.0 + indent as f32 * 12.0;
     let caret = if open { icons::CARET_DOWN } else { icons::CARET_RIGHT };
     ui.painter().text(egui::pos2(x, rect.center().y), Align2::LEFT_CENTER, caret, FontId::proportional(10.0), p.weak);
@@ -839,7 +945,7 @@ fn folder_row(
         if dim { p.weak } else { p.text },
     );
     ui.painter().text(
-        rect.right_center() - egui::vec2(6.0 + reserved(tools), 0.0),
+        rect.right_center() - egui::vec2(6.0 + tools.reserved(ui.rect_contains_pointer(rect)), 0.0),
         Align2::RIGHT_CENTER,
         count.to_string(),
         FontId::proportional(11.0),

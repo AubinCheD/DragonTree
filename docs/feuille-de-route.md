@@ -109,7 +109,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 |---|---|---|
 | V1 | Modifications locales / Tous les commits, liste des dépôts, journal git | ✅ |
 | V2 | Filtrer sur la branche active (Ctrl+Maj+A), en suivant les checkouts | ✅ |
-| V3 | Filtrer sur des branches choisies : entonnoir sur chaque branche, dossier ou remote, plusieurs à la fois, bandeau « Filtré par : … » | 🆕 M |
+| V3 | Filtrer sur des branches choisies : entonnoir sur chaque branche, dossier ou remote, plusieurs à la fois, bandeau « Filtré par : … » | ✅ |
 | V4 | Masquer une branche, un dossier ou un remote du graphe (icône œil) | ✅ |
 | V5 | Masquer les tags, masquer les branches distantes | ✅ |
 | V6 | Afficher les commits perdus (reflog) dans le graphe (Ctrl+Maj+.) | 🆕 M |

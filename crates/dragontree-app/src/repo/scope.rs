@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use dragontree_git::{LogOptions, LogOrder, LogScope, RefKind, RefLabel, RefSelection};
+use dragontree_git::{LogOptions, LogOrder, LogScope, RefKind, RefLabel, RefSelection, RefsSnapshot};
 
 use super::RepoTab;
 use crate::app::Shared;
@@ -56,6 +56,12 @@ pub(super) fn folder_pattern(tree: &str, path: &str) -> String {
     format!("{}{path}/*", namespace(tree))
 }
 
+/// Nom affiché d'un élément du filtre (bandeau) : le motif sans son préfixe `refs/heads/`, `refs/remotes/` ou
+/// `refs/tags/`.
+pub(super) fn display_name(pattern: &str) -> &str {
+    ["refs/heads/", "refs/remotes/", "refs/tags/"].iter().find_map(|p| pattern.strip_prefix(p)).unwrap_or(pattern)
+}
+
 /// Ce qui décide si une étiquette de référence s'affiche : réglages de l'affichage et éléments masqués.
 pub(super) struct LabelVisibility {
     tags: bool,
@@ -91,16 +97,64 @@ impl RepoTab {
         let scope = if self.history.current_branch_only {
             LogScope::Head
         } else {
-            // HEAD reste parcourue même si sa branche est masquée.
+            // Un filtre sur des branches choisies remplace tout le reste (et HEAD) ; sinon HEAD reste parcourue
+            // même si sa branche est masquée.
+            let only = self.history.filter_refs.clone();
             LogScope::Refs(RefSelection {
+                head: only.is_empty(),
                 tags: shared.settings.show_tags,
                 remotes: shared.settings.show_remote_branches,
                 exclude: shared.settings.hidden_refs_of(&self.path).to_vec(),
+                only,
                 ..RefSelection::default()
             })
         };
         let order = if shared.settings.topological_order { LogOrder::Topo } else { LogOrder::Date };
         LogOptions { scope, order, ..LogOptions::default() }
+    }
+
+    /// Active ou désactive « branche courante seulement » ; l'activer retire le filtre sur des branches choisies
+    /// (les deux ne se combinent pas) ; relit le journal.
+    pub(super) fn set_current_branch_only(&mut self, shared: &Shared, on: bool) {
+        self.history.current_branch_only = on;
+        if on {
+            self.history.filter_refs.clear();
+        }
+        self.load_log(shared);
+    }
+
+    /// Ajoute `pattern` au filtre de l'historique, ou l'en retire ; un filtre non vide désactive « branche
+    /// courante seulement » ; relit le journal.
+    pub(super) fn toggle_filter_ref(&mut self, shared: &Shared, pattern: &str) {
+        match self.history.filter_refs.iter().position(|p| p == pattern) {
+            Some(i) => {
+                self.history.filter_refs.remove(i);
+            }
+            None => self.history.filter_refs.push(pattern.to_string()),
+        }
+        if !self.history.filter_refs.is_empty() {
+            self.history.current_branch_only = false;
+        }
+        self.load_log(shared);
+    }
+
+    /// Retire tout le filtre sur des branches choisies (« Tout afficher ») ; relit le journal.
+    pub(super) fn clear_filter_refs(&mut self, shared: &Shared) {
+        self.history.filter_refs.clear();
+        self.load_log(shared);
+    }
+
+    /// Retire du filtre les références précises qui n'existent plus (branche supprimée ou renommée) : git
+    /// refuserait la révision. Les motifs (`dossier/*`) restent. Vrai si le filtre a changé.
+    pub(super) fn prune_filter_refs(&mut self, refs: &RefsSnapshot) -> bool {
+        let exists = |pattern: &str| {
+            refs.locals.iter().any(|b| branch_pattern(&b.name) == pattern)
+                || refs.remotes.iter().any(|b| remote_branch_pattern(&b.full) == pattern)
+                || refs.tags.iter().any(|t| format!("refs/tags/{}", t.name) == pattern)
+        };
+        let before = self.history.filter_refs.len();
+        self.history.filter_refs.retain(|p| p.contains(['*', '?', '[']) || exists(p));
+        self.history.filter_refs.len() != before
     }
 
     /// Masque `pattern` du graphe, ou le réaffiche s'il l'était ; relit le journal.
@@ -121,6 +175,7 @@ impl RepoTab {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::Shared;
 
     fn hidden(patterns: &[&str]) -> Vec<String> {
         patterns.iter().map(|p| p.to_string()).collect()
@@ -151,6 +206,67 @@ mod tests {
         let h = vec![folder_pattern("loc", "feature")];
         assert_eq!(visibility(&h, &branch_pattern("feature/x")), Visibility::HiddenByFolder);
         assert_eq!(visibility(&h, &folder_pattern("loc", "feature/deep")), Visibility::HiddenByFolder);
+    }
+
+    #[test]
+    fn the_banner_shows_names_without_the_ref_prefix() {
+        assert_eq!(display_name("refs/heads/main"), "main");
+        assert_eq!(display_name("refs/heads/feature/*"), "feature/*");
+        assert_eq!(display_name("refs/remotes/origin/*"), "origin/*");
+        assert_eq!(display_name("refs/tags/v1"), "v1");
+    }
+
+    /// Onglet sans git (aucune tâche lancée) et son état partagé.
+    fn tab_without_git(dir: &std::path::Path) -> (RepoTab, Shared) {
+        let (store, settings, _) = crate::settings::SettingsFile::load(&dir.join("settings.json"));
+        let (mut shared, _events) = Shared::new(egui::Context::default(), settings, store, None, None);
+        (RepoTab::new(1, dir.to_path_buf(), &mut shared), shared)
+    }
+
+    fn selection(tab: &RepoTab, shared: &Shared) -> RefSelection {
+        match tab.log_options(shared).scope {
+            LogScope::Refs(selection) => selection,
+            other => panic!("sélection attendue, pas {other:?}"),
+        }
+    }
+
+    #[test]
+    fn log_options_follow_visibility_hidden_refs_and_the_branch_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut tab, mut shared) = tab_without_git(dir.path());
+        assert_eq!(selection(&tab, &shared), RefSelection::default());
+
+        shared.settings.show_tags = false;
+        shared.settings.toggle_hidden_ref(&tab.path, "refs/heads/x");
+        let sel = selection(&tab, &shared);
+        assert!(!sel.tags && sel.remotes && sel.head);
+        assert_eq!(sel.exclude, ["refs/heads/x"]);
+
+        // Un filtre mêlant branche, dossier et remote : seulement ces références, sans HEAD.
+        for pattern in ["refs/heads/main", "refs/heads/feature/*", "refs/remotes/origin/*"] {
+            tab.toggle_filter_ref(&shared, pattern);
+        }
+        let sel = selection(&tab, &shared);
+        assert!(!sel.head);
+        assert_eq!(sel.only, ["refs/heads/main", "refs/heads/feature/*", "refs/remotes/origin/*"]);
+        assert_eq!(sel.exclude, ["refs/heads/x"], "les éléments masqués le restent");
+        tab.toggle_filter_ref(&shared, "refs/heads/feature/*");
+        assert_eq!(selection(&tab, &shared).only, ["refs/heads/main", "refs/remotes/origin/*"]);
+    }
+
+    #[test]
+    fn current_branch_only_and_the_branch_filter_exclude_each_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut tab, shared) = tab_without_git(dir.path());
+        tab.toggle_filter_ref(&shared, "refs/heads/a");
+        tab.set_current_branch_only(&shared, true);
+        assert!(tab.history.current_branch_only && tab.history.filter_refs.is_empty());
+        assert_eq!(tab.log_options(&shared).scope, LogScope::Head);
+        tab.toggle_filter_ref(&shared, "refs/heads/a");
+        assert!(!tab.history.current_branch_only);
+        assert_eq!(tab.history.filter_refs, ["refs/heads/a"]);
+        tab.clear_filter_refs(&shared);
+        assert!(tab.history.filter_refs.is_empty());
     }
 
     #[test]

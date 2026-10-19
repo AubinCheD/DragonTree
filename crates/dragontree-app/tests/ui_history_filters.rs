@@ -1,4 +1,5 @@
-//! Filtres de l'historique : branche courante seulement (Affichage, Ctrl+Maj+A).
+//! Filtres de l'historique : branche courante seulement (Affichage, Ctrl+Maj+A) et filtre sur des branches choisies
+//! (entonnoir de la barre latérale, bandeau « Filtré par »).
 
 mod common;
 
@@ -44,6 +45,106 @@ fn current_branch_shortcut_hides_and_restores_the_other_branch_commits() {
     wait_until(&mut h, "commit de l'autre branche réaffiché", |h| {
         h.query_by_label("Commit de l'autre branche").is_some()
     });
+    open_menu(&mut h, "Affichage");
+    wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
+    assert_eq!(menu_item_checked(&h, entry), Some(false));
+}
+
+// --- Filtre sur des branches choisies (entonnoir et bandeau) -----------------------------------
+
+/// `main`, `a`, `b`, `c`, `feature/x` et `feature/y` ont chacune un commit propre.
+fn filter_repo(base: &std::path::Path) -> std::path::PathBuf {
+    let repo = base.join("contoso");
+    init_repo(&repo);
+    commit_file(&repo, "base.txt", "base\n", "Commit commun");
+    for branch in ["a", "b", "c", "feature/x", "feature/y"] {
+        git(&repo, &["switch", "-q", "-c", branch, "main"]);
+        commit_file(&repo, &format!("{}.txt", branch.replace('/', "-")), "x\n", &format!("Commit de {branch}"));
+    }
+    git(&repo, &["switch", "-q", "main"]);
+    commit_file(&repo, "main.txt", "main\n", "Commit principal");
+    repo
+}
+
+const OWN_COMMITS: [&str; 5] =
+    ["Commit de a", "Commit de b", "Commit de c", "Commit de feature/x", "Commit de feature/y"];
+
+fn open_filter_repo(tmp: &std::path::Path) -> egui_kittest::Harness<'static, dragontree_app::DragonTreeApp> {
+    let mut h = harness(StartOptions { open: vec![tmp.join("contoso")], view: Some("history".into()), ..start(tmp) });
+    wait_until(&mut h, "historique complet", |h| OWN_COMMITS.iter().all(|s| h.query_by_label(s).is_some()));
+    h
+}
+
+fn shown(h: &egui_kittest::Harness<'static, dragontree_app::DragonTreeApp>) -> Vec<&'static str> {
+    OWN_COMMITS.into_iter().filter(|s| h.query_by_label(s).is_some()).collect()
+}
+
+#[test]
+fn filtering_on_two_branches_hides_the_third_and_the_banner_removes_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    filter_repo(tmp.path());
+    let mut h = open_filter_repo(tmp.path());
+    assert!(h.query_by_label("Filtré par :").is_none(), "pas de bandeau sans filtre");
+
+    click_label(&mut h, "Filtrer l'historique sur : a");
+    wait_until(&mut h, "filtre sur a", |h| shown(h) == ["Commit de a"]);
+    assert!(h.query_by_label("Retirer du filtre : a").is_some(), "le bandeau apparaît");
+    click_label(&mut h, "Filtrer l'historique sur : b");
+    wait_until(&mut h, "filtre sur a et b", |h| shown(h) == ["Commit de a", "Commit de b"]);
+    assert!(h.query_by_label("Commit de c").is_none(), "le commit propre à la troisième branche disparaît");
+    assert!(h.query_by_label("Commit principal").is_none(), "HEAD n'est plus parcourue");
+    assert!(h.query_by_label("Commit commun").is_some(), "le tronc commun reste");
+    assert!(h.query_by_label("Retirer du filtre : a").is_some());
+    assert!(h.query_by_label("Retirer du filtre : b").is_some());
+
+    // ✕ sur un élément du bandeau : il sort du filtre.
+    click_label(&mut h, "Retirer du filtre : b");
+    wait_until(&mut h, "b retirée du filtre", |h| shown(h) == ["Commit de a"]);
+    assert!(h.query_by_label("Retirer du filtre : b").is_none());
+
+    // « Tout afficher » rétablit tout et fait disparaître le bandeau.
+    click_label(&mut h, "Filtrer l'historique sur : c");
+    wait_until(&mut h, "filtre sur a et c", |h| shown(h) == ["Commit de a", "Commit de c"]);
+    click_label(&mut h, "Tout afficher");
+    wait_until(&mut h, "tout réaffiché", |h| shown(h) == OWN_COMMITS);
+    assert!(h.query_by_label("Retirer du filtre : a").is_none());
+    assert!(h.query_by_label("Commit principal").is_some());
+}
+
+#[test]
+fn filtering_on_a_folder_keeps_the_commits_of_its_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    filter_repo(tmp.path());
+    let mut h = open_filter_repo(tmp.path());
+    click_label(&mut h, "Filtrer l'historique sur : feature");
+    wait_until(&mut h, "filtre sur le dossier", |h| shown(h) == ["Commit de feature/x", "Commit de feature/y"]);
+    assert!(h.query_by_label("Retirer du filtre : feature/*").is_some(), "le bandeau nomme le motif du dossier");
+}
+
+#[test]
+fn current_branch_only_and_the_branch_filter_exclude_each_other() {
+    let tmp = tempfile::tempdir().unwrap();
+    filter_repo(tmp.path());
+    let mut h = open_filter_repo(tmp.path());
+    let entry = "Branche courante seulement Ctrl+Maj+A";
+
+    click_label(&mut h, "Filtrer l'historique sur : a");
+    wait_until(&mut h, "filtre sur a", |h| shown(h) == ["Commit de a"]);
+
+    // Activer « branche courante seulement » retire le filtre et son bandeau.
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+    wait_until(&mut h, "branche courante seulement", |h| {
+        shown(h).is_empty() && h.query_by_label("Retirer du filtre : a").is_none()
+    });
+    assert!(h.query_all_by_label("Commit principal").next().is_some());
+    open_menu(&mut h, "Affichage");
+    wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
+    assert_eq!(menu_item_checked(&h, entry), Some(true));
+    h.key_press(Key::Escape);
+
+    // Filtrer sur une branche désactive « branche courante seulement ».
+    click_label(&mut h, "Filtrer l'historique sur : b");
+    wait_until(&mut h, "filtre sur b", |h| shown(h) == ["Commit de b"]);
     open_menu(&mut h, "Affichage");
     wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
     assert_eq!(menu_item_checked(&h, entry), Some(false));
