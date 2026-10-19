@@ -49,26 +49,29 @@ impl RepoTab {
             ui.separator();
 
             if toolbar_button(ui, icons::CLOUD_ARROW_DOWN, "Fetch", fetch, busy(self, "Fetch"))
-                .on_hover_text(tr!("Récupérer les nouveautés de tous les remotes (fetch --all --prune)"))
+                .on_hover_text(with_shortcut(
+                    tr!("Récupérer les nouveautés de tous les remotes (fetch --all --prune)"),
+                    Command::Fetch,
+                ))
                 .clicked()
             {
                 self.run_command(Command::Fetch, shared);
             }
             if toolbar_button(ui, icons::ARROW_LINE_DOWN, "Pull", pull, busy(self, "Pull"))
-                .on_hover_text(tr!("Récupérer et intégrer la branche suivie"))
+                .on_hover_text(with_shortcut(tr!("Récupérer et intégrer la branche suivie"), Command::Pull))
                 .clicked()
             {
                 self.run_command(Command::Pull, shared);
             }
             if toolbar_button(ui, icons::ARROW_LINE_UP, "Push", push, busy(self, "Push"))
-                .on_hover_text(tr!("Envoyer la branche courante"))
+                .on_hover_text(with_shortcut(tr!("Envoyer la branche courante"), Command::Push))
                 .clicked()
             {
                 self.run_command(Command::Push, shared);
             }
             ui.separator();
             if toolbar_button(ui, icons::TRAY_ARROW_DOWN, "Stash", stash, busy(self, "Stash"))
-                .on_hover_text(tr!("Mettre de côté les modifications en cours"))
+                .on_hover_text(with_shortcut(tr!("Mettre de côté les modifications en cours"), Command::Stash))
                 .clicked()
             {
                 self.run_command(Command::Stash, shared);
@@ -84,7 +87,7 @@ impl RepoTab {
             }
             ui.separator();
             if toolbar_button(ui, icons::GIT_BRANCH, tr!("Branche"), branch, false)
-                .on_hover_text(tr!("Créer une branche à partir de HEAD"))
+                .on_hover_text(with_shortcut(tr!("Créer une branche à partir de HEAD"), Command::NewBranch))
                 .clicked()
             {
                 self.run_command(Command::NewBranch, shared);
@@ -152,5 +155,13 @@ impl RepoTab {
             force: false,
             tags: false,
         });
+    }
+}
+
+/// Infobulle d'un bouton : le texte suivi du raccourci de la commande, s'il y en a un.
+fn with_shortcut(text: impl std::fmt::Display, cmd: Command) -> String {
+    match cmd.shortcut_text() {
+        Some(shortcut) => format!("{text} ({shortcut})"),
+        None => text.to_string(),
     }
 }

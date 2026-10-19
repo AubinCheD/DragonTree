@@ -85,6 +85,8 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Ctrl+O | Ouvrir un dépôt |
 | Ctrl+Maj+C | Cloner |
 | Ctrl+, | Réglages |
+| Ctrl+Maj+F / Ctrl+Maj+U / Ctrl+Maj+P | Fetch / Pull… / Push… |
+| Ctrl+Maj+B / Ctrl+Maj+H | Nouvelle branche… / Stash… |
 | Ctrl+Maj+A | Historique : branche courante seulement (bascule) |
 | Ctrl+B | Afficher/masquer la liste des dépôts |
 | Ctrl+= / Ctrl+- | Zoom avant / arrière (taille de l'interface, enregistrée) |

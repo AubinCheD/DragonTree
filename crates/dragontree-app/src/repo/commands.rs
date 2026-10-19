@@ -11,7 +11,12 @@ use crate::commands::{Command, Scope};
 impl RepoTab {
     /// Une commande de dépôt est utilisable dans l'état de l'onglet (dépôt ouvert) ; grise aussi le bouton
     /// correspondant de la barre d'outils.
+    /// Rien n'est utilisable tant qu'un dialogue modal est ouvert.
     pub fn can_run(&self, cmd: Command) -> bool {
+        // Un dialogue modal est ouvert : il bloque la barre d'outils et les menus, les raccourcis aussi.
+        if self.dialog.is_some() {
+            return false;
+        }
         let has_remote = !self.remotes.is_empty();
         let on_branch = matches!(self.refs.as_ref().map(|r| &r.head), Some(HeadState::Branch(_)));
         match cmd {

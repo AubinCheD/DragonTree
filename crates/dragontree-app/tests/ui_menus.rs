@@ -36,9 +36,9 @@ fn repo_entries_are_disabled_on_the_welcome_tab() {
     let mut h = harness(start(tmp.path()));
 
     open_menu(&mut h, "Dépôt");
-    wait_until(&mut h, "entrée Fetch", |h| menu_item(h, "Fetch").is_some());
-    assert!(menu_item_disabled(&h, "Fetch"), "Fetch est grisée sans dépôt ouvert");
-    assert!(menu_item_disabled(&h, "Nouvelle branche…"));
+    wait_until(&mut h, "entrée Fetch", |h| menu_item(h, "Fetch Ctrl+Maj+F").is_some());
+    assert!(menu_item_disabled(&h, "Fetch Ctrl+Maj+F"), "Fetch est grisée sans dépôt ouvert");
+    assert!(menu_item_disabled(&h, "Nouvelle branche… Ctrl+Maj+B"));
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn repo_menu_opens_the_new_branch_dialog() {
         h.query_by_label("Branche").is_some_and(|n| !n.accesskit_node().is_disabled())
     });
     open_menu(&mut h, "Dépôt");
-    click_menu_item(&mut h, "Nouvelle branche…");
+    click_menu_item(&mut h, "Nouvelle branche… Ctrl+Maj+B");
     wait_until(&mut h, "dialogue de branche", |h| {
         h.query_by(|n| n.placeholder() == Some("nom-de-la-branche (ex. feature/ma-fonction)")).is_some()
     });

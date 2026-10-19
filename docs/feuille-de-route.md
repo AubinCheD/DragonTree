@@ -79,7 +79,7 @@ Quand un raccourci actuel entre en conflit avec ceux de Fork, l'actuel est gard�
 
 **Points à trancher**, relevés en vérifiant le code le 2026-10-19 :
 
-- **Ctrl+Maj+L** ouvre le journal git (`crates/dragontree-app/src/repo/mod.rs:891-894`, rappelé dans l'infobulle `crates/dragontree-app/src/repo/toolbar.rs:104-105`). Or R1 prévoit Ctrl+Maj+F/L/P pour Fetch/Pull/Push, comme Fork. Il faut choisir un autre raccourci pour l'un des deux.
+- **Ctrl+Maj+L** ouvre le journal git (`crates/dragontree-app/src/repo/mod.rs:891-894`, rappelé dans l'infobulle `crates/dragontree-app/src/repo/toolbar.rs:104-105`). Tranché : il est gardé, et Pull prend **Ctrl+Maj+U** (Fetch Ctrl+Maj+F, Push Ctrl+Maj+P, Nouvelle branche Ctrl+Maj+B, Stash Ctrl+Maj+H).
 - **Ctrl+Maj+C** ouvre Cloner (`crates/dragontree-app/src/app.rs:476`). Dans Fork, Cloner est sur Ctrl+N et Ctrl+Maj+C copie les informations du commit.
 - **Ctrl+1 pour « Modifications locales »** ne fonctionne jamais : le changement d'onglet le consomme avant (voir B1). Une autre façon d'atteindre cette vue reste à prévoir, par exemple une entrée du menu View.
 
@@ -125,7 +125,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 
 | # | Option | État |
 |---|---|---|
-| R1 | Actualiser, Fetch/Pull/Push (Ctrl+Maj+F/L/P), Nouvelle branche (Ctrl+Maj+B), Nouveau tag, Stash (Ctrl+Maj+H), ouvrir dans l'Explorateur, le Terminal ou VS Code | ✅ + raccourcis (conflit sur Ctrl+Maj+L, voir Raccourcis) |
+| R1 | Actualiser, Fetch/Pull/Push (Ctrl+Maj+F/U/P), Nouvelle branche (Ctrl+Maj+B), Nouveau tag, Stash (Ctrl+Maj+H), ouvrir dans l'Explorateur, le Terminal ou VS Code | ✅ |
 | R2 | Fetch, Pull et Push rapides, sans dialogue (Ctrl+clic) | 🆕 P |
 | R3 | Créer un worktree… (voir Worktrees) | 🆕 |
 | R4 | Stashs complets : liste déroulante sur Pop, renommer, stash des seuls fichiers sélectionnés, snapshot (garde les modifications), fichiers non suivis visibles dans le diff | 🆕 M |
