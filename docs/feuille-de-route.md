@@ -141,7 +141,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | R14 | Git LFS (init, track, fetch/pull/prune, verrous) | ✅ |
 | R15 | Commandes personnalisées (sur le dépôt, une branche, un commit ou un fichier ; script ou URL) | ✅ |
 | R16 | Fast-forward ou push de plusieurs branches à la fois ; sélection des branches périmées à supprimer | ✅ |
-| R17 | Remettre un fichier dans son état à un commit donné | 🆕 P |
+| R17 | Remettre un fichier dans son état à un commit donné | ✅ |
 | R18 | Créer une pull request (GitHub, GitLab, Azure DevOps) | 🆕 M |
 | R19 | « Ouvrir dans ▾ » avec d'autres éditeurs (Visual Studio .sln, Rider, Cursor…) | 🆕 P |
 | R20 | Statistiques du dépôt | 🆕 M |

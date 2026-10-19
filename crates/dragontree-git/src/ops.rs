@@ -172,6 +172,24 @@ impl Repo {
         self.run_write(["branch", if force { "-D" } else { "-d" }, name])
     }
 
+    /// Le fichier `path` a des modifications locales qu'une remise écraserait : modifié, indexé, non suivi ou
+    /// ignoré (`git status --porcelain --ignored -- <chemin>`, chemin littéral). Un fichier propre n'apparaît pas.
+    pub fn file_has_local_changes(&self, path: &str) -> Result<bool, GitError> {
+        let out = self
+            .read()
+            .env("GIT_LITERAL_PATHSPECS", "1")
+            .args(["status", "--porcelain", "--ignored", "--", path])
+            .run()?;
+        Ok(!out.stdout_str().trim().is_empty())
+    }
+
+    /// Remet `path` dans son état au commit `rev` (`git checkout <rev> -- <chemin>`) : le fichier de la copie de
+    /// travail est écrasé et le résultat est aussi indexé, comme le fait git. `<sha>^` donne la version d'avant un
+    /// commit ; un fichier absent de `rev` est une erreur (rien n'est modifié).
+    pub fn restore_file(&self, rev: &str, path: &str) -> Result<(), GitError> {
+        self.write_paths().args(["checkout", rev, "--", path]).run().map(|_| ())
+    }
+
     pub fn merge(&self, rev: &str, mode: MergeMode) -> Result<(), GitError> {
         match mode {
             MergeMode::Default => self.run_write(["merge", "--no-edit", rev]),

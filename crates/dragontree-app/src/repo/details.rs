@@ -7,6 +7,7 @@ use egui::{Frame, RichText, Sense, Ui};
 use super::RepoTab;
 use super::custom::Clicked;
 use super::diff_view::{self, DiffMode};
+use super::restore::RestoreTarget;
 use crate::app::Shared;
 use crate::icons;
 use crate::settings::TicketRule;
@@ -155,7 +156,11 @@ impl RepoTab {
                             }
                             let change: FileChange = f.clone();
                             let commit = info.id;
-                            resp.context_menu(|ui| self.file_menu(ui, shared, &change.path, Some(commit)));
+                            let restore =
+                                RestoreTarget { commit, kind: Some(change.kind), has_parent: !info.parents.is_empty() };
+                            resp.context_menu(|ui| {
+                                self.file_menu(ui, shared, &change.path, Some(commit), Some(restore))
+                            });
                         }
                     },
                 );
@@ -356,6 +361,7 @@ impl RepoTab {
         shared: &mut Shared,
         path: &str,
         commit: Option<dragontree_git::Oid>,
+        restore: Option<RestoreTarget>,
     ) {
         // `path` est relatif à la racine du dépôt, pas au dossier ouvert.
         let full = crate::util::native_path(&self.workdir().join(path));
@@ -385,6 +391,12 @@ impl RepoTab {
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le chemin complet"))).clicked() {
             ui.ctx().copy_text(full.display().to_string());
             ui.close();
+        }
+        if let Some(target) = restore {
+            ui.separator();
+            if let Some(from) = Self::restore_menu_entries(ui, target) {
+                self.request_restore(shared, path.to_string(), from);
+            }
         }
         self.custom_commands_menu(ui, shared, Clicked::File { path: path.to_string(), commit });
     }

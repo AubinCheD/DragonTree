@@ -9,6 +9,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
 use super::diff_view::{self, DiffMode, DiffViewState};
+use super::restore::{RestoreFrom, RestoreTarget};
 use super::{RepoEvent, RepoTab};
 use crate::app::{AppEvent, Shared, TabId};
 use crate::icons;
@@ -35,6 +36,8 @@ pub struct FileHistoryWindow {
     blame_loading: bool,
     blame_rev: Option<Oid>,
     error: Option<String>,
+    /// Version choisie dans le menu d'un commit, à remettre par l'onglet (`take_restore`).
+    restore: Option<RestoreFrom>,
     generation: u64,
 }
 
@@ -54,6 +57,7 @@ impl FileHistoryWindow {
             blame_loading: false,
             blame_rev: rev,
             error: None,
+            restore: None,
             generation: 0,
         }
     }
@@ -92,6 +96,11 @@ impl FileHistoryWindow {
                 RepoEvent::Blame(BlameEvent::Diff(generation, repo.diff_commit_file(oid, parent, &change, &o))),
             ))
         });
+    }
+
+    /// Le fichier de la fenêtre et la version à lui remettre, si l'utilisateur en a choisi une dans le menu d'un commit.
+    pub fn take_restore(&mut self) -> Option<(String, RestoreFrom)> {
+        self.restore.take().map(|from| (self.path.clone(), from))
     }
 
     pub fn handle(&mut self, ev: BlameEvent) {
@@ -164,6 +173,7 @@ impl FileHistoryWindow {
             }
             ui.label(RichText::new(trn!(self.commits.len(), "{n} commit", "{n} commits")).color(p.weak));
             let mut clicked = None;
+            let mut restore = None;
             egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(
                 ui,
                 40.0,
@@ -198,11 +208,20 @@ impl FileHistoryWindow {
                         if resp.clicked() {
                             clicked = Some(i);
                         }
+                        let target = RestoreTarget { commit: c.id, kind: None, has_parent: !c.parents.is_empty() };
+                        resp.context_menu(|ui| {
+                            if let Some(from) = RepoTab::restore_menu_entries(ui, target) {
+                                restore = Some(from);
+                            }
+                        });
                     }
                 },
             );
             if let Some(i) = clicked {
                 self.load_diff(shared, i);
+            }
+            if restore.is_some() {
+                self.restore = restore;
             }
         });
         egui::CentralPanel::default().show(ui, |ui| match &self.diff {

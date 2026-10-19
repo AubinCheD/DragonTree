@@ -519,7 +519,7 @@ impl RepoTab {
             );
         }
         ui.separator();
-        self.file_menu(ui, shared, path, None);
+        self.file_menu(ui, shared, path, None, None);
     }
 
     fn add_to_gitignore(&mut self, shared: &Shared, pattern: &str) {

@@ -22,6 +22,7 @@ mod lfs;
 mod patches;
 mod rebase_ui;
 mod repo_settings;
+mod restore;
 mod scope;
 mod sidebar;
 mod submodules;
@@ -336,6 +337,13 @@ pub enum RepoEvent {
     LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
     /// Branches périmées lues pour le dialogue qui les attend.
     StaleBranches(Result<Vec<dragontree_git::StaleBranch>, GitError>),
+    /// Fichier examiné avant une remise (`dirty` : il a des modifications locales).
+    RestoreChecked {
+        path: String,
+        rev: String,
+        label: String,
+        dirty: bool,
+    },
     /// Fin d'une commande personnalisée (script) : sa sortie ou l'erreur de lancement.
     CustomDone(Box<custom::CustomOutcome>),
     RebaseList(Result<Vec<Commit>, GitError>),
@@ -963,6 +971,9 @@ impl RepoTab {
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
             RepoEvent::StaleBranches(found) => self.on_stale_branches(shared, found),
+            RepoEvent::RestoreChecked { path, rev, label, dirty } => {
+                self.on_restore_checked(shared, path, rev, label, dirty)
+            }
             RepoEvent::CustomDone(outcome) => self.on_custom_done(shared, *outcome),
             RepoEvent::RebaseList(res) => match res {
                 Ok(list) => {
@@ -1173,6 +1184,10 @@ impl RepoTab {
             if let Some(oid) = select {
                 self.view = RepoView::History;
                 self.select_commit(shared, oid, true);
+            }
+            let restore = self.file_history.as_mut().and_then(|w| w.take_restore());
+            if let Some((path, from)) = restore {
+                self.request_restore(shared, path, from);
             }
         }
         if let Some(w) = &mut self.compare

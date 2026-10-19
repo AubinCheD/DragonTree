@@ -52,7 +52,9 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// (jamais forcé) ; `LfsTrack` : motif à suivre avec Git LFS ; `LfsUntrack` : motif suivi à retirer (choisi dans la
 /// liste des motifs du `.gitattributes`) ; `CustomCommand` : commande personnalisée qui demande confirmation, sa ligne
 /// (ou son URL) complète affichée ; `UpdateBranches`, `PushBranches` et `DeleteStaleBranches` : branches à cocher (voir
-/// `branch_batch`), `DeleteStaleBranches::items` vaut `None` tant que la liste est lue et `force` demande `-D`.
+/// `branch_batch`), `DeleteStaleBranches::items` vaut `None` tant que la liste est lue et `force` demande `-D` ;
+/// `RestoreFile` : fichier à remettre dans son état à `rev` (`label` décrit la version), demandé seulement quand il a
+/// des modifications locales.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -92,6 +94,7 @@ pub enum Dialog {
     GitFlowFinish { kind: FlowKind, name: String, delete_branch: bool },
     LfsTrack { pattern: String },
     LfsUntrack { pattern: String },
+    RestoreFile { path: String, rev: String, label: String },
     UpdateBranches { items: Vec<super::branch_batch::BranchChoice> },
     PushBranches { items: Vec<super::branch_batch::BranchChoice> },
     DeleteStaleBranches { items: Option<Vec<super::branch_batch::BranchChoice>>, force: bool },
@@ -176,6 +179,9 @@ impl Dialog {
             Dialog::LfsTrack { .. } => (tr!("Suivre un motif avec Git LFS").into(), tr!("Suivre").into(), false),
             Dialog::LfsUntrack { .. } => {
                 (tr!("Ne plus suivre avec Git LFS").into(), tr!("Ne plus suivre").into(), false)
+            }
+            Dialog::RestoreFile { path, .. } => {
+                (tr!("Remettre « {path} »", path), tr!("Remettre le fichier").into(), true)
             }
             Dialog::UpdateBranches { .. } => {
                 (tr!("Mettre à jour les branches locales").into(), tr!("Mettre à jour").into(), false)
@@ -574,6 +580,7 @@ impl RepoTab {
             }
             Dialog::LfsTrack { pattern } => self.lfs_track_body(ui, pattern, p),
             Dialog::LfsUntrack { pattern } => self.lfs_untrack_body(ui, pattern, p),
+            Dialog::RestoreFile { path, label, .. } => Self::restore_file_body(ui, path, label, p),
             Dialog::UpdateBranches { items } => Self::update_branches_body(ui, items, p),
             Dialog::PushBranches { items } => Self::push_branches_body(ui, items, p),
             Dialog::DeleteStaleBranches { items, force } => Self::delete_stale_body(ui, items, force, p),
@@ -718,6 +725,7 @@ impl RepoTab {
             }
             Dialog::LfsTrack { pattern } => self.op_lfs_track(shared, pattern),
             Dialog::LfsUntrack { pattern } => self.op_lfs_untrack(shared, pattern),
+            Dialog::RestoreFile { path, rev, label } => self.op_restore_file(shared, path, rev, label, true),
             Dialog::UpdateBranches { items } => self.op_update_branches(shared, items),
             Dialog::PushBranches { items } => self.op_push_branches(shared, items),
             Dialog::DeleteStaleBranches { items, force } => {
