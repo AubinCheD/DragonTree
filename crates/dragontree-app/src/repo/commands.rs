@@ -45,6 +45,11 @@ impl RepoTab {
             Command::LfsInstall | Command::LfsTrack | Command::LfsPrune => self.refs.is_some(),
             Command::LfsUntrack => !self.lfs_patterns.is_empty(),
             Command::LfsFetch | Command::LfsLocks => has_remote,
+            Command::UpdateBranches => !self.updatable_here().is_empty(),
+            Command::PushBranches => {
+                has_remote && self.refs.as_ref().is_some_and(|r| !r.pushable_branches().is_empty())
+            }
+            Command::DeleteStaleBranches => self.refs.is_some(),
             Command::LfsPull => has_remote && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
@@ -108,6 +113,9 @@ impl RepoTab {
             Command::CreateWorktree => self.open_create_worktree(None),
             Command::AddSubmodule => self.open_add_submodule(),
             Command::IgnoreFiles => self.open_ignore(None),
+            Command::UpdateBranches => self.open_update_branches(),
+            Command::PushBranches => self.open_push_branches(),
+            Command::DeleteStaleBranches => self.open_delete_stale(shared),
             Command::Stash => {
                 self.dialog =
                     Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false, snapshot: false })

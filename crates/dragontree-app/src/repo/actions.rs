@@ -164,15 +164,7 @@ impl RepoTab {
         let refs = self.refs.as_ref()?;
         let current = refs.current_branch()?;
         let upstream = refs.local(current)?.upstream.clone()?;
-        let remotes = refs.remote_names();
-        // Le nom du remote peut contenir « / » : on prend le plus long préfixe connu.
-        let remote = remotes
-            .iter()
-            .filter(|r| upstream.starts_with(&format!("{r}/")))
-            .max_by_key(|r| r.len())
-            .cloned()
-            .or_else(|| upstream.split_once('/').map(|(r, _)| r.to_string()))?;
-        Some((remote.clone(), upstream[remote.len() + 1..].to_string()))
+        refs.upstream_parts(&upstream)
     }
 
     pub(crate) fn default_remote(&self) -> Option<String> {

@@ -51,7 +51,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `GitFlowFinish` : branche de travail à terminer (nature, nom court), `delete_branch` demande de la supprimer ensuite
 /// (jamais forcé) ; `LfsTrack` : motif à suivre avec Git LFS ; `LfsUntrack` : motif suivi à retirer (choisi dans la
 /// liste des motifs du `.gitattributes`) ; `CustomCommand` : commande personnalisée qui demande confirmation, sa ligne
-/// (ou son URL) complète affichée.
+/// (ou son URL) complète affichée ; `UpdateBranches`, `PushBranches` et `DeleteStaleBranches` : branches à cocher (voir
+/// `branch_batch`), `DeleteStaleBranches::items` vaut `None` tant que la liste est lue et `force` demande `-D`.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -91,6 +92,9 @@ pub enum Dialog {
     GitFlowFinish { kind: FlowKind, name: String, delete_branch: bool },
     LfsTrack { pattern: String },
     LfsUntrack { pattern: String },
+    UpdateBranches { items: Vec<super::branch_batch::BranchChoice> },
+    PushBranches { items: Vec<super::branch_batch::BranchChoice> },
+    DeleteStaleBranches { items: Option<Vec<super::branch_batch::BranchChoice>>, force: bool },
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
     CustomCommand(Box<Prepared>),
     Confirm { title: String, text: String, action: ConfirmAction },
@@ -172,6 +176,13 @@ impl Dialog {
             Dialog::LfsTrack { .. } => (tr!("Suivre un motif avec Git LFS").into(), tr!("Suivre").into(), false),
             Dialog::LfsUntrack { .. } => {
                 (tr!("Ne plus suivre avec Git LFS").into(), tr!("Ne plus suivre").into(), false)
+            }
+            Dialog::UpdateBranches { .. } => {
+                (tr!("Mettre à jour les branches locales").into(), tr!("Mettre à jour").into(), false)
+            }
+            Dialog::PushBranches { .. } => (tr!("Pousser plusieurs branches").into(), "Push".into(), false),
+            Dialog::DeleteStaleBranches { .. } => {
+                (tr!("Supprimer les branches périmées").into(), tr!("Supprimer").into(), true)
             }
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
             // Un script peut tout faire : sa confirmation exige un clic.
@@ -563,6 +574,9 @@ impl RepoTab {
             }
             Dialog::LfsTrack { pattern } => self.lfs_track_body(ui, pattern, p),
             Dialog::LfsUntrack { pattern } => self.lfs_untrack_body(ui, pattern, p),
+            Dialog::UpdateBranches { items } => Self::update_branches_body(ui, items, p),
+            Dialog::PushBranches { items } => Self::push_branches_body(ui, items, p),
+            Dialog::DeleteStaleBranches { items, force } => Self::delete_stale_body(ui, items, force, p),
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
             Dialog::CustomCommand(prepared) => self.custom_command_body(ui, prepared, p),
             Dialog::Confirm { text, .. } => {
@@ -704,6 +718,11 @@ impl RepoTab {
             }
             Dialog::LfsTrack { pattern } => self.op_lfs_track(shared, pattern),
             Dialog::LfsUntrack { pattern } => self.op_lfs_untrack(shared, pattern),
+            Dialog::UpdateBranches { items } => self.op_update_branches(shared, items),
+            Dialog::PushBranches { items } => self.op_push_branches(shared, items),
+            Dialog::DeleteStaleBranches { items, force } => {
+                self.op_delete_stale(shared, items.unwrap_or_default(), force)
+            }
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
             Dialog::CustomCommand(prepared) => self.launch_custom(shared, *prepared),
             Dialog::Confirm { action, .. } => match action {

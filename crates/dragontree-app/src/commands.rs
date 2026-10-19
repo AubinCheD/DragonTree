@@ -90,6 +90,12 @@ pub enum Command {
     Stash,
     /// Enregistre un stash sans toucher aux modifications en cours.
     Snapshot,
+    /// Fait avancer d'un coup toutes les branches locales en retard sur leur branche suivie (avance rapide).
+    UpdateBranches,
+    /// Pousse plusieurs branches locales en avance sur leur branche suivie.
+    PushBranches,
+    /// Supprime les branches locales périmées (amont disparu ou fusionnées dans la branche par défaut).
+    DeleteStaleBranches,
     /// Ajoute un motif au .gitignore, avec un aperçu des fichiers concernés.
     IgnoreFiles,
     /// Applique un patch lu dans un fichier choisi (aussi : fichier déposé sur la fenêtre).
@@ -234,6 +240,10 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::Snapshot),
             Cmd(Command::IgnoreFiles),
             Separator,
+            Cmd(Command::UpdateBranches),
+            Cmd(Command::PushBranches),
+            Cmd(Command::DeleteStaleBranches),
+            Separator,
             Cmd(Command::ApplyPatch),
             Cmd(Command::PastePatch),
             Separator,
@@ -361,6 +371,9 @@ impl Command {
         Command::AddSubmodule,
         Command::Stash,
         Command::Snapshot,
+        Command::UpdateBranches,
+        Command::PushBranches,
+        Command::DeleteStaleBranches,
         Command::IgnoreFiles,
         Command::ApplyPatch,
         Command::PastePatch,
@@ -440,6 +453,9 @@ impl Command {
             Command::AddSubmodule => tr!("Ajouter un sous-module…"),
             Command::Stash => "Stash…",
             Command::Snapshot => tr!("Snapshot…"),
+            Command::UpdateBranches => tr!("Mettre à jour les branches locales…"),
+            Command::PushBranches => tr!("Pousser plusieurs branches…"),
+            Command::DeleteStaleBranches => tr!("Supprimer les branches périmées…"),
             Command::IgnoreFiles => tr!("Ignorer des fichiers…"),
             Command::ApplyPatch => tr!("Appliquer un patch…"),
             Command::PastePatch => tr!("Coller un patch…"),
@@ -540,6 +556,9 @@ impl Command {
             Command::AddSubmodule => icons::CUBE,
             Command::Stash => icons::TRAY_ARROW_DOWN,
             Command::Snapshot => icons::CAMERA,
+            Command::UpdateBranches => icons::ARROW_LINE_DOWN,
+            Command::PushBranches => icons::ARROW_LINE_UP,
+            Command::DeleteStaleBranches => icons::BROOM,
             Command::IgnoreFiles => icons::EYE_SLASH,
             Command::ApplyPatch => icons::FILE_ARROW_DOWN,
             Command::PastePatch => icons::CLIPBOARD_TEXT,
@@ -616,6 +635,9 @@ impl Command {
             | Command::AddSubmodule
             | Command::Stash
             | Command::Snapshot
+            | Command::UpdateBranches
+            | Command::PushBranches
+            | Command::DeleteStaleBranches
             | Command::IgnoreFiles
             | Command::ApplyPatch
             | Command::PastePatch

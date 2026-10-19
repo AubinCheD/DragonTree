@@ -7,6 +7,7 @@
 pub mod apply;
 pub mod bisect;
 pub mod blame;
+pub mod branches;
 pub mod collapse;
 pub mod config;
 pub mod conflict;
@@ -37,6 +38,7 @@ pub mod worktree;
 
 pub use apply::{ApplyTarget, PatchFile, is_mail_patch};
 pub use bisect::{BisectMark, BisectState};
+pub use branches::{BranchOutcome, StaleBranch, StaleReason};
 pub use collapse::{CollapsedLog, collapse_merges};
 pub use diff::{ChangeKind, DiffLine, DiffOptions, FileChange, FileDiff, Hunk, LineKind};
 pub use error::GitError;

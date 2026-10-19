@@ -3,6 +3,7 @@
 mod actions;
 mod bisect;
 mod blame;
+mod branch_batch;
 mod changes;
 mod commands;
 mod compare;
@@ -333,6 +334,8 @@ pub enum RepoEvent {
     Compare(compare::CompareEvent),
     /// Verrous Git LFS lus sur le serveur pour la fenêtre des verrous.
     LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
+    /// Branches périmées lues pour le dialogue qui les attend.
+    StaleBranches(Result<Vec<dragontree_git::StaleBranch>, GitError>),
     /// Fin d'une commande personnalisée (script) : sa sortie ou l'erreur de lancement.
     CustomDone(Box<custom::CustomOutcome>),
     RebaseList(Result<Vec<Commit>, GitError>),
@@ -959,6 +962,7 @@ impl RepoTab {
             }
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
+            RepoEvent::StaleBranches(found) => self.on_stale_branches(shared, found),
             RepoEvent::CustomDone(outcome) => self.on_custom_done(shared, *outcome),
             RepoEvent::RebaseList(res) => match res {
                 Ok(list) => {
