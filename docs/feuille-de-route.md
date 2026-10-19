@@ -116,7 +116,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | V7 | Afficher les stashs dans le graphe, avec une option pour les masquer | ✅ |
 | V8 | Replier et déplier les merges (← / →, Tout replier) | ✅ |
 | V9 | Révéler HEAD (Ctrl+0), afficher ou masquer le panneau de détails (Ctrl+Maj+D) | ✅ |
-| V10 | Disposition verticale ou horizontale de l'historique | 🆕 M |
+| V10 | Disposition verticale ou horizontale de l'historique | ✅ |
 | V11 | Tri des commits : topologique ou par date | ✅ (le moteur sait déjà faire les deux : `crates/dragontree-git/src/log.rs:60-61`) |
 | V12 | Vue Changements : afficher les fichiers ignorés, masquer les non suivis | 🆕 P |
 | V13 | Zoom Ctrl+= / Ctrl+- (le réglage de taille existe) et thème | ✅ |

@@ -21,7 +21,7 @@ use egui::{Key, KeyboardShortcut, ModifierNames, Modifiers};
 
 use crate::icons;
 use crate::repo::{RepoTab, RepoView};
-use crate::settings::{Settings, ThemeChoice};
+use crate::settings::{HistoryLayout, Settings, ThemeChoice};
 
 /// Commande de l'interface : entrée de menu, raccourci éventuel, palette Ctrl+P.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,6 +45,8 @@ pub enum Command {
     /// Passe à l'historique et sélectionne le commit de HEAD.
     RevealHead,
     ToggleDetailsPanel,
+    /// Place du panneau de détails de l'historique (sous la liste ou à sa droite).
+    Layout(HistoryLayout),
     /// Tri des commits de l'historique : `true` topologique, `false` par date.
     SortCommits(bool),
     /// Affiche (ou masque) les tags dans le graphe.
@@ -141,6 +143,10 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::ShowLog),
             Cmd(Command::RevealHead),
             Cmd(Command::ToggleDetailsPanel),
+            Submenu(
+                tr_mark!("Disposition"),
+                &[Cmd(Command::Layout(HistoryLayout::Horizontal)), Cmd(Command::Layout(HistoryLayout::Vertical))],
+            ),
             Separator,
             Cmd(Command::ZoomIn),
             Cmd(Command::ZoomOut),
@@ -224,6 +230,8 @@ impl Command {
         Command::ShowLog,
         Command::RevealHead,
         Command::ToggleDetailsPanel,
+        Command::Layout(HistoryLayout::Horizontal),
+        Command::Layout(HistoryLayout::Vertical),
         Command::SortCommits(false),
         Command::SortCommits(true),
         Command::ShowTags,
@@ -275,6 +283,8 @@ impl Command {
             Command::ShowLog => tr!("Journal git"),
             Command::RevealHead => tr!("Révéler HEAD"),
             Command::ToggleDetailsPanel => tr!("Panneau de détails"),
+            Command::Layout(HistoryLayout::Horizontal) => tr!("Horizontale (détails à droite)"),
+            Command::Layout(HistoryLayout::Vertical) => tr!("Verticale (détails sous la liste)"),
             Command::SortCommits(false) => tr!("Par date"),
             Command::SortCommits(true) => tr!("Topologique"),
             Command::ShowTags => tr!("Afficher les tags"),
@@ -327,6 +337,8 @@ impl Command {
             Command::ShowLog => icons::LIST,
             Command::RevealHead => icons::CROSSHAIR,
             Command::ToggleDetailsPanel => icons::SIDEBAR_SIMPLE,
+            Command::Layout(HistoryLayout::Horizontal) => icons::COLUMNS,
+            Command::Layout(HistoryLayout::Vertical) => icons::ROWS,
             Command::SortCommits(_) => icons::SORT_ASCENDING,
             Command::ShowTags => icons::TAG,
             Command::ShowRemoteBranches => icons::CLOUD,
@@ -370,6 +382,7 @@ impl Command {
             | Command::ToggleRepoList
             | Command::ShowLog
             | Command::ToggleDetailsPanel
+            | Command::Layout(_)
             | Command::SortCommits(_)
             | Command::ShowTags
             | Command::ShowRemoteBranches
@@ -446,7 +459,14 @@ impl Command {
 
     /// La commande figure dans la palette Ctrl+P.
     pub fn in_palette(self) -> bool {
-        !matches!(self, Command::QuickOpen | Command::Language(_) | Command::Theme(_) | Command::SortCommits(_))
+        !matches!(
+            self,
+            Command::QuickOpen
+                | Command::Language(_)
+                | Command::Theme(_)
+                | Command::SortCommits(_)
+                | Command::Layout(_)
+        )
     }
 
     /// La commande est utilisable (sinon son entrée est grisée et elle ne fait rien) : une commande de dépôt
@@ -471,6 +491,7 @@ impl Command {
             Command::CurrentBranchOnly => Some(cx.repo.is_some_and(|tab| tab.history.current_branch_only)),
             Command::ToggleRepoList => Some(cx.settings.repo_list_visible),
             Command::ToggleDetailsPanel => Some(cx.settings.details_panel_visible),
+            Command::Layout(layout) => Some(cx.settings.history_layout == layout),
             Command::SortCommits(topological) => Some(cx.settings.topological_order == topological),
             Command::ShowLostCommits => Some(cx.repo.is_some_and(|tab| tab.history.show_lost)),
             Command::ShowTags => Some(cx.settings.show_tags),

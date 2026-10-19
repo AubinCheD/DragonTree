@@ -21,6 +21,16 @@ pub fn step_ui_scale(current: f32, steps: i32) -> f32 {
     scale.clamp(UI_SCALE_MIN, UI_SCALE_MAX)
 }
 
+/// Disposition de l'historique : où se place le panneau de détails par rapport à la liste des commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum HistoryLayout {
+    /// Détails sous la liste (la disposition d'origine).
+    #[default]
+    Vertical,
+    /// Détails à droite de la liste.
+    Horizontal,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ThemeChoice {
     #[default]
@@ -49,6 +59,8 @@ pub struct Settings {
     pub repo_list_visible: bool,
     /// Panneau de détails du commit visible sous l'historique.
     pub details_panel_visible: bool,
+    /// Place du panneau de détails : sous la liste des commits ou à sa droite.
+    pub history_layout: HistoryLayout,
     /// Historique trié topologiquement (sinon par date).
     pub topological_order: bool,
     /// Tags parcourus par le graphe et étiquetés dans l'historique.
@@ -94,6 +106,7 @@ impl Default for Settings {
             status_sweep: true,
             repo_list_visible: true,
             details_panel_visible: true,
+            history_layout: HistoryLayout::Vertical,
             topological_order: false,
             show_tags: true,
             show_remote_branches: true,

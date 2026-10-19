@@ -582,6 +582,10 @@ impl DragonTreeApp {
                 self.shared.settings.details_panel_visible = !self.shared.settings.details_panel_visible;
                 self.shared.settings_dirty = true;
             }
+            Command::Layout(layout) => {
+                self.shared.settings.history_layout = layout;
+                self.shared.settings_dirty = true;
+            }
             Command::SortCommits(topological) => {
                 if self.shared.settings.topological_order != topological {
                     self.shared.settings.topological_order = topological;

@@ -9,6 +9,7 @@ use super::scope::{LabelVisibility, display_name};
 use super::{RepoTab, RepoView};
 use crate::app::Shared;
 use crate::icons;
+use crate::settings::HistoryLayout;
 use crate::theme::{Palette, bold_family};
 use crate::widgets;
 
@@ -19,14 +20,29 @@ const SHA_W: f32 = 70.0;
 
 impl RepoTab {
     pub(super) fn history_ui(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
-        let total_h = ui.available_height();
         if shared.settings.details_panel_visible {
-            egui::Panel::bottom(("history-details", self.id))
-                .resizable(true)
-                .default_size((total_h * 0.46).max(180.0))
-                .size_range(120.0..=(total_h - 120.0).max(140.0))
-                .frame(Frame::new().fill(p.bg).stroke(egui::Stroke::new(1.0, p.border)))
-                .show(ui, |ui| self.details_ui(ui, shared, p));
+            let frame = Frame::new().fill(p.bg).stroke(egui::Stroke::new(1.0, p.border));
+            // Deux identifiants de panneau distincts : chaque disposition garde sa taille redimensionnée.
+            match shared.settings.history_layout {
+                HistoryLayout::Vertical => {
+                    let total_h = ui.available_height();
+                    egui::Panel::bottom(("history-details", self.id))
+                        .resizable(true)
+                        .default_size((total_h * 0.46).max(180.0))
+                        .size_range(120.0..=(total_h - 120.0).max(140.0))
+                        .frame(frame)
+                        .show(ui, |ui| self.details_ui(ui, shared, p));
+                }
+                HistoryLayout::Horizontal => {
+                    let total_w = ui.available_width();
+                    egui::Panel::right(("history-details-right", self.id))
+                        .resizable(true)
+                        .default_size((total_w * 0.42).max(320.0))
+                        .size_range(280.0..=(total_w - 360.0).max(300.0))
+                        .frame(frame)
+                        .show(ui, |ui| self.details_ui(ui, shared, p));
+                }
+            }
         }
         egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| self.commit_table(ui, shared, p));
     }
