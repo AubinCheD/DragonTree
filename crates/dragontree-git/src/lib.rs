@@ -23,6 +23,7 @@ pub mod runner;
 pub mod ssh;
 pub mod stash;
 pub mod status;
+pub mod worktree;
 
 pub use collapse::{CollapsedLog, collapse_merges};
 pub use diff::{ChangeKind, DiffLine, DiffOptions, FileChange, FileDiff, Hunk, LineKind};
@@ -39,3 +40,4 @@ pub use repo::{CommitInfo, OpState, Remote, Repo, Submodule};
 pub use runner::{CancelToken, Git, GitCommand, Output};
 pub use stash::{StashEntry, fold_stashes};
 pub use status::{ConflictKind, FileState, StatusEntry, StatusSnapshot};
+pub use worktree::{Worktree, WorktreeStart};

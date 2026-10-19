@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::PathBuf;
 
 use dragontree_i18n::tr;
 
@@ -24,6 +25,8 @@ pub enum GitError {
     Io(String),
     /// Opération refusée par DragonTree pour protéger des données (message explicatif).
     Refused(String),
+    /// Checkout refusé : la branche est déjà sortie dans un autre worktree (`path`).
+    CheckedOutElsewhere { branch: String, path: PathBuf },
     /// Erreur interne de DragonTree (tâche interrompue par une panique).
     Internal(String),
 }
@@ -92,6 +95,11 @@ impl fmt::Display for GitError {
             GitError::Parse(e) => write!(f, "{}", tr!("sortie de git inattendue : {e}", e)),
             GitError::Io(e) => write!(f, "{}", tr!("erreur d'entrée/sortie : {e}", e)),
             GitError::Refused(e) => write!(f, "{e}"),
+            GitError::CheckedOutElsewhere { branch, path } => write!(
+                f,
+                "{}",
+                tr!("La branche « {branch} » est déjà sortie dans le worktree {path}", branch, path = path.display())
+            ),
             GitError::Internal(e) => write!(f, "{}", tr!("erreur interne de DragonTree : {e}", e)),
         }
     }

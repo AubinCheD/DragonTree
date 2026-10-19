@@ -82,6 +82,8 @@ pub enum Command {
     QuickPush,
     NewBranch,
     NewTag,
+    /// Nouveau worktree, la branche choisie dans le dialogue (les menus contextuels en créent aussi).
+    CreateWorktree,
     Stash,
     OpenExplorer,
     OpenTerminal,
@@ -185,6 +187,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::NewBranch),
             Cmd(Command::NewTag),
+            Cmd(Command::CreateWorktree),
             Cmd(Command::Stash),
             Separator,
             Cmd(Command::OpenExplorer),
@@ -270,6 +273,7 @@ impl Command {
         Command::QuickPush,
         Command::NewBranch,
         Command::NewTag,
+        Command::CreateWorktree,
         Command::Stash,
         Command::OpenExplorer,
         Command::OpenTerminal,
@@ -327,6 +331,7 @@ impl Command {
             Command::QuickPush => tr!("Push rapide"),
             Command::NewBranch => tr!("Nouvelle branche…"),
             Command::NewTag => tr!("Nouveau tag…"),
+            Command::CreateWorktree => tr!("Créer un worktree…"),
             Command::Stash => "Stash…",
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
@@ -382,6 +387,7 @@ impl Command {
             Command::QuickPush => icons::LIGHTNING,
             Command::NewBranch => icons::GIT_BRANCH,
             Command::NewTag => icons::TAG,
+            Command::CreateWorktree => icons::TREE_STRUCTURE,
             Command::Stash => icons::TRAY_ARROW_DOWN,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
@@ -436,6 +442,7 @@ impl Command {
             | Command::QuickPush
             | Command::NewBranch
             | Command::NewTag
+            | Command::CreateWorktree
             | Command::Stash
             | Command::OpenExplorer
             | Command::OpenTerminal

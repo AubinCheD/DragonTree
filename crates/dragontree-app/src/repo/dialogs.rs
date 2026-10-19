@@ -1,12 +1,14 @@
 //! Dialogues des opérations (création de branche, merge, reset, push…).
 
-use dragontree_git::{HunkSelection, MergeMode, Oid, OpState, PatchMode, ResetMode};
+use std::path::PathBuf;
+
+use dragontree_git::{HunkSelection, MergeMode, Oid, OpState, PatchMode, ResetMode, WorktreeStart};
 use dragontree_i18n::{tr, trn};
 use egui::{RichText, Ui};
 
 use super::actions::StashOp;
 use super::{Refresh, RepoTab};
-use crate::app::Shared;
+use crate::app::{AppAction, Shared};
 use crate::icons;
 use crate::theme::Palette;
 
@@ -15,6 +17,8 @@ pub enum ConfirmAction {
     CheckoutDetached(Oid),
     /// Abandon de la fusion, du rebase, du cherry-pick ou du revert en cours.
     AbortOp(OpState),
+    /// Ouvrir le worktree où la branche demandée est déjà sortie.
+    OpenWorktree(PathBuf),
 }
 
 /// Libellé de l'abandon d'une opération en cours (bandeau et confirmation).
@@ -28,6 +32,8 @@ pub fn abort_label(state: OpState) -> &'static str {
     }
 }
 
+/// Dialogue modal de l'onglet. `CreateWorktree::pick` : la branche se choisit dans le dialogue (Dépôt › Créer un
+/// worktree…) ; `RemoveWorktree::force` (`--force`) : seulement si la case est cochée.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -50,6 +56,8 @@ pub enum Dialog {
     AddRemote { name: String, url: String },
     RemoveRemote { name: String },
     DropStash { oid: Oid, label: String },
+    CreateWorktree { start: WorktreeStart, path: String, pick: bool },
+    RemoveWorktree { path: PathBuf, force: bool },
     Confirm { title: String, text: String, action: ConfirmAction },
 }
 
@@ -90,14 +98,24 @@ impl Dialog {
                 (tr!("Supprimer le remote « {name} »", name), tr!("Supprimer").into(), true)
             }
             Dialog::DropStash { .. } => (tr!("Supprimer le stash").into(), tr!("Supprimer").into(), true),
+            Dialog::CreateWorktree { .. } => (tr!("Créer un worktree").into(), tr!("Créer").into(), false),
+            Dialog::RemoveWorktree { .. } => (tr!("Supprimer le worktree").into(), tr!("Supprimer").into(), true),
             Dialog::Confirm { title, action: ConfirmAction::CheckoutDetached(_), .. } => {
                 (title.clone(), tr!("Continuer").into(), false)
             }
             Dialog::Confirm { title, action: ConfirmAction::AbortOp(state), .. } => {
                 (title.clone(), abort_label(*state).into(), true)
             }
+            Dialog::Confirm { title, action: ConfirmAction::OpenWorktree(_), .. } => {
+                (title.clone(), tr!("Ouvrir le worktree").into(), false)
+            }
         }
     }
+}
+
+/// Avertissement d'un dialogue (icône et couleur d'alerte).
+pub(super) fn warning(ui: &mut Ui, text: &str, p: &Palette) {
+    ui.label(RichText::new(format!("{} {text}", icons::WARNING)).color(p.modified_fg));
 }
 
 /// Validation locale d'un nom de branche ou de tag (règles de `git check-ref-format`).
@@ -156,9 +174,7 @@ impl RepoTab {
     /// Champs du dialogue ; renvoie vrai si la saisie est valide.
     fn dialog_body(&self, ui: &mut Ui, dialog: &mut Dialog, p: &Palette) -> bool {
         let exists = |name: &str| self.refs.as_ref().is_some_and(|r| r.locals.iter().any(|b| b.name == name));
-        let warn = |ui: &mut Ui, text: &str| {
-            ui.label(RichText::new(format!("{} {text}", icons::WARNING)).color(p.modified_fg));
-        };
+        let warn = |ui: &mut Ui, text: &str| warning(ui, text, p);
         match dialog {
             Dialog::CreateBranch { start_label, name, checkout, .. } => {
                 ui.label(RichText::new(tr!("À partir de : {start_label}", start_label)).color(p.weak));
@@ -390,6 +406,8 @@ impl RepoTab {
                 warn(ui, &tr!("{label} sera définitivement supprimé.", label));
                 true
             }
+            Dialog::CreateWorktree { start, path, pick } => self.create_worktree_body(ui, start, path, *pick, p),
+            Dialog::RemoveWorktree { path, force } => Self::remove_worktree_body(ui, path, force, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
                 true
@@ -495,6 +513,13 @@ impl RepoTab {
                 });
             }
             Dialog::DropStash { oid, label } => self.op_stash(shared, oid, label, StashOp::Drop),
+            Dialog::CreateWorktree { start, path, .. } => {
+                self.op_add_worktree(shared, PathBuf::from(path.trim()), start)
+            }
+            // L'application ferme d'abord les onglets ouverts sur ce worktree, puis rend la main à cet onglet.
+            Dialog::RemoveWorktree { path, force } => {
+                shared.actions.push(AppAction::RemoveWorktree { tab: self.id, path, force })
+            }
             Dialog::Confirm { action, .. } => match action {
                 ConfirmAction::CheckoutDetached(oid) => self.op_checkout(shared, oid.to_hex()),
                 ConfirmAction::AbortOp(state) => {
@@ -503,6 +528,7 @@ impl RepoTab {
                         Ok(Some(tr!("Opération abandonnée").into()))
                     });
                 }
+                ConfirmAction::OpenWorktree(path) => shared.actions.push(AppAction::OpenRepo(path)),
             },
         }
     }

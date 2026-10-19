@@ -54,6 +54,14 @@ pub enum AppAction {
     Rescan,
     TrustRepo(PathBuf),
     QuickOpen,
+    /// Supprimer le worktree `path`, demandé par l'onglet `tab` : les onglets ouverts sur ce worktree sont d'abord
+    /// fermés (ils perdraient leur dossier), sans être retenus pour Ctrl+Maj+T, puis l'onglet `tab` lance la
+    /// suppression.
+    RemoveWorktree {
+        tab: TabId,
+        path: PathBuf,
+        force: bool,
+    },
     /// Fermer l'application (Fichier › Quitter) : passe par `save`, comme la croix de la fenêtre.
     Quit,
     /// Commande du registre choisie dans une vue (palette Ctrl+P).
@@ -328,6 +336,28 @@ impl DragonTreeApp {
         self.remember_tabs();
     }
 
+    /// Ferme les onglets ouverts sur `path` sans les retenir pour Ctrl+Maj+T : leur dossier va être supprimé.
+    fn close_tabs_of(&mut self, path: &Path) {
+        let key = path_key(path);
+        let before = self.tabs.len();
+        while let Some(index) =
+            self.tabs.iter().position(|t| matches!(&t.kind, TabKind::Repo(r) if path_key(&r.path) == key))
+        {
+            self.tabs.remove(index);
+            if self.active > index {
+                self.active -= 1;
+            }
+        }
+        if self.tabs.len() == before {
+            return;
+        }
+        if self.tabs.is_empty() {
+            self.new_welcome_tab();
+        }
+        self.active = self.active.min(self.tabs.len() - 1);
+        self.remember_tabs();
+    }
+
     /// Empile l'onglet `index` (s'il s'agit d'un dépôt) avant sa fermeture ; l'onglet d'accueil n'est pas retenu.
     fn remember_closed(&mut self, index: usize) {
         if let Some(TabKind::Repo(r)) = self.tabs.get(index).map(|t| &t.kind) {
@@ -519,6 +549,13 @@ impl DragonTreeApp {
             }
             AppAction::QuickOpen => {
                 self.quick_open = Some(crate::quick_open::QuickOpen::default());
+            }
+            AppAction::RemoveWorktree { tab, path, force } => {
+                // Fermés avant que la suppression ne parte : aucun onglet ne reste sur un dossier supprimé.
+                self.close_tabs_of(&path);
+                if let Some(TabKind::Repo(r)) = self.tabs.iter_mut().find(|t| t.id == tab).map(|t| &mut t.kind) {
+                    r.op_remove_worktree(&self.shared, path, force);
+                }
             }
             AppAction::RunCommand(cmd) => self.run_command(cmd),
             AppAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

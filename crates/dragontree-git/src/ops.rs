@@ -145,8 +145,15 @@ impl Repo {
         cmd.run().map(|_| ())
     }
 
+    /// Checkout. Une branche locale déjà sortie dans un autre worktree est refusée par git : l'erreur nomme ce
+    /// worktree, lu dans la liste des worktrees (le message de git dépend de sa langue).
     pub fn checkout(&self, target: &str) -> Result<(), GitError> {
-        self.run_write(["checkout", target, "--"])
+        self.run_write(["checkout", target, "--"]).map_err(|e| match (&e, self.worktree_holding(target)) {
+            (GitError::Failed { .. }, Some(wt)) => {
+                GitError::CheckedOutElsewhere { branch: target.to_string(), path: wt.path }
+            }
+            _ => e,
+        })
     }
 
     pub fn checkout_new_tracking(&self, remote_branch: &str, local: &str) -> Result<(), GitError> {

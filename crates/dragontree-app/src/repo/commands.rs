@@ -25,7 +25,7 @@ impl RepoTab {
             Command::Fetch => has_remote,
             Command::Pull | Command::QuickPull | Command::Push | Command::QuickPush => has_remote && on_branch,
             Command::Stash => self.status.as_ref().is_some_and(|s| !s.is_clean()),
-            Command::NewBranch | Command::NewTag => self.refs.is_some(),
+            Command::NewBranch | Command::NewTag | Command::CreateWorktree => self.refs.is_some(),
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
             Command::OpenVsCode => crate::util::vscode_available(),
@@ -85,6 +85,7 @@ impl RepoTab {
                 })
             }
             Command::NewTag => self.dialog = Some(Dialog::new_tag("HEAD".into(), "HEAD".into())),
+            Command::CreateWorktree => self.open_create_worktree(None),
             Command::Stash => {
                 self.dialog = Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false })
             }

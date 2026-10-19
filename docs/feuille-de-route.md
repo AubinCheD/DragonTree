@@ -127,7 +127,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 |---|---|---|
 | R1 | Actualiser, Fetch/Pull/Push (Ctrl+Maj+F/U/P), Nouvelle branche (Ctrl+Maj+B), Nouveau tag, Stash (Ctrl+Maj+H), ouvrir dans l'Explorateur, le Terminal ou VS Code | ✅ |
 | R2 | Fetch, Pull et Push rapides, sans dialogue (Ctrl+clic) | ✅ |
-| R3 | Créer un worktree… (voir Worktrees) | 🆕 |
+| R3 | Créer un worktree… (voir Worktrees) | ✅ |
 | R4 | Stashs complets : liste déroulante sur Pop, renommer, stash des seuls fichiers sélectionnés, snapshot (garde les modifications), fichiers non suivis visibles dans le diff | 🆕 M |
 | R5 | Appliquer un patch (fichier, glisser-déposer, presse-papiers) | 🆕 M |
 | R6 | Enregistrer comme patch (commit, plage de commits, stash, fichiers) | 🆕 M |
@@ -240,6 +240,7 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 
 - **Contexte :** l'utilisateur a demandé, le 2026-10-17, de « voir les différents worktrees facilement et basculer entre eux ». La proposition de la section Worktrees attend sa validation, en même temps que le choix des options de menu (R3).
 - **État :**
+  - fait (R3) : moteur `crates/dragontree-git/src/worktree.rs` (liste sans `-z`, création, suppression, prune), section « Worktrees » de la barre latérale et dialogue « Créer un worktree… » (`crates/dragontree-app/src/repo/worktrees.rs`), branches sorties ailleurs signalées, surveillance de `<common>/worktrees` ; les points ci-dessous décrivent l'état d'avant ;
   - le scan reconnaît un worktree (`crates/dragontree-git/src/discovery.rs:16-17`, `:159-160`) ;
   - la liste de droite l'affiche avec une icône propre (`crates/dragontree-app/src/repo_list.rs:336`) et l'ouvre comme un dépôt ordinaire ;
   - un worktree hors des dossiers scannés n'apparaît nulle part ;

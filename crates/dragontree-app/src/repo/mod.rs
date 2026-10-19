@@ -17,6 +17,7 @@ mod scope;
 mod sidebar;
 mod toolbar;
 mod watcher;
+mod worktrees;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -27,7 +28,7 @@ use std::time::{Duration, Instant};
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
     CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions,
-    LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
+    LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule, Worktree,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
@@ -256,7 +257,7 @@ pub enum RepoEvent {
         view: Box<CollapsedLog>,
         follow_selection: bool,
     },
-    Extras(u64, Vec<StashEntry>, Vec<Remote>, Vec<Submodule>),
+    Extras(u64, Vec<StashEntry>, Vec<Remote>, Vec<Submodule>, Vec<Worktree>),
     Details(u64, Oid, Result<(CommitInfo, Vec<FileChange>), GitError>),
     CommitDiff(u64, Result<FileDiff, GitError>),
     WorkDiff(u64, (Side, String), Result<FileDiff, GitError>),
@@ -270,6 +271,8 @@ pub enum RepoEvent {
     FsChanged {
         git_dir: bool,
         worktree: bool,
+        /// La liste des worktrees liés (`<common>/worktrees`) a changé.
+        worktrees: bool,
     },
     LastMessage(String),
     Blame(blame::BlameEvent),
@@ -303,6 +306,8 @@ pub struct RepoTab {
     pub stashes: Arc<Vec<StashEntry>>,
     pub remotes: Arc<Vec<Remote>>,
     pub submodules: Arc<Vec<Submodule>>,
+    /// Worktrees du dépôt, le principal d'abord (lus avec les stashs, remotes et sous-modules).
+    pub worktrees: Arc<Vec<Worktree>>,
     pub view: RepoView,
     pub history: HistoryState,
     pub changes: ChangesState,
@@ -324,6 +329,8 @@ pub struct RepoTab {
     quick_dirty: bool,
     /// Échec d'authentification du fetch automatique déjà signalé (remis à zéro au succès).
     auth_warned: bool,
+    /// Dossier à ouvrir dans un onglet quand l'opération (numéro) réussit : un worktree qui vient d'être créé.
+    open_after_op: Option<(u64, PathBuf)>,
 }
 
 impl RepoTab {
@@ -339,6 +346,7 @@ impl RepoTab {
             stashes: Arc::new(Vec::new()),
             remotes: Arc::new(Vec::new()),
             submodules: Arc::new(Vec::new()),
+            worktrees: Arc::new(Vec::new()),
             view: RepoView::History,
             history: HistoryState::default(),
             changes: ChangesState { push_after: shared.settings.push_after_commit, ..Default::default() },
@@ -358,6 +366,7 @@ impl RepoTab {
             next_op_id: 0,
             quick_dirty: false,
             auth_warned: false,
+            open_after_op: None,
         };
         tab.reopen(shared);
         tab
@@ -451,7 +460,8 @@ impl RepoTab {
                 let stashes = r.stashes().unwrap_or_default();
                 let remotes = r.remotes().unwrap_or_default();
                 let subs = r.submodules().unwrap_or_default();
-                Some(AppEvent::Repo(id, RepoEvent::Extras(g, stashes, remotes, subs)))
+                let worktrees = r.worktrees().unwrap_or_default();
+                Some(AppEvent::Repo(id, RepoEvent::Extras(g, stashes, remotes, subs, worktrees)))
             });
         }
         if what.log {
@@ -617,6 +627,7 @@ impl RepoTab {
                 self.watcher = watcher::RepoWatcher::start(
                     &repo.workdir,
                     &repo.git_dir,
+                    &repo.common_dir,
                     self.id,
                     shared.jobs.sender(),
                     shared.settings.scan_skip_dirs.clone(),
@@ -686,7 +697,7 @@ impl RepoTab {
                 let list = CommitList { commits: Arc::new(commits), graph: Arc::new(graph), index: Arc::new(index) };
                 self.show_list(shared, list, folded, &hidden_in, follow_selection);
             }
-            RepoEvent::Extras(g, stashes, remotes, subs) if g == self.gens.extras => {
+            RepoEvent::Extras(g, stashes, remotes, subs, worktrees) if g == self.gens.extras => {
                 self.stashes = Arc::new(stashes);
                 // Le stash sélectionné a disparu (pop, suppression) : ses détails n'ont plus d'objet.
                 if let Some((gone, _)) = self.history.external.clone()
@@ -705,6 +716,7 @@ impl RepoTab {
                 }
                 self.remotes = Arc::new(remotes);
                 self.submodules = Arc::new(subs);
+                self.worktrees = Arc::new(worktrees);
             }
             RepoEvent::Details(g, oid, res) if g == self.gens.details => {
                 self.history.details_loading = false;
@@ -778,9 +790,19 @@ impl RepoTab {
                             shared.toast(Toast::error(tr!("{title} a échoué", title), e.to_string()));
                         }
                     }
+                    // Branche déjà sortie dans un autre worktree : on propose de l'ouvrir.
+                    Err(GitError::CheckedOutElsewhere { branch, path }) if self.dialog.is_none() => {
+                        self.offer_worktree(branch, path)
+                    }
                     Err(e) => shared.toast(Toast::error(tr!("{title} a échoué", title), e.to_string())),
                 }
                 self.refresh(shared, refresh);
+                if self.open_after_op.as_ref().is_some_and(|(op, _)| *op == id)
+                    && let Some((_, path)) = self.open_after_op.take()
+                    && succeeded
+                {
+                    shared.actions.push(AppAction::OpenRepo(path));
+                }
                 if self.changes.pending_commit.as_ref().is_some_and(|c| c.op == id)
                     && let Some(commit) = self.changes.pending_commit.take()
                     && succeeded
@@ -788,8 +810,9 @@ impl RepoTab {
                     self.after_commit(shared, commit.after);
                 }
             }
-            RepoEvent::FsChanged { git_dir, worktree } => {
-                let what = Refresh { refs: git_dir, status: git_dir || worktree, log: false, extras: git_dir };
+            RepoEvent::FsChanged { git_dir, worktree, worktrees } => {
+                let what =
+                    Refresh { refs: git_dir, status: git_dir || worktree, log: false, extras: git_dir || worktrees };
                 let deadline = Instant::now() + Duration::from_millis(350);
                 self.pending_refresh = Some(match self.pending_refresh {
                     Some((_, prev)) => (deadline, prev.merge(what)),

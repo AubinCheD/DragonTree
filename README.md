@@ -23,7 +23,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   renommer, supprimer localement et sur le remote, checkout, fast-forward), tags (annotés, push, suppression),
   merge (ff, no-ff, ff-only, squash), rebase, **rebase interactif** (réordonner, pick/reword/edit/squash/
   fixup/drop), cherry-pick, revert, reset (soft/mixed/hard), stash (avec message, non suivis, garder l'index),
-  remotes, sous-modules.
+  remotes, sous-modules, **worktrees** (section de la barre latérale : ouvrir dans un onglet, créer depuis une
+  branche, une branche distante ou un commit, supprimer, nettoyer ; les branches sorties ailleurs sont signalées).
 - **Conflits** : bandeau d'opération en cours (Continuer/Annuler/Passer), résolution « notre/leur version »,
   éditeur de conflits par région, outil de merge externe (`git mergetool`).
 - **Historique et blame d'un fichier.**
@@ -164,6 +165,6 @@ des fichiers `tests/live*.rs`.
 ## Limites connues et suite
 
 - **À venir** : vue centralisée des pull requests de tous les comptes (l'architecture des forges est prête).
-- Non gérés pour l'instant : Git LFS (au-delà de ce que fait git lui-même), git-flow, worktrees (listés mais
-  pas gérés), commandes personnalisées, icône intégrée à l'exécutable.
+- Non gérés pour l'instant : Git LFS (au-delà de ce que fait git lui-même), git-flow, commandes personnalisées,
+  icône intégrée à l'exécutable.
 - Dépôts SHA-256 non pris en charge.

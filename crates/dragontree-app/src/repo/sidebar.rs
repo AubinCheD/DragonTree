@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use dragontree_git::{LocalBranch, MergeMode, Oid, RemoteBranch, ResetMode, TagRef};
+use dragontree_git::{LocalBranch, MergeMode, Oid, RemoteBranch, ResetMode, TagRef, WorktreeStart};
 use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
@@ -29,7 +29,7 @@ impl Default for SidebarState {
     }
 }
 
-const ROW_H: f32 = 22.0;
+pub(super) const ROW_H: f32 = 22.0;
 /// Largeur d'une icône à droite d'une ligne (œil, entonnoir).
 const TOOL_W: f32 = 22.0;
 
@@ -121,6 +121,8 @@ impl RepoTab {
 
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+
+            self.worktrees_section(ui, shared, p);
 
             // Branches locales.
             if self.section(ui, "branches", &format!("{} Branches", icons::GIT_BRANCH), refs.locals.len(), p) {
@@ -275,7 +277,7 @@ impl RepoTab {
     }
 
     /// En-tête de section repliable ; renvoie vrai si la section est ouverte.
-    fn section(&mut self, ui: &mut Ui, key: &str, title: &str, count: usize, p: &Palette) -> bool {
+    pub(super) fn section(&mut self, ui: &mut Ui, key: &str, title: &str, count: usize, p: &Palette) -> bool {
         ui.add_space(6.0);
         let open = !self.sidebar.closed.contains(key);
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::click());
@@ -413,10 +415,23 @@ impl RepoTab {
         indent: usize,
         p: &Palette,
     ) {
+        // Branche sortie dans un autre worktree : icône de worktree, et son dossier dans l'infobulle.
+        let elsewhere = match leaf {
+            Leaf::Local(b) if !b.is_head => {
+                self.checked_out_elsewhere(&b.name).map(|w| crate::util::native_path(&w.path))
+            }
+            _ => None,
+        };
         let (oid, icon, bold, color) = match leaf {
             Leaf::Local(b) => (
                 b.oid,
-                if b.is_head { icons::CHECK } else { icons::GIT_BRANCH },
+                if b.is_head {
+                    icons::CHECK
+                } else if elsewhere.is_some() {
+                    icons::TREE_STRUCTURE
+                } else {
+                    icons::GIT_BRANCH
+                },
                 b.is_head,
                 if b.is_head { p.accent } else { p.text },
             ),
@@ -458,7 +473,7 @@ impl RepoTab {
         );
         self.row_tools(ui, shared, &resp, full, hide, &pattern, p);
 
-        let resp = resp.on_hover_text(match leaf {
+        let mut tip = match leaf {
             Leaf::Local(b) => match &b.upstream {
                 Some(u) if b.upstream_gone => tr!("{name}\nSuit {u} (supprimée sur le remote)", name = b.name, u),
                 Some(u) => tr!(
@@ -473,7 +488,11 @@ impl RepoTab {
             Leaf::Remote(b) => b.full.clone(),
             Leaf::Tag(t) if t.annotated => tr!("{name} (annoté)", name = t.name),
             Leaf::Tag(t) => t.name.clone(),
-        });
+        };
+        if let Some(path) = &elsewhere {
+            tip = format!("{tip}\n{}", tr!("Sortie dans le worktree {path}", path = path.display()));
+        }
+        let resp = resp.on_hover_text(tip);
         if resp.clicked() {
             self.view = RepoView::History;
             self.select_commit(shared, oid, true);
@@ -638,6 +657,14 @@ impl RepoTab {
 
     fn local_branch_menu(&mut self, ui: &mut Ui, shared: &mut Shared, b: &LocalBranch, current: Option<&str>) {
         let name = b.name.clone();
+        // Sortie dans un autre worktree (git en refuse le checkout ici) : ce worktree peut s'ouvrir.
+        let elsewhere = self.checked_out_elsewhere(&name).map(|w| w.path.clone());
+        if let Some(path) = elsewhere.clone()
+            && ui.button(format!("{} {}", icons::TREE_STRUCTURE, tr!("Ouvrir le worktree"))).clicked()
+        {
+            shared.actions.push(AppAction::OpenRepo(path));
+            ui.close();
+        }
         if !b.is_head && ui.button(format!("{} {}", icons::CHECK, tr!("Checkout « {name} »", name))).clicked() {
             self.op_checkout(shared, name.clone());
             ui.close();
@@ -672,6 +699,13 @@ impl RepoTab {
         }
         if ui.button(format!("{} {}", icons::TAG, tr!("Nouveau tag ici…"))).clicked() {
             self.dialog = Some(Dialog::new_tag(b.oid.to_hex(), name.clone()));
+            ui.close();
+        }
+        if !b.is_head
+            && elsewhere.is_none()
+            && ui.button(format!("{} {}", icons::TREE_STRUCTURE, tr!("Créer un worktree…"))).clicked()
+        {
+            self.open_create_worktree(Some(WorktreeStart::Branch(name.clone())));
             ui.close();
         }
         if b.is_head && ui.button(format!("{} Push…", icons::ARROW_LINE_UP)).clicked() {
@@ -735,6 +769,11 @@ impl RepoTab {
                 name: b.name.clone(),
                 checkout: true,
             });
+            ui.close();
+        }
+        if ui.button(format!("{} {}", icons::TREE_STRUCTURE, tr!("Créer un worktree…"))).clicked() {
+            let start = WorktreeStart::Track { remote_branch: b.full.clone(), local: b.name.clone() };
+            self.open_create_worktree(Some(start));
             ui.close();
         }
         if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer sur le remote…"))).clicked() {
@@ -829,6 +868,10 @@ impl RepoTab {
         }
         if ui.button(format!("{} {}", icons::TAG, tr!("Nouveau tag ici…"))).clicked() {
             self.dialog = Some(Dialog::new_tag(oid.to_hex(), short.clone()));
+            ui.close();
+        }
+        if ui.button(format!("{} {}", icons::TREE_STRUCTURE, tr!("Créer un worktree ici…"))).clicked() {
+            self.open_create_worktree(Some(WorktreeStart::Detached(oid.to_hex())));
             ui.close();
         }
         ui.separator();
