@@ -435,6 +435,10 @@ impl RepoTab {
                             }
                         }
                     });
+                    if ui.button(format!("{} {}", icons::EYE_SLASH, tr!("Ignorer…"))).clicked() {
+                        self.open_ignore(Some(path.to_string()));
+                        ui.close();
+                    }
                 }
             }
             Side::Staged => {

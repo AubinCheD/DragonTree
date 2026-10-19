@@ -343,20 +343,7 @@ impl Repo {
 
     /// Ajoute un motif à la fin du `.gitignore` (octets existants préservés, encodage compris).
     pub fn add_to_gitignore(&self, pattern: &str) -> Result<(), GitError> {
-        use std::io::Write;
-        let path = self.workdir.join(".gitignore");
-        let needs_newline = match std::fs::read(&path) {
-            Ok(bytes) => !bytes.is_empty() && !bytes.ends_with(b"\n"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-            Err(e) => return Err(e.into()),
-        };
-        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
-        if needs_newline {
-            file.write_all(b"\n")?;
-        }
-        file.write_all(pattern.as_bytes())?;
-        file.write_all(b"\n")?;
-        Ok(())
+        crate::ignore::append_line(&self.workdir.join(".gitignore"), pattern)
     }
 
     pub fn stash_apply(&self, index: usize) -> Result<(), GitError> {

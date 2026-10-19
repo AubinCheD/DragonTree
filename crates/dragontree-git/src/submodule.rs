@@ -47,16 +47,14 @@ pub(crate) fn parse_gitmodules(out: &str) -> Vec<GitmodulesEntry> {
 }
 
 /// Chemin relatif au dépôt, sans `..` ni racine : refuse ce qui sortirait de la copie de travail.
-fn check_relative(path: &str) -> Result<(), GitError> {
+pub(crate) fn check_relative(path: &str) -> Result<(), GitError> {
     let p = Path::new(path);
     let bad = path.trim().is_empty()
         || p.is_absolute()
         || path.starts_with(['/', '\\'])
         || p.components().any(|c| matches!(c, Component::ParentDir | Component::Prefix(_) | Component::RootDir));
     if bad {
-        return Err(GitError::Refused(
-            tr!("Le chemin d'un sous-module doit être relatif au dépôt, sans « .. ».").into(),
-        ));
+        return Err(GitError::Refused(tr!("Le chemin doit être relatif au dépôt, sans « .. ».").into()));
     }
     Ok(())
 }

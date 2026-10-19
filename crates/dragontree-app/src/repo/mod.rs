@@ -12,6 +12,7 @@ pub mod diff_view;
 mod folding;
 mod graph_paint;
 mod history;
+mod ignore;
 mod image_diff;
 mod patches;
 mod rebase_ui;
@@ -254,6 +255,7 @@ struct Gens {
     patch: u64,
     compare: u64,
     repo_settings: u64,
+    ignore: u64,
     template: u64,
 }
 
@@ -288,6 +290,8 @@ pub enum RepoEvent {
     PatchText(Result<String, GitError>),
     /// Configuration du dépôt lue pour le dialogue « Réglages du dépôt ».
     RepoSettings(u64, Box<repo_settings::RepoSettingsForm>),
+    /// Aperçu des fichiers concernés par un motif, pour le dialogue « Ignorer des fichiers ».
+    IgnorePreview(u64, String, dragontree_git::IgnoreTarget, Result<dragontree_git::IgnorePreview, GitError>),
     /// Modèle de message de commit (`commit.template`) lu pour préremplir la zone de commit.
     CommitTemplate(u64, Option<String>),
     OpProgress(u64, Progress),
@@ -795,6 +799,9 @@ impl RepoTab {
             RepoEvent::PatchPreview(g, res) if g == self.gens.patch => self.on_patch_preview(shared, res),
             RepoEvent::PatchText(res) => self.on_patch_text(shared, res),
             RepoEvent::RepoSettings(g, form) if g == self.gens.repo_settings => self.on_repo_settings(shared, form),
+            RepoEvent::IgnorePreview(g, pattern, target, res) if g == self.gens.ignore => {
+                self.on_ignore_preview(pattern, target, res)
+            }
             RepoEvent::CommitTemplate(g, template) if g == self.gens.template => self.on_commit_template(template),
             RepoEvent::WorkDiff(g, key, res) if g == self.gens.work_diff => {
                 self.changes.diff_loading = false;

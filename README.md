@@ -18,7 +18,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   avant/après des images.
 - **Changements locaux** : fichiers non indexés / indexés / en conflit, indexation par fichier, par **hunk** ou
   par **ligne** (y compris fichiers non suivis et CRLF), annulation de modifications, « Ignorer » dans le
-  `.gitignore`, zone de commit (Amend, pousser après le commit, Ctrl+Entrée).
+  `.gitignore`, dialogue « Ignorer… » (motif libre ou proposé, `.gitignore` racine ou de dossier ou `.git/info/exclude`,
+  aperçu des fichiers concernés), zone de commit (Amend, pousser après le commit, Ctrl+Entrée).
 - **Opérations** : fetch, pull (merge ou rebase), push (upstream, force-with-lease, tags), branches (créer,
   renommer, supprimer localement et sur le remote, checkout, fast-forward), tags (annotés, push, suppression),
   merge (ff, no-ff, ff-only, squash), rebase, **rebase interactif** (réordonner, pick/reword/edit/squash/

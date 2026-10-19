@@ -89,6 +89,8 @@ pub enum Command {
     Stash,
     /// Enregistre un stash sans toucher aux modifications en cours.
     Snapshot,
+    /// Ajoute un motif au .gitignore, avec un aperçu des fichiers concernés.
+    IgnoreFiles,
     /// Applique un patch lu dans un fichier choisi (aussi : fichier déposé sur la fenêtre).
     ApplyPatch,
     /// Applique un patch collé dans une zone de texte (le presse-papiers n'est lisible que par un collage).
@@ -201,6 +203,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::AddSubmodule),
             Cmd(Command::Stash),
             Cmd(Command::Snapshot),
+            Cmd(Command::IgnoreFiles),
             Separator,
             Cmd(Command::ApplyPatch),
             Cmd(Command::PastePatch),
@@ -294,6 +297,7 @@ impl Command {
         Command::AddSubmodule,
         Command::Stash,
         Command::Snapshot,
+        Command::IgnoreFiles,
         Command::ApplyPatch,
         Command::PastePatch,
         Command::OpenExplorer,
@@ -357,6 +361,7 @@ impl Command {
             Command::AddSubmodule => tr!("Ajouter un sous-module…"),
             Command::Stash => "Stash…",
             Command::Snapshot => tr!("Snapshot…"),
+            Command::IgnoreFiles => tr!("Ignorer des fichiers…"),
             Command::ApplyPatch => tr!("Appliquer un patch…"),
             Command::PastePatch => tr!("Coller un patch…"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
@@ -418,6 +423,7 @@ impl Command {
             Command::AddSubmodule => icons::CUBE,
             Command::Stash => icons::TRAY_ARROW_DOWN,
             Command::Snapshot => icons::CAMERA,
+            Command::IgnoreFiles => icons::EYE_SLASH,
             Command::ApplyPatch => icons::FILE_ARROW_DOWN,
             Command::PastePatch => icons::CLIPBOARD_TEXT,
             Command::OpenExplorer => icons::FOLDER_OPEN,
@@ -478,6 +484,7 @@ impl Command {
             | Command::AddSubmodule
             | Command::Stash
             | Command::Snapshot
+            | Command::IgnoreFiles
             | Command::ApplyPatch
             | Command::PastePatch
             | Command::OpenExplorer

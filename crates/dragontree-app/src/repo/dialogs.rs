@@ -41,7 +41,7 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `push_url` est un champ séparé, seulement si le remote a une URL de push distincte ; `RepoSettings` : identité
 /// locale, modèle de message et liens vers les tickets ; `AddSubmodule` : `path` vide reprend le nom du dépôt cloné,
 /// `branch` est facultative ; `EditSubmoduleUrl`, `MoveSubmodule` et `RemoveSubmodule` portent sur le sous-module installé
-/// dans `path` (`old` pour le déplacement).
+/// dans `path` (`old` pour le déplacement) ; `Ignore` : motif, fichier cible et aperçu des fichiers concernés.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -75,6 +75,7 @@ pub enum Dialog {
     EditSubmoduleUrl { path: String, url: String },
     MoveSubmodule { old: String, new: String },
     RemoveSubmodule { path: String },
+    Ignore(Box<super::ignore::IgnoreForm>),
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
     Confirm { title: String, text: String, action: ConfirmAction },
 }
@@ -143,6 +144,7 @@ impl Dialog {
             Dialog::RemoveSubmodule { path } => {
                 (tr!("Supprimer le sous-module « {path} »", path), tr!("Supprimer").into(), true)
             }
+            Dialog::Ignore(_) => (tr!("Ignorer des fichiers").into(), tr!("Ignorer").into(), false),
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
             Dialog::Confirm { title, action: ConfirmAction::CheckoutDetached(_), .. } => {
                 (title.clone(), tr!("Continuer").into(), false)
@@ -208,6 +210,12 @@ impl RepoTab {
                 confirmed = true;
             }
         });
+        if let Dialog::Ignore(form) = &mut dialog
+            && !confirmed
+            && !cancelled
+        {
+            self.request_ignore_preview(shared, form);
+        }
         if confirmed {
             self.execute_dialog(dialog, shared);
         } else if !cancelled && !response.should_close() {
@@ -511,6 +519,7 @@ impl RepoTab {
             Dialog::EditSubmoduleUrl { url, .. } => Self::edit_submodule_url_body(ui, url),
             Dialog::MoveSubmodule { old, new } => self.move_submodule_body(ui, old, new, p),
             Dialog::RemoveSubmodule { path } => Self::remove_submodule_body(ui, path, p),
+            Dialog::Ignore(form) => Self::ignore_body(ui, form, p),
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
@@ -640,6 +649,10 @@ impl RepoTab {
             Dialog::EditSubmoduleUrl { path, url } => self.op_set_submodule_url(shared, path, url),
             Dialog::MoveSubmodule { old, new } => self.op_move_submodule(shared, old, new),
             Dialog::RemoveSubmodule { path } => self.op_remove_submodule(shared, path),
+            Dialog::Ignore(form) => {
+                let target = form.target();
+                self.op_add_ignore(shared, form.pattern, target);
+            }
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
             Dialog::Confirm { action, .. } => match action {
                 ConfirmAction::CheckoutDetached(oid) => self.op_checkout(shared, oid.to_hex()),
