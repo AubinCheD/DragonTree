@@ -132,6 +132,8 @@ pub struct HistoryState {
     pub show_lost: bool,
     /// Commits perdus du dernier journal chargé (atténués et étiquetés « perdu »).
     pub lost: Arc<HashSet<Oid>>,
+    /// Stashs que le dernier journal demandé affiche (relu quand la liste des stashs change).
+    pub stashes_loaded: Vec<Oid>,
 }
 
 impl Default for HistoryState {
@@ -164,6 +166,7 @@ impl Default for HistoryState {
             filter_refs: Vec::new(),
             show_lost: false,
             lost: Arc::new(HashSet::new()),
+            stashes_loaded: Vec::new(),
         }
     }
 }
@@ -427,6 +430,8 @@ impl RepoTab {
         let (generation, id, sender) = (self.gens.log, self.id, shared.jobs.sender());
         let mut options = self.log_options(shared);
         let with_lost = self.shows_lost();
+        let stashes = self.shown_stashes(shared);
+        self.history.stashes_loaded = stashes.clone();
         shared.jobs.spawn("log", move || {
             // Commits perdus : calculés avant le journal, dont leurs extrémités deviennent des révisions de plus.
             // Limite connue : les ancêtres d'un commit perdu peuvent n'être atteints que par des références
@@ -447,7 +452,15 @@ impl RepoTab {
                 }
             }
             let lost = Arc::new(lost);
+            // Les stashs affichés : leurs commits, lus un à un (sans parcourir l'historique de leur base).
+            let stash_commits = match repo.commits_of(&stashes, &cancel) {
+                Ok(commits) => commits,
+                Err(GitError::Cancelled) => return None,
+                Err(_) => Vec::new(),
+            };
             let build = |commits: Vec<Commit>| -> LogData {
+                // Un stash est une ligne attachée à sa base : ni index ni fichiers non suivis (voir `fold_stashes`).
+                let commits = dragontree_git::fold_stashes(commits, &stash_commits);
                 let mut g = GraphBuilder::new();
                 let mut index = HashMap::with_capacity(commits.len());
                 for (i, c) in commits.iter().enumerate() {
@@ -624,6 +637,21 @@ impl RepoTab {
             }
             RepoEvent::Extras(g, stashes, remotes, subs) if g == self.gens.extras => {
                 self.stashes = Arc::new(stashes);
+                // Le stash sélectionné a disparu (pop, suppression) : ses détails n'ont plus d'objet.
+                if let Some((gone, _)) = self.history.external.clone()
+                    && !self.stashes.iter().any(|s| s.oid == gone)
+                {
+                    self.history.external = None;
+                    if self.history.selected == Some(gone) {
+                        self.history.selected = None;
+                        self.history.details = None;
+                        self.history.diff = None;
+                    }
+                }
+                // Un stash créé, appliqué ou supprimé change les lignes du graphe.
+                if self.shown_stashes(shared) != self.history.stashes_loaded {
+                    self.load_log(shared);
+                }
                 self.remotes = Arc::new(remotes);
                 self.submodules = Arc::new(subs);
             }

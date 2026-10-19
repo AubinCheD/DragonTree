@@ -55,6 +55,8 @@ pub struct Settings {
     pub show_tags: bool,
     /// Branches distantes parcourues par le graphe et étiquetées dans l'historique.
     pub show_remote_branches: bool,
+    /// Stashs affichés comme des lignes du graphe (en mode « toutes les branches »).
+    pub show_stashes: bool,
     /// Dépôt (chemin) -> références masquées du graphe : noms complets ou motifs (`refs/heads/x`,
     /// `refs/heads/feature/*`, `refs/remotes/origin/*`).
     pub hidden_refs: BTreeMap<String, Vec<String>>,
@@ -95,6 +97,7 @@ impl Default for Settings {
             topological_order: false,
             show_tags: true,
             show_remote_branches: true,
+            show_stashes: true,
             hidden_refs: BTreeMap::new(),
             repo_list_width: 280.0,
             favorites: Vec::new(),
@@ -347,7 +350,7 @@ mod tests {
         assert_eq!(s.theme, ThemeChoice::Light);
         assert_eq!(s.diff_context, 3);
         // Un ancien fichier sans les réglages d'affichage garde tags et branches distantes visibles.
-        assert!(s.show_tags && s.show_remote_branches);
+        assert!(s.show_tags && s.show_remote_branches && s.show_stashes);
     }
 
     #[test]

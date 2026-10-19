@@ -7,8 +7,8 @@ use dragontree_i18n::tr;
 use crate::diff::{DiffOptions, FileChange, FileDiff, MAX_DIFF_BYTES, parse_name_status_z, parse_unified_diff_bytes};
 use crate::error::GitError;
 use crate::log::{
-    Commit, LogOptions, LogParser, LogScope, LostCommits, RefSelection, log_args, log_stdin, lost_args, lost_stdin,
-    parse_lost,
+    Commit, LOG_FORMAT, LogOptions, LogParser, LogScope, LostCommits, RefSelection, log_args, log_stdin, lost_args,
+    lost_stdin, parse_lost,
 };
 use crate::oid::Oid;
 use crate::refs::{FOR_EACH_REF_FORMAT, RefsSnapshot, parse_refs, read_head};
@@ -188,6 +188,20 @@ impl Repo {
         if let Some(e) = parse_err {
             return Err(e);
         }
+        parser.finish(&mut commits)?;
+        Ok(commits)
+    }
+
+    /// Les commits `oids`, tels quels et dans cet ordre (sans parcourir leur historique) : par exemple les stashs.
+    pub fn commits_of(&self, oids: &[Oid], cancel: &CancelToken) -> Result<Vec<Commit>, GitError> {
+        if oids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let stdin: Vec<u8> = oids.iter().flat_map(|oid| format!("{}\n", oid.to_hex()).into_bytes()).collect();
+        let args = ["log", "-z", "--no-walk=unsorted", &format!("--format={LOG_FORMAT}"), "--stdin", "--"];
+        let out = self.read().args(args).stdin(stdin).cancel(cancel.clone()).run()?;
+        let (mut parser, mut commits) = (LogParser::new(), Vec::new());
+        parser.feed(&out.stdout, &mut commits)?;
         parser.finish(&mut commits)?;
         Ok(commits)
     }

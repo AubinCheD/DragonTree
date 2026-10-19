@@ -599,6 +599,11 @@ impl DragonTreeApp {
                 self.shared.settings_dirty = true;
                 self.reload_logs();
             }
+            Command::ShowStashes => {
+                self.shared.settings.show_stashes = !self.shared.settings.show_stashes;
+                self.shared.settings_dirty = true;
+                self.reload_logs();
+            }
             Command::ToggleRepoList => {
                 self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
                 self.shared.settings_dirty = true;

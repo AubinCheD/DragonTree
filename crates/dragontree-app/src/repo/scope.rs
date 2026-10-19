@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use dragontree_git::{LogOptions, LogOrder, LogScope, RefKind, RefLabel, RefSelection, RefsSnapshot};
+use dragontree_git::{LogOptions, LogOrder, LogScope, Oid, RefKind, RefLabel, RefSelection, RefsSnapshot};
 
 use super::RepoTab;
 use crate::app::Shared;
@@ -60,6 +60,11 @@ pub(super) fn folder_pattern(tree: &str, path: &str) -> String {
 /// `refs/tags/`.
 pub(super) fn display_name(pattern: &str) -> &str {
     ["refs/heads/", "refs/remotes/", "refs/tags/"].iter().find_map(|p| pattern.strip_prefix(p)).unwrap_or(pattern)
+}
+
+/// Libellé d'un stash : `stash@{n}  message` (barre latérale, détails, étiquette du graphe).
+pub(super) fn stash_label(index: usize, message: &str) -> String {
+    format!("stash@{{{index}}}  {message}")
 }
 
 /// Ce qui décide si une étiquette de référence s'affiche : réglages de l'affichage et éléments masqués.
@@ -123,6 +128,19 @@ impl RepoTab {
     /// Les commits perdus du reflog sont ajoutés au graphe : option cochée, en mode « toutes les branches ».
     pub(crate) fn shows_lost(&self) -> bool {
         self.history.show_lost && self.walks_all_refs()
+    }
+
+    /// Stashs candidats au graphe : réglage coché. Un stash n'y apparaît que si son commit de base est affiché par
+    /// la sélection courante (voir `fold_stashes`) : dans tous les modes, jamais d'historique masqué qui revienne.
+    pub(crate) fn shown_stashes(&self, shared: &Shared) -> Vec<Oid> {
+        if shared.settings.show_stashes { self.stashes.iter().map(|s| s.oid).collect() } else { Vec::new() }
+    }
+
+    /// Sélection d'un commit du graphe : si c'est un stash, il se sélectionne comme dans la barre latérale (détails
+    /// et diff par rapport à sa base, libellé « stash@{n} »).
+    pub(super) fn stash_selection(&self, oid: Oid) -> Option<(Oid, String)> {
+        let entry = self.stashes.iter().find(|s| s.oid == oid)?;
+        Some((oid, stash_label(entry.index, &entry.message)))
     }
 
     /// Active ou désactive l'affichage des commits perdus ; relit le journal.
@@ -300,6 +318,45 @@ mod tests {
         tab.set_current_branch_only(&shared, true);
         assert!(!tab.shows_lost(), "pas avec la branche courante seulement");
         assert!(tab.history.show_lost, "le choix est gardé pour le retour à toutes les branches");
+    }
+
+    #[test]
+    fn stashes_are_never_extra_revisions_and_follow_the_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut tab, mut shared) = tab_without_git(dir.path());
+        let oid = Oid::from_hex(&"c".repeat(40)).unwrap();
+        tab.stashes =
+            std::sync::Arc::new(vec![dragontree_git::StashEntry { index: 0, oid, message: "x".into(), time: 0 }]);
+        assert_eq!(tab.shown_stashes(&shared), [oid]);
+        // Un stash ne devient jamais une révision parcourue : elle ramènerait l'historique de sa base, masqué ou non.
+        shared.settings.toggle_hidden_ref(&tab.path, "refs/heads/x");
+        let sel = selection(&tab, &shared);
+        assert_eq!((sel.exclude, sel.extra), (vec!["refs/heads/x".to_string()], Vec::new()));
+        // Candidats dans tous les modes : `fold_stashes` ne garde que ceux dont la base est affichée.
+        tab.toggle_filter_ref(&shared, "refs/heads/a");
+        assert_eq!(tab.shown_stashes(&shared), [oid]);
+        tab.clear_filter_refs(&shared);
+        tab.set_current_branch_only(&shared, true);
+        assert_eq!(tab.shown_stashes(&shared), [oid]);
+        tab.set_current_branch_only(&shared, false);
+        shared.settings.show_stashes = false;
+        assert!(tab.shown_stashes(&shared).is_empty(), "réglage décoché");
+    }
+
+    #[test]
+    fn a_stash_is_labelled_and_selected_like_in_the_sidebar() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut tab, _shared) = tab_without_git(dir.path());
+        let oid = Oid::from_hex(&"a".repeat(40)).unwrap();
+        tab.stashes = std::sync::Arc::new(vec![dragontree_git::StashEntry {
+            index: 2,
+            oid,
+            message: "On main: x".into(),
+            time: 0,
+        }]);
+        assert_eq!(stash_label(2, "On main: x"), "stash@{2}  On main: x");
+        assert_eq!(tab.stash_selection(oid), Some((oid, "stash@{2}  On main: x".to_string())));
+        assert_eq!(tab.stash_selection(Oid::from_hex(&"b".repeat(40)).unwrap()), None);
     }
 
     #[test]

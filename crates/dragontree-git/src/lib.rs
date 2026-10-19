@@ -35,5 +35,5 @@ pub use progress::{Progress, parse_progress};
 pub use refs::{HeadState, LocalBranch, RefKind, RefLabel, RefsSnapshot, RemoteBranch, TagRef};
 pub use repo::{CommitInfo, OpState, Remote, Repo, Submodule};
 pub use runner::{CancelToken, Git, GitCommand, Output};
-pub use stash::StashEntry;
+pub use stash::{StashEntry, fold_stashes};
 pub use status::{ConflictKind, FileState, StatusEntry, StatusSnapshot};

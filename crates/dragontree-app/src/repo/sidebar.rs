@@ -201,7 +201,7 @@ impl RepoTab {
             let stashes = self.stashes.clone();
             if self.section(ui, "stashes", &format!("{} Stashes", icons::STACK), stashes.len(), p) {
                 for s in stashes.iter() {
-                    let label = format!("stash@{{{}}}  {}", s.index, s.message);
+                    let label = super::scope::stash_label(s.index, &s.message);
                     let selected = self.history.external.as_ref().is_some_and(|(o, _)| *o == s.oid);
                     let (rect, resp) = widgets::row_response(ui, ("stash", s.oid), ROW_H, selected, Sense::click());
                     widgets::a11y(&resp, &label, true);
@@ -211,24 +211,7 @@ impl RepoTab {
                         self.select_external(shared, s.oid, label.clone());
                     }
                     let oid = s.oid;
-                    resp.context_menu(|ui| {
-                        if ui.button(format!("{} {}", icons::TRAY_ARROW_UP, tr!("Appliquer"))).clicked() {
-                            self.op_stash(shared, oid, label.clone(), StashOp::Apply);
-                            ui.close();
-                        }
-                        if ui
-                            .button(format!("{} {}", icons::TRAY_ARROW_UP, tr!("Appliquer et supprimer (pop)")))
-                            .clicked()
-                        {
-                            self.op_stash(shared, oid, label.clone(), StashOp::Pop);
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer…"))).clicked() {
-                            self.dialog = Some(Dialog::DropStash { oid, label: label.clone() });
-                            ui.close();
-                        }
-                    });
+                    resp.context_menu(|ui| self.stash_menu(ui, shared, oid, &label));
                 }
             }
 
@@ -804,6 +787,23 @@ impl RepoTab {
     }
 
     /// Commit menu partagé (historique, branches) : opérations sur un commit précis.
+    /// Menu contextuel d'un stash (barre latérale et lignes de stash du graphe) : appliquer, pop, supprimer.
+    pub(super) fn stash_menu(&mut self, ui: &mut Ui, shared: &mut Shared, oid: Oid, label: &str) {
+        if ui.button(format!("{} {}", icons::TRAY_ARROW_UP, tr!("Appliquer"))).clicked() {
+            self.op_stash(shared, oid, label.to_string(), StashOp::Apply);
+            ui.close();
+        }
+        if ui.button(format!("{} {}", icons::TRAY_ARROW_UP, tr!("Appliquer et supprimer (pop)"))).clicked() {
+            self.op_stash(shared, oid, label.to_string(), StashOp::Pop);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer…"))).clicked() {
+            self.dialog = Some(Dialog::DropStash { oid, label: label.to_string() });
+            ui.close();
+        }
+    }
+
     pub(super) fn commit_menu(&mut self, ui: &mut Ui, shared: &mut Shared, oid: Oid, summary: &str) {
         let short = oid.short();
         let current = self.refs.as_ref().and_then(|r| r.current_branch().map(str::to_string));

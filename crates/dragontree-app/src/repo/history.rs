@@ -226,7 +226,7 @@ impl RepoTab {
                 let idx = filtered.as_ref().map_or(t, |f| f[t]);
                 let oid = commits[idx].id;
                 self.history.selected = Some(oid);
-                self.history.external = None;
+                self.history.external = self.stash_selection(oid);
                 self.load_details(shared, oid);
                 self.ensure_row_visible(t);
             }
@@ -275,6 +275,13 @@ impl RepoTab {
                 let ls: Vec<&RefLabel> =
                     labels.get(&c.id).map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect()).unwrap_or_default();
                 let is_lost = lost.contains(&c.id);
+                let stash = self.stashes.iter().find(|s| s.oid == c.id);
+                if let Some(s) = stash {
+                    let text = format!("{} stash@{{{}}}", icons::STACK, s.index);
+                    let family = egui::FontFamily::Proportional;
+                    x += paint_badge(ui, &painter, egui::pos2(x, rect.top() + 3.5), text, p.badge_tag, family, false)
+                        + 4.0;
+                }
                 if is_lost {
                     x += paint_lost_badge(ui, &painter, egui::pos2(x, rect.top() + 3.5), p) + 4.0;
                 }
@@ -349,7 +356,11 @@ impl RepoTab {
                     clicked = Some(r);
                 }
                 let (oid, summary) = (c.id, c.summary.to_string());
-                resp.context_menu(|ui| self.commit_menu(ui, shared, oid, &summary));
+                let stash_menu = stash.map(|s| super::scope::stash_label(s.index, &s.message));
+                resp.context_menu(|ui| match &stash_menu {
+                    Some(label) => self.stash_menu(ui, shared, oid, label),
+                    None => self.commit_menu(ui, shared, oid, &summary),
+                });
             }
             if show_graph {
                 let last = range.end.saturating_sub(1);
@@ -364,7 +375,7 @@ impl RepoTab {
             let oid = commits[idx].id;
             if self.history.selected != Some(oid) {
                 self.history.selected = Some(oid);
-                self.history.external = None;
+                self.history.external = self.stash_selection(oid);
                 self.load_details(shared, oid);
             }
         }

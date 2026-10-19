@@ -51,6 +51,8 @@ pub enum Command {
     ShowTags,
     /// Affiche (ou masque) les branches distantes dans le graphe.
     ShowRemoteBranches,
+    /// Affiche (ou masque) les stashs dans le graphe.
+    ShowStashes,
     /// Réaffiche toutes les branches, dossiers et remotes masqués du graphe du dépôt.
     ShowHiddenRefs,
     /// Ajoute au graphe les commits que seul le reflog atteint (propre à l'onglet).
@@ -124,6 +126,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::ShowTags),
             Cmd(Command::ShowRemoteBranches),
+            Cmd(Command::ShowStashes),
             Cmd(Command::ShowHiddenRefs),
             Cmd(Command::ShowLostCommits),
             Separator,
@@ -218,6 +221,7 @@ impl Command {
         Command::SortCommits(true),
         Command::ShowTags,
         Command::ShowRemoteBranches,
+        Command::ShowStashes,
         Command::ShowHiddenRefs,
         Command::ShowLostCommits,
         Command::ZoomIn,
@@ -266,6 +270,7 @@ impl Command {
             Command::SortCommits(true) => tr!("Topologique"),
             Command::ShowTags => tr!("Afficher les tags"),
             Command::ShowRemoteBranches => tr!("Afficher les branches distantes"),
+            Command::ShowStashes => tr!("Afficher les stashs"),
             Command::ShowHiddenRefs => tr!("Réafficher toutes les branches masquées"),
             Command::ShowLostCommits => tr!("Commits perdus"),
             Command::ZoomIn => tr!("Zoom avant"),
@@ -314,6 +319,7 @@ impl Command {
             Command::SortCommits(_) => icons::SORT_ASCENDING,
             Command::ShowTags => icons::TAG,
             Command::ShowRemoteBranches => icons::CLOUD,
+            Command::ShowStashes => icons::STACK,
             Command::ShowHiddenRefs => icons::EYE,
             Command::ShowLostCommits => icons::GHOST,
             Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
@@ -354,6 +360,7 @@ impl Command {
             | Command::SortCommits(_)
             | Command::ShowTags
             | Command::ShowRemoteBranches
+            | Command::ShowStashes
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset
@@ -453,6 +460,7 @@ impl Command {
             Command::ShowLostCommits => Some(cx.repo.is_some_and(|tab| tab.history.show_lost)),
             Command::ShowTags => Some(cx.settings.show_tags),
             Command::ShowRemoteBranches => Some(cx.settings.show_remote_branches),
+            Command::ShowStashes => Some(cx.settings.show_stashes),
             Command::Language(lang) => Some(cx.settings.language == lang),
             Command::Theme(choice) => Some(cx.settings.theme == choice),
             _ => None,

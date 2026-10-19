@@ -30,6 +30,7 @@
   "Afficher l'état de chaque dépôt (modifié, en avance, en retard)": "Show the state of each repository (modified, ahead, behind)",
   "Afficher la liste des dépôts (Ctrl+B)": "Show the repository list (Ctrl+B)",
   "Afficher les branches distantes": "Show remote branches",
+  "Afficher les stashs": "Show stashes",
   "Afficher les tags": "Show tags",
   "Ajout du remote": "Adding remote",
   "ajouté": "added",
