@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use dragontree_i18n::tr;
@@ -49,7 +49,8 @@ pub struct RefSelection {
     /// Si non vide : seulement ces références (nom complet, ou motif contenant `*`, `?` ou `[`), à la place de
     /// toutes les branches, branches distantes et tags.
     pub only: Vec<String>,
-    /// Révisions supplémentaires passées telles quelles (commits du reflog, stashs…).
+    /// Révisions supplémentaires (extrémités des commits du reflog…), transmises à git par l'entrée standard
+    /// (`--stdin`, voir [`log_stdin`]) : leur nombre n'est pas borné et la ligne de commande Windows l'est.
     pub extra: Vec<String>,
 }
 
@@ -120,7 +121,6 @@ pub fn selection_args(sel: &RefSelection) -> Vec<String> {
     if sel.head {
         args.push("HEAD".into());
     }
-    args.extend(sel.extra.iter().cloned());
     args
 }
 
@@ -166,9 +166,22 @@ pub fn log_args(opts: &LogOptions) -> Vec<String> {
         LogScope::Revs(revs) => args.extend(revs.iter().cloned()),
         LogScope::Refs(selection) => args.extend(selection_args(selection)),
     }
+    if log_stdin(opts).is_some() {
+        args.push("--stdin".into());
+    }
     args.push("--".into());
     args.extend(opts.paths.iter().cloned());
     args
+}
+
+/// Révisions supplémentaires du sélecteur, une par ligne, à envoyer sur l'entrée standard de `git log --stdin`
+/// (`None` : rien à envoyer, `--stdin` n'est alors pas demandé).
+pub fn log_stdin(opts: &LogOptions) -> Option<Vec<u8>> {
+    let LogScope::Refs(selection) = &opts.scope else { return None };
+    if selection.extra.is_empty() {
+        return None;
+    }
+    Some(selection.extra.iter().flat_map(|rev| [rev.as_bytes(), b"\n"]).flatten().copied().collect())
 }
 
 /// Parseur incrémental de la sortie de `git log -z --format=LOG_FORMAT`.
@@ -250,6 +263,46 @@ impl LogParser {
             summary: f[7].trim_end_matches('\n').into(),
         })
     }
+}
+
+/// Commits atteignables seulement par le reflog (ex. après un `reset --hard` ou un `commit --amend`) : ni
+/// branche, ni branche distante, ni tag, ni HEAD ne les contient.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LostCommits {
+    /// Tous les commits perdus.
+    pub all: HashSet<Oid>,
+    /// Les extrémités : commits perdus qui n'ont aucun descendant perdu. Les passer à `git log` suffit à tout
+    /// parcourir.
+    pub tips: Vec<Oid>,
+}
+
+/// Arguments de `git rev-list` listant les commits perdus : tout ce que les reflogs atteignent, sauf ce qu'une
+/// référence atteint. `--all` couvre branches, tags, remotes, `refs/stash`, `refs/notes`, `refs/original`, et le
+/// HEAD de chaque worktree. Les commits des stashs plus anciens que `refs/stash` ne sont pas atteints par elle :
+/// leurs oid sont exclus par [`lost_stdin`].
+pub fn lost_args() -> Vec<String> {
+    ["rev-list", "--parents", "--reflog", "--not", "--all", "--stdin"].map(String::from).to_vec()
+}
+
+/// Entrée standard de [`lost_args`] : `^oid` pour chaque stash (une ligne lue sur stdin n'hérite pas de `--not`).
+pub fn lost_stdin(stashes: &[Oid]) -> Vec<u8> {
+    stashes.iter().flat_map(|oid| format!("^{}\n", oid.to_hex()).into_bytes()).collect()
+}
+
+/// Analyse la sortie de `git rev-list --parents` (« oid parent… » par ligne).
+pub fn parse_lost(out: &str) -> LostCommits {
+    let rows: Vec<(Oid, Vec<Oid>)> = out
+        .lines()
+        .filter_map(|line| {
+            let mut ids = line.split_whitespace().map(Oid::from_hex);
+            let id = ids.next()??;
+            Some((id, ids.flatten().collect()))
+        })
+        .collect();
+    let all: HashSet<Oid> = rows.iter().map(|(id, _)| *id).collect();
+    let parents: HashSet<Oid> = rows.iter().flat_map(|(_, p)| p.iter().copied()).collect();
+    let tips = rows.iter().map(|(id, _)| *id).filter(|id| !parents.contains(id)).collect();
+    LostCommits { all, tips }
 }
 
 fn truncate(s: &str, max: usize) -> &str {
@@ -439,9 +492,37 @@ mod tests {
     }
 
     #[test]
-    fn extra_revisions_come_last() {
-        let args = tail(RefSelection { extra: strings(&["abc123"]), ..RefSelection::default() });
-        assert_eq!(args.last().unwrap(), "abc123");
+    fn extra_revisions_go_through_stdin_not_the_command_line() {
+        let sel = RefSelection { extra: strings(&["abc123", "def456"]), ..RefSelection::default() };
+        let opts = LogOptions { scope: LogScope::Refs(sel), ..LogOptions::default() };
+        let args = log_args(&opts);
+        assert!(args.contains(&"--stdin".to_string()));
+        assert!(!args.iter().any(|a| a.starts_with("abc") || a.starts_with("def")), "{args:?}");
+        assert_eq!(log_stdin(&opts).unwrap(), b"abc123\ndef456\n");
+        // Sans révision supplémentaire : ni --stdin ni entrée.
+        assert!(!log_args(&LogOptions::default()).contains(&"--stdin".to_string()));
+        assert_eq!(log_stdin(&LogOptions::default()), None);
+    }
+
+    #[test]
+    fn lost_args_walk_the_reflog_but_not_any_reference_or_stash() {
+        let args = lost_args();
+        assert_eq!(args[..3], ["rev-list", "--parents", "--reflog"]);
+        let not = args.iter().position(|a| a == "--not").unwrap();
+        assert_eq!(args[not + 1..], ["--all", "--stdin"]);
+        assert_eq!(lost_stdin(&[Oid::from_hex(A).unwrap()]), format!("^{A}\n").into_bytes());
+        assert!(lost_stdin(&[]).is_empty());
+    }
+
+    #[test]
+    fn lost_parsing_keeps_only_the_tips_of_the_lost_chain() {
+        // C et son parent B sont perdus ; A, atteint par une branche, n'est pas listé.
+        let out = format!("{C} {B}\n{B} {A}\n");
+        let lost = parse_lost(&out);
+        assert_eq!(lost.tips, [Oid::from_hex(C).unwrap()]);
+        assert_eq!(lost.all.len(), 2);
+        assert!(lost.all.contains(&Oid::from_hex(B).unwrap()));
+        assert_eq!(parse_lost(""), LostCommits::default());
     }
 
     #[test]

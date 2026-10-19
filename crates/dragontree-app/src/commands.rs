@@ -53,6 +53,8 @@ pub enum Command {
     ShowRemoteBranches,
     /// Réaffiche toutes les branches, dossiers et remotes masqués du graphe du dépôt.
     ShowHiddenRefs,
+    /// Ajoute au graphe les commits que seul le reflog atteint (propre à l'onglet).
+    ShowLostCommits,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -123,6 +125,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::ShowTags),
             Cmd(Command::ShowRemoteBranches),
             Cmd(Command::ShowHiddenRefs),
+            Cmd(Command::ShowLostCommits),
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
@@ -216,6 +219,7 @@ impl Command {
         Command::ShowTags,
         Command::ShowRemoteBranches,
         Command::ShowHiddenRefs,
+        Command::ShowLostCommits,
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -263,6 +267,7 @@ impl Command {
             Command::ShowTags => tr!("Afficher les tags"),
             Command::ShowRemoteBranches => tr!("Afficher les branches distantes"),
             Command::ShowHiddenRefs => tr!("Réafficher toutes les branches masquées"),
+            Command::ShowLostCommits => tr!("Commits perdus"),
             Command::ZoomIn => tr!("Zoom avant"),
             Command::ZoomOut => tr!("Zoom arrière"),
             Command::ZoomReset => tr!("Taille par défaut"),
@@ -310,6 +315,7 @@ impl Command {
             Command::ShowTags => icons::TAG,
             Command::ShowRemoteBranches => icons::CLOUD,
             Command::ShowHiddenRefs => icons::EYE,
+            Command::ShowLostCommits => icons::GHOST,
             Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
             Command::ZoomOut => icons::MAGNIFYING_GLASS_MINUS,
             Command::ZoomReset => icons::MAGNIFYING_GLASS,
@@ -359,6 +365,7 @@ impl Command {
             | Command::CurrentBranchOnly
             | Command::RevealHead
             | Command::ShowHiddenRefs
+            | Command::ShowLostCommits
             | Command::Refresh
             | Command::Fetch
             | Command::Pull
@@ -386,6 +393,8 @@ impl Command {
             Command::ToggleRepoList => ctrl(Key::B),
             Command::CurrentBranchOnly => ctrl_shift(Key::A),
             Command::ShowLog => ctrl_shift(Key::L),
+            // Maj+. : point sur QWERTY, Maj+; sur AZERTY ; egui reçoit « . » dans les deux cas.
+            Command::ShowLostCommits => ctrl_shift(Key::Period),
             Command::RevealHead => ctrl(Key::Num0),
             Command::ToggleDetailsPanel => ctrl_shift(Key::D),
             Command::ZoomIn => ctrl(Key::Equals),
@@ -441,6 +450,7 @@ impl Command {
             Command::ToggleRepoList => Some(cx.settings.repo_list_visible),
             Command::ToggleDetailsPanel => Some(cx.settings.details_panel_visible),
             Command::SortCommits(topological) => Some(cx.settings.topological_order == topological),
+            Command::ShowLostCommits => Some(cx.repo.is_some_and(|tab| tab.history.show_lost)),
             Command::ShowTags => Some(cx.settings.show_tags),
             Command::ShowRemoteBranches => Some(cx.settings.show_remote_branches),
             Command::Language(lang) => Some(cx.settings.language == lang),
@@ -562,6 +572,7 @@ mod tests {
         assert_eq!(Command::NewTab.shortcut_text().as_deref(), Some("Ctrl+T"));
         assert_eq!(Command::Settings.shortcut_text().as_deref(), Some("Ctrl+,"));
         assert_eq!(Command::Refresh.shortcut_text().as_deref(), Some("F5"));
+        assert_eq!(Command::ShowLostCommits.shortcut_text().as_deref(), Some("Ctrl+Maj+."));
         assert_eq!(Command::InitRepo.shortcut_text(), None);
     }
 }

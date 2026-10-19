@@ -113,6 +113,24 @@ impl RepoTab {
         LogOptions { scope, order, ..LogOptions::default() }
     }
 
+    /// Le graphe parcourt toutes les branches (ni « branche courante seulement », ni filtre sur des branches
+    /// choisies). C'est le seul mode où s'ajoutent les commits perdus et les stashs : dans les autres, l'utilisateur
+    /// a restreint la vue à des branches, et ces commits ramèneraient des historiques qu'il n'a pas demandés.
+    pub(crate) fn walks_all_refs(&self) -> bool {
+        !self.history.current_branch_only && self.history.filter_refs.is_empty()
+    }
+
+    /// Les commits perdus du reflog sont ajoutés au graphe : option cochée, en mode « toutes les branches ».
+    pub(crate) fn shows_lost(&self) -> bool {
+        self.history.show_lost && self.walks_all_refs()
+    }
+
+    /// Active ou désactive l'affichage des commits perdus ; relit le journal.
+    pub(super) fn set_show_lost(&mut self, shared: &Shared, on: bool) {
+        self.history.show_lost = on;
+        self.load_log(shared);
+    }
+
     /// Active ou désactive « branche courante seulement » ; l'activer retire le filtre sur des branches choisies
     /// (les deux ne se combinent pas) ; relit le journal.
     pub(super) fn set_current_branch_only(&mut self, shared: &Shared, on: bool) {
@@ -267,6 +285,21 @@ mod tests {
         assert_eq!(tab.history.filter_refs, ["refs/heads/a"]);
         tab.clear_filter_refs(&shared);
         assert!(tab.history.filter_refs.is_empty());
+    }
+
+    #[test]
+    fn lost_commits_only_join_the_graph_of_all_branches() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut tab, shared) = tab_without_git(dir.path());
+        assert!(!tab.shows_lost(), "désactivé par défaut");
+        tab.history.show_lost = true;
+        assert!(tab.shows_lost());
+        tab.toggle_filter_ref(&shared, "refs/heads/a");
+        assert!(!tab.shows_lost(), "pas avec un filtre sur des branches");
+        tab.clear_filter_refs(&shared);
+        tab.set_current_branch_only(&shared, true);
+        assert!(!tab.shows_lost(), "pas avec la branche courante seulement");
+        assert!(tab.history.show_lost, "le choix est gardé pour le retour à toutes les branches");
     }
 
     #[test]

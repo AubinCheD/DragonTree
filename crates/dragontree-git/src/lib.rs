@@ -26,7 +26,7 @@ pub mod status;
 pub use diff::{ChangeKind, DiffLine, DiffOptions, FileChange, FileDiff, Hunk, LineKind};
 pub use error::GitError;
 pub use graph::{Edge, GraphBuilder, GraphLayout, GraphRow};
-pub use log::{Commit, LogOptions, LogOrder, LogParser, LogScope, RefSelection};
+pub use log::{Commit, LogOptions, LogOrder, LogParser, LogScope, LostCommits, RefSelection};
 pub use net::{NetOptions, clone_repo, init_repo, trust_directory};
 pub use oid::Oid;
 pub use ops::{MergeMode, ResetMode};

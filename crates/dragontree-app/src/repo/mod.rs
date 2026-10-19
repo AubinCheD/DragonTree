@@ -17,7 +17,7 @@ mod sidebar;
 mod toolbar;
 mod watcher;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
-    CancelToken, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions, Oid, OpState,
-    Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
+    CancelToken, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions, LogScope, Oid,
+    OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
@@ -127,6 +127,11 @@ pub struct HistoryState {
     /// `refs/heads/feature/*`, `refs/remotes/origin/*`, `refs/tags/v1`) ; vide : pas de filtre. Propre à l'onglet
     /// et à la session ; exclusif avec `current_branch_only`.
     pub filter_refs: Vec<String>,
+    /// Afficher aussi les commits que seul le reflog atteint (« perdus ») ; propre à l'onglet et à la session.
+    /// Sans effet hors de « toutes les branches » (voir `RepoTab::log_options`).
+    pub show_lost: bool,
+    /// Commits perdus du dernier journal chargé (atténués et étiquetés « perdu »).
+    pub lost: Arc<HashSet<Oid>>,
 }
 
 impl Default for HistoryState {
@@ -157,6 +162,8 @@ impl Default for HistoryState {
             viewport_height: 400.0,
             current_branch_only: false,
             filter_refs: Vec::new(),
+            show_lost: false,
+            lost: Arc::new(HashSet::new()),
         }
     }
 }
@@ -237,6 +244,10 @@ pub struct LogData {
     pub commits: Arc<Vec<Commit>>,
     pub graph: Arc<GraphLayout>,
     pub index: Arc<HashMap<Oid, usize>>,
+    /// Commits perdus (reflog) parmi ceux du journal.
+    pub lost: Arc<HashSet<Oid>>,
+    /// Les commits perdus n'ont pas pu être lus (le journal est affiché sans eux).
+    pub lost_error: Option<GitError>,
 }
 
 pub struct RepoTab {
@@ -414,8 +425,28 @@ impl RepoTab {
         self.gens.log += 1;
         self.history.loading = true;
         let (generation, id, sender) = (self.gens.log, self.id, shared.jobs.sender());
-        let options = self.log_options(shared);
+        let mut options = self.log_options(shared);
+        let with_lost = self.shows_lost();
         shared.jobs.spawn("log", move || {
+            // Commits perdus : calculés avant le journal, dont leurs extrémités deviennent des révisions de plus.
+            // Limite connue : les ancêtres d'un commit perdu peuvent n'être atteints que par des références
+            // masquées (V4, V5) ; ils reviennent alors dans le graphe. L'option est explicite, on l'accepte.
+            let mut lost = HashSet::new();
+            let mut lost_error = None;
+            if with_lost {
+                match repo.lost_commits(&cancel) {
+                    Ok(found) => {
+                        if let LogScope::Refs(selection) = &mut options.scope {
+                            selection.extra.extend(found.tips.iter().map(Oid::to_hex));
+                        }
+                        lost = found.all;
+                    }
+                    Err(GitError::Cancelled) => return None,
+                    // Sans eux, le graphe reste utilisable : l'erreur est signalée avec le journal.
+                    Err(e) => lost_error = Some(e),
+                }
+            }
+            let lost = Arc::new(lost);
             let build = |commits: Vec<Commit>| -> LogData {
                 let mut g = GraphBuilder::new();
                 let mut index = HashMap::with_capacity(commits.len());
@@ -423,7 +454,13 @@ impl RepoTab {
                     g.push(c.id, &c.parents);
                     index.insert(c.id, i);
                 }
-                LogData { commits: Arc::new(commits), graph: Arc::new(g.finish()), index: Arc::new(index) }
+                LogData {
+                    commits: Arc::new(commits),
+                    graph: Arc::new(g.finish()),
+                    index: Arc::new(index),
+                    lost: lost.clone(),
+                    lost_error: lost_error.clone(),
+                }
             };
             let first = LogOptions { max_count: Some(FIRST_BATCH), ..options.clone() };
             let commits = match repo.log(&first, &cancel) {
@@ -567,6 +604,10 @@ impl RepoTab {
                         self.history.commits = data.commits;
                         self.history.graph = data.graph;
                         self.history.index = data.index;
+                        self.history.lost = data.lost;
+                        if complete && let Some(e) = data.lost_error {
+                            shared.toast(Toast::error(tr!("Lecture des commits perdus impossible"), e.to_string()));
+                        }
                         self.history.error = None;
                         self.history.complete = complete;
                         self.history.filter_applied.clear();

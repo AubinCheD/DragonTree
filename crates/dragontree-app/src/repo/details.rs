@@ -224,9 +224,16 @@ impl RepoTab {
                 .and_then(|r| r.labels.get(&info.id))
                 .map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect())
                 .unwrap_or_default();
-            if !labels.is_empty() {
+            let is_lost = self.history.lost.contains(&info.id);
+            if !labels.is_empty() || is_lost {
                 ui.label(RichText::new(tr!("Références")).color(p.weak));
                 ui.horizontal_wrapped(|ui| {
+                    if is_lost {
+                        ui.label(RichText::new(tr!("perdu")).size(12.0).background_color(p.hover).color(p.weak))
+                            .on_hover_text(tr!(
+                                "Aucune branche, aucun tag ni HEAD n'atteint ce commit : seul le reflog le garde. Créez une branche ou un tag ici pour le conserver."
+                            ));
+                    }
                     for l in labels {
                         ui.label(
                             RichText::new(&l.name).size(12.0).background_color(p.badge_local.0).color(p.badge_local.1),

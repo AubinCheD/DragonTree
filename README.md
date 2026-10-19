@@ -89,6 +89,7 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Ctrl+Maj+F / Ctrl+Maj+U / Ctrl+Maj+P | Fetch / Pull… / Push… |
 | Ctrl+Maj+B / Ctrl+Maj+H | Nouvelle branche… / Stash… |
 | Ctrl+Maj+A | Historique : branche courante seulement (bascule) |
+| Ctrl+Maj+. | Historique : afficher les commits perdus du reflog (bascule, par onglet) |
 | Ctrl+B | Afficher/masquer la liste des dépôts |
 | Ctrl+0 | Historique : révéler HEAD (le sélectionner) |
 | Ctrl+Maj+D | Afficher/masquer le panneau de détails du commit |
@@ -162,5 +163,5 @@ des fichiers `tests/live*.rs`.
 
 - **À venir** : vue centralisée des pull requests de tous les comptes (l'architecture des forges est prête).
 - Non gérés pour l'instant : Git LFS (au-delà de ce que fait git lui-même), git-flow, worktrees (listés mais
-  pas gérés), reflog, commandes personnalisées, icône intégrée à l'exécutable.
+  pas gérés), commandes personnalisées, icône intégrée à l'exécutable.
 - Dépôts SHA-256 non pris en charge.

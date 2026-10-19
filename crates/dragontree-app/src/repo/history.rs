@@ -236,6 +236,7 @@ impl RepoTab {
         let head_row = head_oid.and_then(|o| self.history.index.get(&o).copied());
         let labels = self.refs.as_ref().map(|r| r.labels.clone()).unwrap_or_default();
         let visibility = LabelVisibility::of(shared, &self.path);
+        let lost = self.history.lost.clone();
         let now = widgets::now_ts();
 
         let mut area = egui::ScrollArea::vertical().id_salt(("history-rows", self.id)).auto_shrink([false, false]);
@@ -273,6 +274,10 @@ impl RepoTab {
                 let mut x = cols.desc.left() + 6.0;
                 let ls: Vec<&RefLabel> =
                     labels.get(&c.id).map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect()).unwrap_or_default();
+                let is_lost = lost.contains(&c.id);
+                if is_lost {
+                    x += paint_lost_badge(ui, &painter, egui::pos2(x, rect.top() + 3.5), p) + 4.0;
+                }
                 for (n, l) in ls.iter().enumerate() {
                     if n >= 4 {
                         let more = format!("+{}", ls.len() - 4);
@@ -296,7 +301,13 @@ impl RepoTab {
                             13.0,
                             if is_head { bold_family() } else { egui::FontFamily::Proportional },
                         ),
-                        color: if selected { p.selection_text } else { p.text },
+                        color: if selected {
+                            p.selection_text
+                        } else if is_lost {
+                            p.weak
+                        } else {
+                            p.text
+                        },
                         ..Default::default()
                     },
                 );
@@ -309,7 +320,8 @@ impl RepoTab {
                 let galley = painter.layout_job(job);
                 painter.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, p.text);
 
-                let weak = if selected { p.selection_text } else { p.weak };
+                let weak =
+                    if selected { p.selection_text } else { p.weak.gamma_multiply(if is_lost { 0.7 } else { 1.0 }) };
                 let cell = |ui: &Ui, col: Rect, text: &str, font: FontId, color| {
                     let painter = ui.painter_at(col.intersect(rect));
                     let mut job = egui::text::LayoutJob::single_section(
@@ -391,6 +403,33 @@ impl Columns {
     }
 }
 
+/// Étiquette « perdu » d'un commit que seul le reflog atteint ; renvoie sa largeur.
+fn paint_lost_badge(ui: &Ui, painter: &egui::Painter, pos: egui::Pos2, p: &Palette) -> f32 {
+    let text = format!("{} {}", icons::GHOST, tr!("perdu"));
+    paint_badge(ui, painter, pos, text, (p.hover, p.weak), egui::FontFamily::Proportional, false)
+}
+
+/// Pastille de texte (fond, texte) ; `outline` la cerne ; renvoie sa largeur.
+fn paint_badge(
+    ui: &Ui,
+    painter: &egui::Painter,
+    pos: egui::Pos2,
+    text: String,
+    (bg, fg): (egui::Color32, egui::Color32),
+    family: egui::FontFamily,
+    outline: bool,
+) -> f32 {
+    let galley = ui.painter().layout_no_wrap(text, FontId::new(11.5, family), fg);
+    let w = galley.size().x + 10.0;
+    let rect = Rect::from_min_size(pos, egui::vec2(w, 17.0));
+    painter.rect_filled(rect, 4.0, bg);
+    if outline {
+        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, fg), egui::StrokeKind::Inside);
+    }
+    painter.galley(egui::pos2(rect.left() + 5.0, rect.center().y - galley.size().y / 2.0), galley, fg);
+    w
+}
+
 /// Étiquette de référence (branche, remote, tag, HEAD) ; renvoie sa largeur.
 fn paint_label(ui: &Ui, painter: &egui::Painter, pos: egui::Pos2, l: &RefLabel, p: &Palette) -> f32 {
     let ((bg, fg), icon) = match l.kind {
@@ -401,13 +440,5 @@ fn paint_label(ui: &Ui, painter: &egui::Painter, pos: egui::Pos2, l: &RefLabel, 
     };
     let text = format!("{icon} {}", widgets::ellipsize_middle(&l.name, 34));
     let family = if l.is_head { bold_family() } else { egui::FontFamily::Proportional };
-    let galley = ui.painter().layout_no_wrap(text, FontId::new(11.5, family), fg);
-    let w = galley.size().x + 10.0;
-    let rect = Rect::from_min_size(pos, egui::vec2(w, 17.0));
-    painter.rect_filled(rect, 4.0, bg);
-    if l.is_head {
-        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, fg), egui::StrokeKind::Inside);
-    }
-    painter.galley(egui::pos2(rect.left() + 5.0, rect.center().y - galley.size().y / 2.0), galley, fg);
-    w
+    paint_badge(ui, painter, pos, text, (bg, fg), family, l.is_head)
 }

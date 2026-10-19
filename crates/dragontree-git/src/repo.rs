@@ -6,7 +6,10 @@ use dragontree_i18n::tr;
 
 use crate::diff::{DiffOptions, FileChange, FileDiff, MAX_DIFF_BYTES, parse_name_status_z, parse_unified_diff_bytes};
 use crate::error::GitError;
-use crate::log::{Commit, LogOptions, LogParser, LogScope, RefSelection, log_args};
+use crate::log::{
+    Commit, LogOptions, LogParser, LogScope, LostCommits, RefSelection, log_args, log_stdin, lost_args, lost_stdin,
+    parse_lost,
+};
 use crate::oid::Oid;
 use crate::refs::{FOR_EACH_REF_FORMAT, RefsSnapshot, parse_refs, read_head};
 use crate::runner::{CancelToken, Git, GitCommand};
@@ -168,6 +171,10 @@ impl Repo {
         let mut commits = Vec::new();
         let mut parse_err = None;
         let cmd = if opts.paths.is_empty() { self.read() } else { self.read_paths() };
+        let cmd = match log_stdin(opts) {
+            Some(revisions) => cmd.stdin(revisions),
+            None => cmd,
+        };
         cmd.args(log_args(opts)).cancel(cancel.clone()).run_streaming(
             &mut |chunk| {
                 if parse_err.is_none()
@@ -183,6 +190,13 @@ impl Repo {
         }
         parser.finish(&mut commits)?;
         Ok(commits)
+    }
+
+    /// Commits atteignables seulement par le reflog (voir [`LostCommits`]).
+    pub fn lost_commits(&self, cancel: &CancelToken) -> Result<LostCommits, GitError> {
+        let stashes: Vec<Oid> = self.stashes()?.iter().map(|s| s.oid).collect();
+        let out = self.read().args(lost_args()).stdin(lost_stdin(&stashes)).cancel(cancel.clone()).run()?;
+        Ok(parse_lost(&out.stdout_str()))
     }
 
     /// HEAD pointe sur un commit existant.
