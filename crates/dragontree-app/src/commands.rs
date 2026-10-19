@@ -42,6 +42,9 @@ pub enum Command {
     CurrentBranchOnly,
     ToggleRepoList,
     ShowLog,
+    /// Passe à l'historique et sélectionne le commit de HEAD.
+    RevealHead,
+    ToggleDetailsPanel,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -110,6 +113,8 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
+            Cmd(Command::RevealHead),
+            Cmd(Command::ToggleDetailsPanel),
             Separator,
             Cmd(Command::ZoomIn),
             Cmd(Command::ZoomOut),
@@ -191,6 +196,8 @@ impl Command {
         Command::CurrentBranchOnly,
         Command::ToggleRepoList,
         Command::ShowLog,
+        Command::RevealHead,
+        Command::ToggleDetailsPanel,
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -231,6 +238,8 @@ impl Command {
             Command::CurrentBranchOnly => tr!("Branche courante seulement"),
             Command::ToggleRepoList => tr!("Liste des dépôts"),
             Command::ShowLog => tr!("Journal git"),
+            Command::RevealHead => tr!("Révéler HEAD"),
+            Command::ToggleDetailsPanel => tr!("Panneau de détails"),
             Command::ZoomIn => tr!("Zoom avant"),
             Command::ZoomOut => tr!("Zoom arrière"),
             Command::ZoomReset => tr!("Taille par défaut"),
@@ -272,6 +281,8 @@ impl Command {
             Command::CurrentBranchOnly => icons::GIT_BRANCH,
             Command::ToggleRepoList => icons::SIDEBAR_SIMPLE,
             Command::ShowLog => icons::LIST,
+            Command::RevealHead => icons::CROSSHAIR,
+            Command::ToggleDetailsPanel => icons::SIDEBAR_SIMPLE,
             Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
             Command::ZoomOut => icons::MAGNIFYING_GLASS_MINUS,
             Command::ZoomReset => icons::MAGNIFYING_GLASS,
@@ -306,6 +317,7 @@ impl Command {
             | Command::Quit
             | Command::ToggleRepoList
             | Command::ShowLog
+            | Command::ToggleDetailsPanel
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset
@@ -315,6 +327,7 @@ impl Command {
             Command::ShowChanges
             | Command::ShowHistory
             | Command::CurrentBranchOnly
+            | Command::RevealHead
             | Command::Refresh
             | Command::Fetch
             | Command::Pull
@@ -342,6 +355,8 @@ impl Command {
             Command::ToggleRepoList => ctrl(Key::B),
             Command::CurrentBranchOnly => ctrl_shift(Key::A),
             Command::ShowLog => ctrl_shift(Key::L),
+            Command::RevealHead => ctrl(Key::Num0),
+            Command::ToggleDetailsPanel => ctrl_shift(Key::D),
             Command::ZoomIn => ctrl(Key::Equals),
             Command::ZoomOut => ctrl(Key::Minus),
             Command::Fetch => ctrl_shift(Key::F),
@@ -389,6 +404,7 @@ impl Command {
             Command::ShowHistory => Some(view == Some(RepoView::History)),
             Command::CurrentBranchOnly => Some(cx.repo.is_some_and(|tab| tab.history.current_branch_only)),
             Command::ToggleRepoList => Some(cx.settings.repo_list_visible),
+            Command::ToggleDetailsPanel => Some(cx.settings.details_panel_visible),
             Command::Language(lang) => Some(cx.settings.language == lang),
             Command::Theme(choice) => Some(cx.settings.theme == choice),
             _ => None,

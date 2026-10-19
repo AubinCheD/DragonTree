@@ -569,6 +569,10 @@ impl DragonTreeApp {
             Command::Settings => self.shared.actions.push(AppAction::ShowSettings),
             Command::ShowLog => self.shared.actions.push(AppAction::ShowLog),
             Command::Quit => self.shared.actions.push(AppAction::Quit),
+            Command::ToggleDetailsPanel => {
+                self.shared.settings.details_panel_visible = !self.shared.settings.details_panel_visible;
+                self.shared.settings_dirty = true;
+            }
             Command::ToggleRepoList => {
                 self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
                 self.shared.settings_dirty = true;

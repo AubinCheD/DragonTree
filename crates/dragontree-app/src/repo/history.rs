@@ -19,12 +19,14 @@ const SHA_W: f32 = 70.0;
 impl RepoTab {
     pub(super) fn history_ui(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
         let total_h = ui.available_height();
-        egui::Panel::bottom(("history-details", self.id))
-            .resizable(true)
-            .default_size((total_h * 0.46).max(180.0))
-            .size_range(120.0..=(total_h - 120.0).max(140.0))
-            .frame(Frame::new().fill(p.bg).stroke(egui::Stroke::new(1.0, p.border)))
-            .show(ui, |ui| self.details_ui(ui, shared, p));
+        if shared.settings.details_panel_visible {
+            egui::Panel::bottom(("history-details", self.id))
+                .resizable(true)
+                .default_size((total_h * 0.46).max(180.0))
+                .size_range(120.0..=(total_h - 120.0).max(140.0))
+                .frame(Frame::new().fill(p.bg).stroke(egui::Stroke::new(1.0, p.border)))
+                .show(ui, |ui| self.details_ui(ui, shared, p));
+        }
         egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| self.commit_table(ui, shared, p));
     }
 

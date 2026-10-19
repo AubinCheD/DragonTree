@@ -3,10 +3,12 @@
 //! barre d'outils.
 
 use dragontree_git::HeadState;
+use dragontree_i18n::tr;
 
 use super::{Dialog, Refresh, RepoTab, RepoView};
 use crate::app::Shared;
 use crate::commands::{Command, Scope};
+use crate::toasts::Toast;
 
 impl RepoTab {
     /// Une commande de dépôt est utilisable dans l'état de l'onglet (dépôt ouvert) ; grise aussi le bouton
@@ -29,6 +31,25 @@ impl RepoTab {
         }
     }
 
+    /// Passe à l'historique et sélectionne le commit de HEAD, défilé dans la vue. Un filtre de recherche qui le
+    /// masque est effacé ; un HEAD absent de la liste (pas encore chargée, HEAD détaché hors des branches
+    /// affichées…) est signalé par un message.
+    fn reveal_head(&mut self, shared: &mut Shared) {
+        self.view = RepoView::History;
+        let head = self.refs.as_ref().and_then(|r| r.head_oid);
+        let Some(oid) = head.filter(|o| self.history.index.contains_key(o)) else {
+            shared.toast(Toast::info(tr!("HEAD n'est pas dans l'historique affiché")));
+            return;
+        };
+        if self.history.filtered.is_some() {
+            // Même état qu'un champ de recherche vidé (voir `apply_filter`).
+            self.history.filter.clear();
+            self.history.filter_applied.clear();
+            self.history.filtered = None;
+        }
+        self.select_commit(shared, oid, true);
+    }
+
     /// Exécute une commande de dépôt (portée Repo) sur l'onglet. Une commande sans traitement ici, ou de portée
     /// App, est un oubli : assertion en debug.
     pub fn run_command(&mut self, cmd: Command, shared: &mut Shared) {
@@ -39,6 +60,7 @@ impl RepoTab {
                 self.ensure_change_selected(shared);
             }
             Command::ShowHistory => self.view = RepoView::History,
+            Command::RevealHead => self.reveal_head(shared),
             Command::CurrentBranchOnly => {
                 self.history.current_branch_only = !self.history.current_branch_only;
                 self.load_log(shared);

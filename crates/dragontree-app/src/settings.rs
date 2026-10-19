@@ -47,6 +47,8 @@ pub struct Settings {
     /// Calculer l'état (modifié, en avance, en retard) des dépôts listés.
     pub status_sweep: bool,
     pub repo_list_visible: bool,
+    /// Panneau de détails du commit visible sous l'historique.
+    pub details_panel_visible: bool,
     pub repo_list_width: f32,
     pub favorites: Vec<PathBuf>,
     pub hidden_repos: Vec<PathBuf>,
@@ -80,6 +82,7 @@ impl Default for Settings {
             scan_deep: false,
             status_sweep: true,
             repo_list_visible: true,
+            details_panel_visible: true,
             repo_list_width: 280.0,
             favorites: Vec::new(),
             hidden_repos: Vec::new(),
