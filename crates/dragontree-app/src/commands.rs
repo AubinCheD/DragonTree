@@ -35,6 +35,7 @@ pub enum Command {
     Accounts,
     ShowChanges,
     ShowHistory,
+    CurrentBranchOnly,
     ToggleRepoList,
     ShowLog,
     Refresh,
@@ -92,6 +93,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
         &[
             Cmd(Command::ShowChanges),
             Cmd(Command::ShowHistory),
+            Cmd(Command::CurrentBranchOnly),
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
@@ -156,6 +158,7 @@ impl Command {
         Command::Accounts,
         Command::ShowChanges,
         Command::ShowHistory,
+        Command::CurrentBranchOnly,
         Command::ToggleRepoList,
         Command::ShowLog,
         Command::Refresh,
@@ -186,6 +189,7 @@ impl Command {
             Command::Accounts => tr!("Comptes…"),
             Command::ShowChanges => tr!("Modifications locales"),
             Command::ShowHistory => tr!("Tous les commits"),
+            Command::CurrentBranchOnly => tr!("Branche courante seulement"),
             Command::ToggleRepoList => tr!("Liste des dépôts"),
             Command::ShowLog => tr!("Journal git"),
             Command::Refresh => tr!("Actualiser"),
@@ -217,6 +221,7 @@ impl Command {
             Command::Accounts => icons::USER_CIRCLE,
             Command::ShowChanges => icons::GIT_DIFF,
             Command::ShowHistory => icons::GIT_COMMIT,
+            Command::CurrentBranchOnly => icons::GIT_BRANCH,
             Command::ToggleRepoList => icons::SIDEBAR_SIMPLE,
             Command::ShowLog => icons::LIST,
             Command::Refresh => icons::ARROWS_CLOCKWISE,
@@ -250,6 +255,7 @@ impl Command {
             | Command::Language(_) => Scope::App,
             Command::ShowChanges
             | Command::ShowHistory
+            | Command::CurrentBranchOnly
             | Command::Refresh
             | Command::Fetch
             | Command::Pull
@@ -274,6 +280,7 @@ impl Command {
             Command::CloseTab => ctrl(Key::W),
             Command::QuickOpen => ctrl(Key::P),
             Command::ToggleRepoList => ctrl(Key::B),
+            Command::CurrentBranchOnly => ctrl_shift(Key::A),
             Command::ShowLog => ctrl_shift(Key::L),
             Command::Refresh => Some(KeyboardShortcut::new(Modifiers::NONE, Key::F5)),
             Command::Settings => ctrl(Key::Comma),
@@ -308,6 +315,7 @@ impl Command {
         match self {
             Command::ShowChanges => Some(view == Some(RepoView::Changes)),
             Command::ShowHistory => Some(view == Some(RepoView::History)),
+            Command::CurrentBranchOnly => Some(cx.repo.is_some_and(|tab| tab.history.current_branch_only)),
             Command::ToggleRepoList => Some(cx.settings.repo_list_visible),
             Command::Language(lang) => Some(cx.settings.language == lang),
             _ => None,

@@ -398,6 +398,17 @@ impl RepoTab {
         }
     }
 
+    /// Options du journal affichées par le graphe : l'unique point qui les construit. Les filtres de
+    /// l'historique s'y ajoutent ; `max_count` reste à `None` (le premier lot le fixe).
+    pub(crate) fn log_options(&self, _shared: &Shared) -> LogOptions {
+        let scope = if self.history.current_branch_only {
+            dragontree_git::LogScope::Head
+        } else {
+            dragontree_git::LogScope::All
+        };
+        LogOptions { scope, ..LogOptions::default() }
+    }
+
     pub(crate) fn load_log(&mut self, shared: &Shared) {
         let Some(repo) = self.repo.clone() else { return };
         if let Some(c) = self.history.log_cancel.take() {
@@ -408,11 +419,7 @@ impl RepoTab {
         self.gens.log += 1;
         self.history.loading = true;
         let (generation, id, sender) = (self.gens.log, self.id, shared.jobs.sender());
-        let scope = if self.history.current_branch_only {
-            dragontree_git::LogScope::Head
-        } else {
-            dragontree_git::LogScope::All
-        };
+        let options = self.log_options(shared);
         shared.jobs.spawn("log", move || {
             let build = |commits: Vec<Commit>| -> LogData {
                 let mut g = GraphBuilder::new();
@@ -423,7 +430,7 @@ impl RepoTab {
                 }
                 LogData { commits: Arc::new(commits), graph: Arc::new(g.finish()), index: Arc::new(index) }
             };
-            let first = LogOptions { max_count: Some(FIRST_BATCH), scope: scope.clone(), ..LogOptions::default() };
+            let first = LogOptions { max_count: Some(FIRST_BATCH), ..options.clone() };
             let commits = match repo.log(&first, &cancel) {
                 Ok(c) => c,
                 Err(GitError::Cancelled) => return None,
@@ -439,7 +446,7 @@ impl RepoTab {
             if !partial {
                 return None;
             }
-            match repo.log(&LogOptions { scope, ..LogOptions::default() }, &cancel) {
+            match repo.log(&options, &cancel) {
                 Ok(all) => {
                     Some(AppEvent::Repo(id, RepoEvent::Log { generation, complete: true, result: Ok(build(all)) }))
                 }

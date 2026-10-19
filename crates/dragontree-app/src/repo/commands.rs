@@ -34,6 +34,10 @@ impl RepoTab {
                 self.ensure_change_selected(shared);
             }
             Command::ShowHistory => self.view = RepoView::History,
+            Command::CurrentBranchOnly => {
+                self.history.current_branch_only = !self.history.current_branch_only;
+                self.load_log(shared);
+            }
             Command::Refresh => self.refresh(shared, Refresh::ALL),
             Command::Fetch => self.op_fetch(shared, None, true, false),
             Command::Pull => self.open_pull_dialog(shared),
