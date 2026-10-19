@@ -268,3 +268,34 @@ fn scanner_reports_non_literal_texts() {
 fn params_are_named_placeholders_only() {
     assert_eq!(params("stash@{0} « {name} » {n}"), BTreeSet::from(["n".to_string(), "name".to_string()]));
 }
+
+/// Clés d'un objet JSON plat, doublons compris (serde_json garde silencieusement la dernière valeur).
+fn duplicate_keys(json: &str) -> Vec<String> {
+    use serde::de::{Deserializer, IgnoredAny, MapAccess, Visitor};
+
+    struct Keys(Vec<String>);
+    impl<'de> Visitor<'de> for Keys {
+        type Value = Vec<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("un objet JSON")
+        }
+        fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<Self::Value, A::Error> {
+            while let Some((key, IgnoredAny)) = map.next_entry::<String, IgnoredAny>()? {
+                self.0.push(key);
+            }
+            Ok(self.0)
+        }
+    }
+    let all = serde_json::Deserializer::from_str(json).deserialize_map(Keys(Vec::new())).unwrap();
+    let mut seen = BTreeSet::new();
+    all.into_iter().filter(|k| !seen.insert(k.clone())).collect()
+}
+
+#[test]
+fn catalogs_have_no_duplicate_keys() {
+    for (lang, json) in CATALOGS {
+        let dups = duplicate_keys(json);
+        assert!(dups.is_empty(), "[{}] clés en double : {dups:?}", lang.code());
+    }
+    assert_eq!(duplicate_keys(r#"{"a": "1", "b": "2", "a": "3"}"#), ["a"]);
+}

@@ -19,6 +19,7 @@ pub mod rebase;
 pub mod refs;
 pub mod repo;
 pub mod runner;
+pub mod ssh;
 pub mod stash;
 pub mod status;
 

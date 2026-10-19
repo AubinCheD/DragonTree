@@ -17,6 +17,7 @@ pub mod repo;
 pub mod repo_list;
 pub mod settings;
 pub mod settings_ui;
+pub mod ssh_keys;
 pub mod tabbar;
 pub mod theme;
 pub mod toasts;

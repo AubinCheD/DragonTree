@@ -18,6 +18,7 @@ use crate::repo::{RepoEvent, RepoTab};
 use crate::repo_list::{RepoListState, ScanEvent};
 use crate::settings::{Settings, SettingsFile, ThemeChoice, path_key};
 use crate::settings_ui::SettingsWindow;
+use crate::ssh_keys::{SshEvent, SshKeysWindow};
 use crate::tabbar::{self, TabBarAction, TabInfo};
 use crate::theme::{self, Palette};
 use crate::toasts::{CommandLog, Toast, Toasts};
@@ -30,6 +31,7 @@ pub enum AppEvent {
     Repo(TabId, RepoEvent),
     Scan(ScanEvent),
     Forge(ForgeEvent),
+    Ssh(SshEvent),
     Clone(CloneEvent),
     Trusted(PathBuf, Result<(), GitError>),
     Initialized(PathBuf, Result<(), GitError>),
@@ -44,6 +46,7 @@ pub enum AppAction {
     InitRepo,
     ShowClone,
     ShowAccounts,
+    ShowSshKeys,
     ShowSettings,
     ShowLog,
     AddScanRoot,
@@ -126,6 +129,8 @@ pub struct StartOptions {
     pub add_root: Option<PathBuf>,
     pub select_commit: Option<usize>,
     pub window: Option<String>,
+    /// Dossier `.ssh` de la fenêtre « Clés SSH » : réservé aux tests (et à `--profile`) ; `~/.ssh` par défaut.
+    pub ssh_dir: Option<PathBuf>,
 }
 
 pub enum TabKind {
@@ -146,6 +151,7 @@ pub struct DragonTreeApp {
     next_tab_id: TabId,
     repo_list: RepoListState,
     accounts: AccountsWindow,
+    ssh_keys: SshKeysWindow,
     clone: Option<CloneWindow>,
     settings_window: Option<SettingsWindow>,
     log_open: bool,
@@ -205,6 +211,11 @@ impl DragonTreeApp {
         }
 
         let accounts = AccountsWindow::default();
+        let ssh_dir = start
+            .ssh_dir
+            .clone()
+            .or_else(|| dirs::home_dir().map(|h| h.join(".ssh")))
+            .unwrap_or_else(|| PathBuf::from(".ssh"));
         let mut app = DragonTreeApp {
             shared,
             rx,
@@ -213,6 +224,7 @@ impl DragonTreeApp {
             next_tab_id: 1,
             repo_list,
             accounts,
+            ssh_keys: SshKeysWindow::new(ssh_dir),
             clone: None,
             settings_window: None,
             log_open: false,
@@ -252,6 +264,7 @@ impl DragonTreeApp {
         }
         match app.start.window.as_deref() {
             Some("accounts") => app.accounts.open = true,
+            Some("ssh") => app.ssh_keys.show(),
             Some("settings") => app.settings_window = Some(SettingsWindow::new(&app.shared.settings)),
             Some("clone") => app.clone = Some(CloneWindow::new(&app.shared)),
             Some("log") => app.log_open = true,
@@ -384,6 +397,7 @@ impl DragonTreeApp {
                 }
                 AppEvent::Scan(ev) => self.repo_list.handle(ev, &mut self.shared),
                 AppEvent::Forge(ev) => self.accounts.handle(ev, &mut self.shared),
+                AppEvent::Ssh(ev) => self.ssh_keys.handle(ev, &mut self.shared),
                 AppEvent::Clone(CloneEvent::Done(done)) => {
                     crate::clone::finish_clone(&mut self.shared, &done, self.clone.is_some());
                     if let Some(c) = &mut self.clone {
@@ -467,6 +481,7 @@ impl DragonTreeApp {
                 }
             }
             AppAction::ShowAccounts => self.accounts.open = true,
+            AppAction::ShowSshKeys => self.ssh_keys.show(),
             AppAction::ShowSettings => {
                 if self.settings_window.is_none() {
                     self.settings_window = Some(SettingsWindow::new(&self.shared.settings));
@@ -550,6 +565,7 @@ impl DragonTreeApp {
             Command::InitRepo => self.shared.actions.push(AppAction::InitRepo),
             Command::QuickOpen => self.shared.actions.push(AppAction::QuickOpen),
             Command::Accounts => self.shared.actions.push(AppAction::ShowAccounts),
+            Command::SshKeys => self.shared.actions.push(AppAction::ShowSshKeys),
             Command::Settings => self.shared.actions.push(AppAction::ShowSettings),
             Command::ShowLog => self.shared.actions.push(AppAction::ShowLog),
             Command::Quit => self.shared.actions.push(AppAction::Quit),
@@ -793,6 +809,11 @@ impl eframe::App for DragonTreeApp {
 
         // Fenêtres globales.
         self.accounts.ui(&ctx, &mut self.shared, &self.repo_list.repos, &p);
+        let active_repo = match self.tabs.get(self.active).map(|t| &t.kind) {
+            Some(TabKind::Repo(r)) if r.repo.is_some() => Some(r.path.clone()),
+            _ => None,
+        };
+        self.ssh_keys.ui(&ctx, &mut self.shared, active_repo.as_deref(), &p);
         if let Some(c) = &mut self.clone
             && !c.ui(&ctx, &mut self.shared, &p)
         {

@@ -21,7 +21,7 @@ Utilisation : dragontree [OPTIONS] [DÉPÔT…]
   --lang fr|en            force la langue de l'interface
   --view history|changes  vue initiale des dépôts ouverts
   --select <n>            sélectionne le n-ième commit de l'historique
-  --window accounts|clone|settings|log  ouvre une fenêtre au démarrage
+  --window accounts|clone|settings|log|ssh  ouvre une fenêtre au démarrage
   --screenshot <png>      capture la fenêtre puis quitte
   --after-ms <n>          délai avant la capture (défaut 2500)
 ")

@@ -34,6 +34,7 @@ pub enum Command {
     ReopenClosedTab,
     QuickOpen,
     Accounts,
+    SshKeys,
     /// Ferme l'application (pas de raccourci propre : Alt+F4 reste celui du système).
     Quit,
     ShowChanges,
@@ -95,6 +96,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::QuickOpen),
             Cmd(Command::Accounts),
+            Cmd(Command::SshKeys),
             Separator,
             Cmd(Command::Quit),
         ],
@@ -182,6 +184,7 @@ impl Command {
         Command::ReopenClosedTab,
         Command::QuickOpen,
         Command::Accounts,
+        Command::SshKeys,
         Command::Quit,
         Command::ShowChanges,
         Command::ShowHistory,
@@ -221,6 +224,7 @@ impl Command {
             Command::ReopenClosedTab => tr!("Rouvrir l'onglet fermé"),
             Command::QuickOpen => tr!("Palette de commandes"),
             Command::Accounts => tr!("Comptes…"),
+            Command::SshKeys => tr!("Clés SSH…"),
             Command::Quit => tr!("Quitter"),
             Command::ShowChanges => tr!("Modifications locales"),
             Command::ShowHistory => tr!("Tous les commits"),
@@ -261,6 +265,7 @@ impl Command {
             Command::ReopenClosedTab => icons::ARROW_COUNTER_CLOCKWISE,
             Command::QuickOpen => icons::MAGNIFYING_GLASS,
             Command::Accounts => icons::USER_CIRCLE,
+            Command::SshKeys => icons::KEY,
             Command::Quit => icons::SIGN_OUT,
             Command::ShowChanges => icons::GIT_DIFF,
             Command::ShowHistory => icons::GIT_COMMIT,
@@ -297,6 +302,7 @@ impl Command {
             | Command::ReopenClosedTab
             | Command::QuickOpen
             | Command::Accounts
+            | Command::SshKeys
             | Command::Quit
             | Command::ToggleRepoList
             | Command::ShowLog
