@@ -21,7 +21,7 @@ use egui::{Key, KeyboardShortcut, ModifierNames, Modifiers};
 
 use crate::icons;
 use crate::repo::{RepoTab, RepoView};
-use crate::settings::Settings;
+use crate::settings::{Settings, ThemeChoice};
 
 /// Commande de l'interface : entrée de menu, raccourci éventuel, palette Ctrl+P.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,6 +38,11 @@ pub enum Command {
     CurrentBranchOnly,
     ToggleRepoList,
     ShowLog,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    /// Thème de l'interface.
+    Theme(ThemeChoice),
     Refresh,
     Fetch,
     Pull,
@@ -97,6 +102,18 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
+            Separator,
+            Cmd(Command::ZoomIn),
+            Cmd(Command::ZoomOut),
+            Cmd(Command::ZoomReset),
+            Submenu(
+                tr_mark!("Thème"),
+                &[
+                    Cmd(Command::Theme(ThemeChoice::System)),
+                    Cmd(Command::Theme(ThemeChoice::Light)),
+                    Cmd(Command::Theme(ThemeChoice::Dark)),
+                ],
+            ),
         ],
     ),
     (
@@ -161,6 +178,12 @@ impl Command {
         Command::CurrentBranchOnly,
         Command::ToggleRepoList,
         Command::ShowLog,
+        Command::ZoomIn,
+        Command::ZoomOut,
+        Command::ZoomReset,
+        Command::Theme(ThemeChoice::System),
+        Command::Theme(ThemeChoice::Light),
+        Command::Theme(ThemeChoice::Dark),
         Command::Refresh,
         Command::Fetch,
         Command::Pull,
@@ -192,6 +215,12 @@ impl Command {
             Command::CurrentBranchOnly => tr!("Branche courante seulement"),
             Command::ToggleRepoList => tr!("Liste des dépôts"),
             Command::ShowLog => tr!("Journal git"),
+            Command::ZoomIn => tr!("Zoom avant"),
+            Command::ZoomOut => tr!("Zoom arrière"),
+            Command::ZoomReset => tr!("Taille par défaut"),
+            Command::Theme(ThemeChoice::System) => tr!("Système"),
+            Command::Theme(ThemeChoice::Light) => tr!("Clair"),
+            Command::Theme(ThemeChoice::Dark) => tr!("Sombre"),
             Command::Refresh => tr!("Actualiser"),
             Command::Fetch => "Fetch",
             Command::Pull => "Pull…",
@@ -224,6 +253,10 @@ impl Command {
             Command::CurrentBranchOnly => icons::GIT_BRANCH,
             Command::ToggleRepoList => icons::SIDEBAR_SIMPLE,
             Command::ShowLog => icons::LIST,
+            Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
+            Command::ZoomOut => icons::MAGNIFYING_GLASS_MINUS,
+            Command::ZoomReset => icons::MAGNIFYING_GLASS,
+            Command::Theme(_) => icons::CIRCLE_HALF,
             Command::Refresh => icons::ARROWS_CLOCKWISE,
             Command::Fetch => icons::CLOUD_ARROW_DOWN,
             Command::Pull => icons::ARROW_LINE_DOWN,
@@ -251,6 +284,10 @@ impl Command {
             | Command::Accounts
             | Command::ToggleRepoList
             | Command::ShowLog
+            | Command::ZoomIn
+            | Command::ZoomOut
+            | Command::ZoomReset
+            | Command::Theme(_)
             | Command::Settings
             | Command::Language(_) => Scope::App,
             Command::ShowChanges
@@ -282,10 +319,17 @@ impl Command {
             Command::ToggleRepoList => ctrl(Key::B),
             Command::CurrentBranchOnly => ctrl_shift(Key::A),
             Command::ShowLog => ctrl_shift(Key::L),
+            Command::ZoomIn => ctrl(Key::Equals),
+            Command::ZoomOut => ctrl(Key::Minus),
             Command::Refresh => Some(KeyboardShortcut::new(Modifiers::NONE, Key::F5)),
             Command::Settings => ctrl(Key::Comma),
             _ => None,
         }
+    }
+
+    /// Second raccourci de la même commande, non affiché (Ctrl++ : le « + » du pavé numérique ou Maj+=).
+    pub fn alternate_shortcut(self) -> Option<KeyboardShortcut> {
+        (self == Command::ZoomIn).then(|| KeyboardShortcut::new(Modifiers::COMMAND, Key::Plus))
     }
 
     /// Raccourci tel qu'affiché dans les menus (« Ctrl+Maj+C », « Ctrl+, »).
@@ -297,7 +341,7 @@ impl Command {
 
     /// La commande figure dans la palette Ctrl+P.
     pub fn in_palette(self) -> bool {
-        !matches!(self, Command::QuickOpen | Command::Language(_))
+        !matches!(self, Command::QuickOpen | Command::Language(_) | Command::Theme(_))
     }
 
     /// La commande est utilisable (sinon son entrée est grisée et elle ne fait rien) : une commande de dépôt
@@ -318,6 +362,7 @@ impl Command {
             Command::CurrentBranchOnly => Some(cx.repo.is_some_and(|tab| tab.history.current_branch_only)),
             Command::ToggleRepoList => Some(cx.settings.repo_list_visible),
             Command::Language(lang) => Some(cx.settings.language == lang),
+            Command::Theme(choice) => Some(cx.settings.theme == choice),
             _ => None,
         }
     }
@@ -326,7 +371,10 @@ impl Command {
 /// Raccourcis du registre dans l'ordre où les consommer. egui fait correspondre un raccourci à un appui qui
 /// a en plus Maj ou Alt (Ctrl+T répond à Ctrl+Maj+T) : les plus spécifiques passent donc d'abord.
 pub fn shortcuts() -> Vec<(KeyboardShortcut, Command)> {
-    let mut list: Vec<_> = Command::ALL.iter().filter_map(|&cmd| Some((cmd.shortcut()?, cmd))).collect();
+    let mut list: Vec<_> = Command::ALL
+        .iter()
+        .flat_map(|&cmd| [cmd.shortcut(), cmd.alternate_shortcut()].into_iter().flatten().map(move |s| (s, cmd)))
+        .collect();
     most_specific_first(&mut list);
     list
 }

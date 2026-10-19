@@ -8,7 +8,20 @@ use dragontree_forges::Account;
 use dragontree_i18n::{Lang, tr};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Bornes et pas de la taille de l'interface (curseur des réglages, zoom au clavier).
+pub const UI_SCALE_MIN: f32 = 0.8;
+pub const UI_SCALE_MAX: f32 = 1.6;
+pub const UI_SCALE_STEP: f32 = 0.05;
+
+/// Taille de l'interface après `steps` pas (négatif : zoom arrière), ramenée sur la grille des pas et bornée.
+pub fn step_ui_scale(current: f32, steps: i32) -> f32 {
+    let index = (current / UI_SCALE_STEP).round() + steps as f32;
+    // Arrondi à 0,01 : les pas répétés ne dérivent pas (0,05 n'est pas exact en flottant).
+    let scale = (index * UI_SCALE_STEP * 100.0).round() / 100.0;
+    scale.clamp(UI_SCALE_MIN, UI_SCALE_MAX)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ThemeChoice {
     #[default]
     System,
@@ -220,6 +233,24 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_scale_steps_stay_on_the_grid_and_within_bounds() {
+        assert_eq!(step_ui_scale(1.0, 1), 1.05);
+        assert_eq!(step_ui_scale(1.0, -1), 0.95);
+        // Une valeur hors grille (ancien réglage) revient sur la grille.
+        assert_eq!(step_ui_scale(1.02, 1), 1.05);
+        // Des pas répétés n'accumulent pas d'erreur d'arrondi.
+        let mut scale = 1.0;
+        for _ in 0..4 {
+            scale = step_ui_scale(scale, 1);
+        }
+        assert_eq!(scale, 1.2);
+        // Bornes.
+        assert_eq!(step_ui_scale(UI_SCALE_MAX, 1), UI_SCALE_MAX);
+        assert_eq!(step_ui_scale(UI_SCALE_MIN, -1), UI_SCALE_MIN);
+        assert_eq!(step_ui_scale(3.0, -1), UI_SCALE_MAX);
+    }
 
     #[test]
     fn settings_roundtrip_and_defaults() {

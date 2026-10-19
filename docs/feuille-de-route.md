@@ -119,7 +119,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | V10 | Disposition verticale ou horizontale de l'historique | 🆕 M |
 | V11 | Tri des commits : topologique ou par date | 🆕 P (le moteur sait déjà faire les deux : `crates/dragontree-git/src/log.rs:60-61`) |
 | V12 | Vue Changements : afficher les fichiers ignorés, masquer les non suivis | 🆕 P |
-| V13 | Zoom Ctrl+= / Ctrl+- (le réglage de taille existe) et thème | ✅ + raccourcis |
+| V13 | Zoom Ctrl+= / Ctrl+- (le réglage de taille existe) et thème | ✅ |
 
 ### Repo
 

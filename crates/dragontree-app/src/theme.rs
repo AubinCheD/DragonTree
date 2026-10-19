@@ -244,5 +244,7 @@ pub fn apply(ctx: &egui::Context, choice: crate::settings::ThemeChoice, scale: f
         style.spacing.interact_size.y = 22.0;
         style.interaction.selectable_labels = false;
     });
+    // Le zoom clavier d'egui est coupé : seul le réglage enregistré (Affichage › Zoom) agit.
+    ctx.options_mut(|o| o.zoom_with_keyboard = false);
     ctx.set_zoom_factor(scale.clamp(0.75, 2.0));
 }

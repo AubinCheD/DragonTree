@@ -512,6 +512,19 @@ impl DragonTreeApp {
                 self.shared.settings.language = lang;
                 self.shared.settings_dirty = true;
             }
+            Command::Theme(choice) => {
+                self.shared.settings.theme = choice;
+                self.shared.settings_dirty = true;
+            }
+            Command::ZoomIn | Command::ZoomOut | Command::ZoomReset => {
+                let settings = &mut self.shared.settings;
+                settings.ui_scale = match cmd {
+                    Command::ZoomIn => crate::settings::step_ui_scale(settings.ui_scale, 1),
+                    Command::ZoomOut => crate::settings::step_ui_scale(settings.ui_scale, -1),
+                    _ => Settings::default().ui_scale,
+                };
+                self.shared.settings_dirty = true;
+            }
             _ => debug_assert!(false, "{cmd:?} : commande App sans traitement dans DragonTreeApp::run_app_command"),
         }
     }

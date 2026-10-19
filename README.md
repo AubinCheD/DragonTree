@@ -87,6 +87,7 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Ctrl+, | Réglages |
 | Ctrl+Maj+A | Historique : branche courante seulement (bascule) |
 | Ctrl+B | Afficher/masquer la liste des dépôts |
+| Ctrl+= / Ctrl+- | Zoom avant / arrière (taille de l'interface, enregistrée) |
 | F5 | Actualiser |
 | Ctrl+Maj+L | Journal des commandes git |
 | Ctrl+Entrée | Commit (dans la zone de message) |

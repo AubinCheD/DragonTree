@@ -8,7 +8,7 @@ use egui::RichText;
 
 use crate::app::{AppAction, Shared};
 use crate::icons;
-use crate::settings::{Settings, ThemeChoice, path_key};
+use crate::settings::{Settings, ThemeChoice, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, path_key};
 use crate::theme::Palette;
 
 pub struct SettingsWindow {
@@ -65,8 +65,8 @@ impl SettingsWindow {
                     ui.horizontal(|ui| {
                         let label = ui.label(tr!("Taille de l'interface"));
                         ui.add(
-                            egui::Slider::new(&mut d.ui_scale, 0.8..=1.6)
-                                .step_by(0.05)
+                            egui::Slider::new(&mut d.ui_scale, UI_SCALE_MIN..=UI_SCALE_MAX)
+                                .step_by(f64::from(UI_SCALE_STEP))
                                 .custom_formatter(|v, _| tr!("{percent} %", percent = format!("{:.0}", v * 100.0))),
                         )
                         .labelled_by(label.id);
