@@ -134,7 +134,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | R7 | Comparer deux commits, deux branches, ou un commit avec les modifications locales | ✅ |
 | R8 | Réglages du dépôt : nom et email propres au dépôt, liens vers les tickets (`#1234` → Azure DevOps), modèle de message de commit | ✅ |
 | R9 | Remotes : modifier l'URL, tester la connexion (ajouter et supprimer existent déjà) | ✅ |
-| R10 | Sous-modules : ajouter, supprimer, déplacer, changer l'URL (la liste, la mise à jour et l'ouverture en onglet existent déjà : `crates/dragontree-app/src/repo/sidebar.rs:204-259`) | 🆕 M |
+| R10 | Sous-modules : ajouter, supprimer, déplacer, changer l'URL (la liste, la mise à jour et l'ouverture en onglet existent déjà : `crates/dragontree-app/src/repo/sidebar.rs:204-259`) | ✅ |
 | R11 | .gitignore : ajouter un motif avec un aperçu des fichiers concernés (« Ignorer » existe déjà) | 🆕 P |
 | R12 | Bisect (bon, mauvais, passer, bandeau d'état) | 🆕 M |
 | R13 | Git Flow (initialiser, start/finish feature, release, hotfix) | 🆕 M |

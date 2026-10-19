@@ -84,6 +84,8 @@ pub enum Command {
     NewTag,
     /// Nouveau worktree, la branche choisie dans le dialogue (les menus contextuels en créent aussi).
     CreateWorktree,
+    /// Ajoute un sous-module (URL, chemin et branche facultative demandés dans un dialogue).
+    AddSubmodule,
     Stash,
     /// Enregistre un stash sans toucher aux modifications en cours.
     Snapshot,
@@ -196,6 +198,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::NewBranch),
             Cmd(Command::NewTag),
             Cmd(Command::CreateWorktree),
+            Cmd(Command::AddSubmodule),
             Cmd(Command::Stash),
             Cmd(Command::Snapshot),
             Separator,
@@ -288,6 +291,7 @@ impl Command {
         Command::NewBranch,
         Command::NewTag,
         Command::CreateWorktree,
+        Command::AddSubmodule,
         Command::Stash,
         Command::Snapshot,
         Command::ApplyPatch,
@@ -350,6 +354,7 @@ impl Command {
             Command::NewBranch => tr!("Nouvelle branche…"),
             Command::NewTag => tr!("Nouveau tag…"),
             Command::CreateWorktree => tr!("Créer un worktree…"),
+            Command::AddSubmodule => tr!("Ajouter un sous-module…"),
             Command::Stash => "Stash…",
             Command::Snapshot => tr!("Snapshot…"),
             Command::ApplyPatch => tr!("Appliquer un patch…"),
@@ -410,6 +415,7 @@ impl Command {
             Command::NewBranch => icons::GIT_BRANCH,
             Command::NewTag => icons::TAG,
             Command::CreateWorktree => icons::TREE_STRUCTURE,
+            Command::AddSubmodule => icons::CUBE,
             Command::Stash => icons::TRAY_ARROW_DOWN,
             Command::Snapshot => icons::CAMERA,
             Command::ApplyPatch => icons::FILE_ARROW_DOWN,
@@ -469,6 +475,7 @@ impl Command {
             | Command::NewBranch
             | Command::NewTag
             | Command::CreateWorktree
+            | Command::AddSubmodule
             | Command::Stash
             | Command::Snapshot
             | Command::ApplyPatch

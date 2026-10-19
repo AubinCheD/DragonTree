@@ -18,6 +18,7 @@ mod rebase_ui;
 mod repo_settings;
 mod scope;
 mod sidebar;
+mod submodules;
 mod toolbar;
 mod watcher;
 mod worktrees;

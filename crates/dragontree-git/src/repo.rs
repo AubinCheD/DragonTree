@@ -63,6 +63,10 @@ pub struct Submodule {
     pub oid: Option<Oid>,
     /// ' ' à jour, '-' non initialisé, '+' commit différent, 'U' en conflit.
     pub status: char,
+    /// Nom dans `.gitmodules` (clé `submodule.<nom>`), le plus souvent identique au chemin.
+    pub name: String,
+    /// URL de `.gitmodules` (vide si absente).
+    pub url: String,
 }
 
 /// Chemin renvoyé par git (`C:/a/b`) converti au format natif.
@@ -406,6 +410,7 @@ impl Repo {
         if !self.workdir.join(".gitmodules").exists() {
             return Ok(Vec::new());
         }
+        let entries = self.gitmodules_entries()?;
         let out = self.read().args(["-c", "core.quotepath=false", "submodule", "status"]).run()?;
         Ok(out
             .stdout_str()
@@ -416,7 +421,14 @@ impl Repo {
                 let rest = chars.as_str();
                 let (sha, tail) = rest.split_once(' ')?;
                 let path = tail.rsplit_once(" (").map_or(tail, |(p, _)| p);
-                Some(Submodule { path: path.to_string(), oid: Oid::from_hex(sha), status })
+                let entry = entries.iter().find(|e| e.path == path);
+                Some(Submodule {
+                    path: path.to_string(),
+                    oid: Oid::from_hex(sha),
+                    status,
+                    name: entry.map_or_else(|| path.to_string(), |e| e.name.clone()),
+                    url: entry.map(|e| e.url.clone()).unwrap_or_default(),
+                })
             })
             .collect())
     }

@@ -18,12 +18,12 @@ pub struct NetOptions {
     pub non_interactive: bool,
 }
 
-fn with_net(cmd: GitCommand, n: &NetOptions) -> GitCommand {
+pub(crate) fn with_net(cmd: GitCommand, n: &NetOptions) -> GitCommand {
     let cmd = cmd.env("GIT_EDITOR", "true").envs(&n.env).cancel(n.cancel.clone());
     if n.non_interactive { cmd.non_interactive() } else { cmd }
 }
 
-fn run_with_progress(cmd: GitCommand, on: &mut dyn FnMut(Progress)) -> Result<(), GitError> {
+pub(crate) fn run_with_progress(cmd: GitCommand, on: &mut dyn FnMut(Progress)) -> Result<(), GitError> {
     cmd.run_streaming(&mut |_| {}, &mut |line| {
         if let Some(p) = parse_progress(line) {
             on(p);

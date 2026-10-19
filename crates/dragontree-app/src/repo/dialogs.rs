@@ -39,7 +39,9 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `StashFiles` : seulement les fichiers choisis dans la vue Changements ; `ApplyPatch` : aperçu d'un patch lu (fichier
 /// déposé, texte collé) et cible choisie ; `PastePatch` : zone où coller le texte d'un patch ; `EditRemoteUrl` :
 /// `push_url` est un champ séparé, seulement si le remote a une URL de push distincte ; `RepoSettings` : identité
-/// locale, modèle de message et liens vers les tickets.
+/// locale, modèle de message et liens vers les tickets ; `AddSubmodule` : `path` vide reprend le nom du dépôt cloné,
+/// `branch` est facultative ; `EditSubmoduleUrl`, `MoveSubmodule` et `RemoveSubmodule` portent sur le sous-module installé
+/// dans `path` (`old` pour le déplacement).
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -69,6 +71,10 @@ pub enum Dialog {
     DropStash { oid: Oid, label: String },
     CreateWorktree { start: WorktreeStart, path: String, pick: bool },
     RemoveWorktree { path: PathBuf, force: bool },
+    AddSubmodule { url: String, path: String, branch: String },
+    EditSubmoduleUrl { path: String, url: String },
+    MoveSubmodule { old: String, new: String },
+    RemoveSubmodule { path: String },
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
     Confirm { title: String, text: String, action: ConfirmAction },
 }
@@ -127,6 +133,16 @@ impl Dialog {
             Dialog::DropStash { .. } => (tr!("Supprimer le stash").into(), tr!("Supprimer").into(), true),
             Dialog::CreateWorktree { .. } => (tr!("Créer un worktree").into(), tr!("Créer").into(), false),
             Dialog::RemoveWorktree { .. } => (tr!("Supprimer le worktree").into(), tr!("Supprimer").into(), true),
+            Dialog::AddSubmodule { .. } => (tr!("Ajouter un sous-module").into(), tr!("Ajouter").into(), false),
+            Dialog::EditSubmoduleUrl { path, .. } => {
+                (tr!("Modifier l'URL de « {path} »", path), tr!("Enregistrer").into(), false)
+            }
+            Dialog::MoveSubmodule { old, .. } => {
+                (tr!("Déplacer le sous-module « {old} »", old), tr!("Déplacer").into(), false)
+            }
+            Dialog::RemoveSubmodule { path } => {
+                (tr!("Supprimer le sous-module « {path} »", path), tr!("Supprimer").into(), true)
+            }
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
             Dialog::Confirm { title, action: ConfirmAction::CheckoutDetached(_), .. } => {
                 (title.clone(), tr!("Continuer").into(), false)
@@ -491,6 +507,10 @@ impl RepoTab {
             }
             Dialog::CreateWorktree { start, path, pick } => self.create_worktree_body(ui, start, path, *pick, p),
             Dialog::RemoveWorktree { path, force } => Self::remove_worktree_body(ui, path, force, p),
+            Dialog::AddSubmodule { url, path, branch } => self.add_submodule_body(ui, url, path, branch, p),
+            Dialog::EditSubmoduleUrl { url, .. } => Self::edit_submodule_url_body(ui, url),
+            Dialog::MoveSubmodule { old, new } => self.move_submodule_body(ui, old, new, p),
+            Dialog::RemoveSubmodule { path } => Self::remove_submodule_body(ui, path, p),
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
@@ -616,6 +636,10 @@ impl RepoTab {
             Dialog::RemoveWorktree { path, force } => {
                 shared.actions.push(AppAction::RemoveWorktree { tab: self.id, path, force })
             }
+            Dialog::AddSubmodule { url, path, branch } => self.op_add_submodule(shared, url, path, branch),
+            Dialog::EditSubmoduleUrl { path, url } => self.op_set_submodule_url(shared, path, url),
+            Dialog::MoveSubmodule { old, new } => self.op_move_submodule(shared, old, new),
+            Dialog::RemoveSubmodule { path } => self.op_remove_submodule(shared, path),
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
             Dialog::Confirm { action, .. } => match action {
                 ConfirmAction::CheckoutDetached(oid) => self.op_checkout(shared, oid.to_hex()),

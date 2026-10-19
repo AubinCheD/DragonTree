@@ -245,6 +245,7 @@ impl RepoTab {
                         'U' => p.conflict_fg,
                         _ => p.text,
                     };
+                    widgets::a11y(&resp, &s.path, true);
                     paint_row(ui, rect, 1, icons::CUBE, &s.path, false, color, p);
                     let tip = match s.status {
                         '-' => tr!("non initialisé"),
@@ -286,7 +287,33 @@ impl RepoTab {
                             );
                             ui.close();
                         }
+                        ui.separator();
+                        if ui.button(format!("{} {}", icons::PENCIL_SIMPLE, tr!("Modifier l'URL…"))).clicked() {
+                            self.dialog = Some(Dialog::EditSubmoduleUrl { path: s.path.clone(), url: s.url.clone() });
+                            ui.close();
+                        }
+                        if ui.button(format!("{} {}", icons::ARROWS_LEFT_RIGHT, tr!("Déplacer…"))).clicked() {
+                            self.dialog = Some(Dialog::MoveSubmodule { old: s.path.clone(), new: s.path.clone() });
+                            ui.close();
+                        }
+                        if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer…"))).clicked() {
+                            self.dialog = Some(Dialog::RemoveSubmodule { path: s.path.clone() });
+                            ui.close();
+                        }
                     });
+                }
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new(format!("{}  {}", icons::PLUS, tr!("Ajouter un sous-module…")))
+                                .size(12.0)
+                                .color(p.weak),
+                        )
+                        .frame(false),
+                    )
+                    .clicked()
+                {
+                    self.open_add_submodule();
                 }
             }
         });

@@ -26,6 +26,7 @@ pub mod runner;
 pub mod ssh;
 pub mod stash;
 pub mod status;
+pub mod submodule;
 pub mod worktree;
 
 pub use apply::{ApplyTarget, PatchFile, is_mail_patch};

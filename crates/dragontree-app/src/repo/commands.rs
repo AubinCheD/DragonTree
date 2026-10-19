@@ -25,9 +25,11 @@ impl RepoTab {
             Command::Fetch => has_remote,
             Command::Pull | Command::QuickPull | Command::Push | Command::QuickPush => has_remote && on_branch,
             Command::Stash | Command::Snapshot => self.status.as_ref().is_some_and(|s| !s.is_clean()),
-            Command::NewBranch | Command::NewTag | Command::CreateWorktree | Command::RepoSettings => {
-                self.refs.is_some()
-            }
+            Command::NewBranch
+            | Command::NewTag
+            | Command::CreateWorktree
+            | Command::AddSubmodule
+            | Command::RepoSettings => self.refs.is_some(),
             // Une opération en cours (fusion, rebase, session am…) : un patch s'y mélangerait.
             Command::ApplyPatch | Command::PastePatch => self.refs.is_some() && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
@@ -90,6 +92,7 @@ impl RepoTab {
             }
             Command::NewTag => self.dialog = Some(Dialog::new_tag("HEAD".into(), "HEAD".into())),
             Command::CreateWorktree => self.open_create_worktree(None),
+            Command::AddSubmodule => self.open_add_submodule(),
             Command::Stash => {
                 self.dialog =
                     Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false, snapshot: false })
