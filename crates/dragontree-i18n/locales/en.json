@@ -465,6 +465,7 @@
   "rev-parse inattendu : {text}": "unexpected rev-parse output: {text}",
   "Revert en cours": "Revert in progress",
   "reword — changer le message": "reword — change the message",
+  "Rouvrir l'onglet fermé": "Reopen closed tab",
   "safe.directory n'a pas pu être ajouté": "Could not add safe.directory",
   "Saisie invalide : {msg}": "Invalid input: {msg}",
   "Sélectionnez un commit": "Select a commit",

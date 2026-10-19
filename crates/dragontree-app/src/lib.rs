@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod app;
 pub mod clone;
+pub mod closed_tabs;
 pub mod commands;
 pub mod highlight;
 pub mod icons;

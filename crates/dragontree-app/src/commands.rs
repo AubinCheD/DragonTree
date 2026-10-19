@@ -31,6 +31,7 @@ pub enum Command {
     Clone,
     InitRepo,
     CloseTab,
+    ReopenClosedTab,
     QuickOpen,
     Accounts,
     ShowChanges,
@@ -88,6 +89,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::InitRepo),
             Separator,
             Cmd(Command::CloseTab),
+            Cmd(Command::ReopenClosedTab),
             Separator,
             Cmd(Command::QuickOpen),
             Cmd(Command::Accounts),
@@ -161,6 +163,8 @@ pub struct CommandContext<'a> {
     pub settings: &'a Settings,
     /// Onglet actif s'il s'agit d'un dépôt ouvert (chargé sans erreur).
     pub repo: Option<&'a RepoTab>,
+    /// Au moins un onglet fermé peut être rouvert.
+    pub can_reopen_tab: bool,
 }
 
 impl Command {
@@ -171,6 +175,7 @@ impl Command {
         Command::Clone,
         Command::InitRepo,
         Command::CloseTab,
+        Command::ReopenClosedTab,
         Command::QuickOpen,
         Command::Accounts,
         Command::ShowChanges,
@@ -208,6 +213,7 @@ impl Command {
             Command::Clone => tr!("Cloner un dépôt…"),
             Command::InitRepo => tr!("Initialiser un dépôt…"),
             Command::CloseTab => tr!("Fermer l'onglet"),
+            Command::ReopenClosedTab => tr!("Rouvrir l'onglet fermé"),
             Command::QuickOpen => tr!("Palette de commandes"),
             Command::Accounts => tr!("Comptes…"),
             Command::ShowChanges => tr!("Modifications locales"),
@@ -246,6 +252,7 @@ impl Command {
             Command::Clone => icons::DOWNLOAD_SIMPLE,
             Command::InitRepo => icons::FOLDER_PLUS,
             Command::CloseTab => icons::X,
+            Command::ReopenClosedTab => icons::ARROW_COUNTER_CLOCKWISE,
             Command::QuickOpen => icons::MAGNIFYING_GLASS,
             Command::Accounts => icons::USER_CIRCLE,
             Command::ShowChanges => icons::GIT_DIFF,
@@ -280,6 +287,7 @@ impl Command {
             | Command::Clone
             | Command::InitRepo
             | Command::CloseTab
+            | Command::ReopenClosedTab
             | Command::QuickOpen
             | Command::Accounts
             | Command::ToggleRepoList
@@ -315,6 +323,7 @@ impl Command {
             Command::OpenRepo => ctrl(Key::O),
             Command::Clone => ctrl_shift(Key::C),
             Command::CloseTab => ctrl(Key::W),
+            Command::ReopenClosedTab => ctrl_shift(Key::T),
             Command::QuickOpen => ctrl(Key::P),
             Command::ToggleRepoList => ctrl(Key::B),
             Command::CurrentBranchOnly => ctrl_shift(Key::A),
@@ -353,7 +362,7 @@ impl Command {
     /// demande un dépôt ouvert dans l'onglet actif, puis ce que l'onglet exige (`RepoTab::can_run`).
     pub fn enabled(self, cx: &CommandContext) -> bool {
         match self.scope() {
-            Scope::App => true,
+            Scope::App => self != Command::ReopenClosedTab || cx.can_reopen_tab,
             Scope::Repo => cx.repo.is_some_and(|tab| tab.can_run(self)),
         }
     }

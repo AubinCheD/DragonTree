@@ -11,6 +11,7 @@ use egui::{Frame, Key, KeyboardShortcut, Modifiers};
 
 use crate::accounts::{AccountsWindow, ForgeEvent};
 use crate::clone::{CloneEvent, CloneWindow};
+use crate::closed_tabs::ClosedTabs;
 use crate::commands::{self, Command, CommandContext, Scope};
 use crate::jobs::Jobs;
 use crate::repo::{RepoEvent, RepoTab};
@@ -156,6 +157,8 @@ pub struct DragonTreeApp {
     /// Langue de Windows, lue au démarrage (réglage « Système »).
     system_lang: Lang,
     window_title: String,
+    /// Onglets de dépôt fermés pendant la session (Ctrl+Maj+T).
+    closed_tabs: ClosedTabs,
 }
 
 impl DragonTreeApp {
@@ -220,6 +223,7 @@ impl DragonTreeApp {
             applied_theme,
             system_lang,
             window_title: String::new(),
+            closed_tabs: ClosedTabs::default(),
         };
 
         // Onglets : ceux de la ligne de commande, sinon ceux de la dernière session.
@@ -294,6 +298,7 @@ impl DragonTreeApp {
         if index >= self.tabs.len() {
             return;
         }
+        self.remember_closed(index);
         self.tabs.remove(index);
         if self.tabs.is_empty() {
             self.new_welcome_tab();
@@ -302,6 +307,45 @@ impl DragonTreeApp {
             self.active = self.active.saturating_sub(1).min(self.tabs.len() - 1);
         }
         self.remember_tabs();
+    }
+
+    /// Empile l'onglet `index` (s'il s'agit d'un dépôt) avant sa fermeture ; l'onglet d'accueil n'est pas retenu.
+    fn remember_closed(&mut self, index: usize) {
+        if let Some(TabKind::Repo(r)) = self.tabs.get(index).map(|t| &t.kind) {
+            self.closed_tabs.push(r.path.clone(), index);
+        }
+    }
+
+    /// Empile en bloc tous les onglets de dépôt sauf `keep` (« Fermer les autres », « Tout fermer »).
+    fn remember_closed_all(&mut self, keep: Option<usize>) {
+        let closing =
+            self.tabs.iter().enumerate().filter(|(i, _)| Some(*i) != keep).filter_map(|(i, t)| match &t.kind {
+                TabKind::Repo(r) => Some((r.path.clone(), i)),
+                TabKind::Welcome => None,
+            });
+        self.closed_tabs.push_all(closing);
+    }
+
+    /// Rouvre le dernier onglet fermé, à sa position d'origine si possible, sinon à la fin, et l'active.
+    fn reopen_closed_tab(&mut self) {
+        let Some(closed) = self.closed_tabs.pop() else { return };
+        let key = path_key(&closed.path);
+        if let Some(i) = self.tabs.iter().position(|t| matches!(&t.kind, TabKind::Repo(r) if path_key(&r.path) == key))
+        {
+            self.active = i;
+            self.remember_tabs();
+            return;
+        }
+        // Un onglet d'accueil seul (barre vide après une fermeture) est remplacé plutôt que gardé à côté.
+        let only_welcome = matches!(self.tabs.as_slice(), [Tab { kind: TabKind::Welcome, .. }]);
+        self.open_repo(&closed.path, !only_welcome);
+        if !only_welcome {
+            let tab = self.tabs.pop().expect("l'onglet vient d'être ajouté");
+            let at = closed.index.min(self.tabs.len());
+            self.tabs.insert(at, tab);
+            self.active = at;
+            self.remember_tabs();
+        }
     }
 
     fn remember_tabs(&mut self) {
@@ -466,7 +510,7 @@ impl DragonTreeApp {
             Some(TabKind::Repo(r)) if r.repo.is_some() => Some(r.as_ref()),
             _ => None,
         };
-        CommandContext { settings: &self.shared.settings, repo }
+        CommandContext { settings: &self.shared.settings, repo, can_reopen_tab: !self.closed_tabs.is_empty() }
     }
 
     /// Commandes proposées par la palette Ctrl+P : celles du registre utilisables en ce moment.
@@ -497,6 +541,7 @@ impl DragonTreeApp {
         match cmd {
             Command::NewTab => self.new_welcome_tab(),
             Command::CloseTab => self.close_tab(self.active),
+            Command::ReopenClosedTab => self.reopen_closed_tab(),
             Command::OpenRepo => self.shared.actions.push(AppAction::PickAndOpenRepo),
             Command::Clone => self.shared.actions.push(AppAction::ShowClone),
             Command::InitRepo => self.shared.actions.push(AppAction::InitRepo),
@@ -583,12 +628,14 @@ impl DragonTreeApp {
                 TabBarAction::Select(i) => self.active = i.min(self.tabs.len() - 1),
                 TabBarAction::Close(i) => self.close_tab(i),
                 TabBarAction::CloseOthers(i) => {
+                    self.remember_closed_all(Some(i));
                     let keep = self.tabs.remove(i);
                     self.tabs = vec![keep];
                     self.active = 0;
                     self.remember_tabs();
                 }
                 TabBarAction::CloseAll => {
+                    self.remember_closed_all(None);
                     self.tabs.clear();
                     self.new_welcome_tab();
                     self.remember_tabs();

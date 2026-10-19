@@ -80,6 +80,7 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Raccourci | Action |
 | --- | --- |
 | Ctrl+T / Ctrl+W | Nouvel onglet / fermer l'onglet |
+| Ctrl+Maj+T | Rouvrir le dernier onglet fermé |
 | Ctrl+Tab, Ctrl+Maj+Tab, Ctrl+1…9 | Changer d'onglet |
 | Ctrl+P | Palette (dépôts, branches, commandes) |
 | Ctrl+O | Ouvrir un dépôt |
