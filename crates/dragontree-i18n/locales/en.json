@@ -406,6 +406,7 @@
   "Profondeur maximale": "Maximum depth",
   "Pull de {remote}/{branch} terminé": "Pull from {remote}/{branch} complete",
   "Push du tag": "Tag push",
+  "Quitter": "Quit",
   "Réafficher le dépôt masqué": "Show the hidden repository again",
   "Réafficher les {n} dépôts masqués": "Show the {n} hidden repositories again",
   "Réappliquer le dernier stash et le supprimer": "Reapply the latest stash and drop it",

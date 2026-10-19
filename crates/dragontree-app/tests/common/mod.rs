@@ -222,3 +222,8 @@ pub fn menu_item_checked(h: &Harness<'static, DragonTreeApp>, label: &str) -> Op
     let node = menu_item(h, label).unwrap_or_else(|| panic!("entrée « {label} » absente"));
     node.accesskit_node().toggled().map(|t| t == egui::accesskit::Toggled::True)
 }
+
+/// Vrai si la dernière image a demandé la fermeture de la fenêtre (`ViewportCommand::Close`).
+pub fn close_requested(h: &Harness<'static, DragonTreeApp>) -> bool {
+    h.output().viewport_output.values().any(|v| v.commands.iter().any(|c| matches!(c, egui::ViewportCommand::Close)))
+}

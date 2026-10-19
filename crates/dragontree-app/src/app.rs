@@ -51,6 +51,8 @@ pub enum AppAction {
     Rescan,
     TrustRepo(PathBuf),
     QuickOpen,
+    /// Fermer l'application (Fichier › Quitter) : passe par `save`, comme la croix de la fenêtre.
+    Quit,
     /// Commande du registre choisie dans une vue (palette Ctrl+P).
     RunCommand(Command),
 }
@@ -422,7 +424,7 @@ impl DragonTreeApp {
         while !self.shared.actions.is_empty() {
             let actions = std::mem::take(&mut self.shared.actions);
             for action in actions {
-                self.apply_action(action);
+                self.apply_action(action, ctx);
             }
         }
         if self.shared.settings_dirty {
@@ -440,7 +442,7 @@ impl DragonTreeApp {
         }
     }
 
-    fn apply_action(&mut self, action: AppAction) {
+    fn apply_action(&mut self, action: AppAction, ctx: &egui::Context) {
         match action {
             AppAction::OpenRepo(p) => self.open_repo(&p, false),
             AppAction::OpenRepoNewTab(p) => self.open_repo(&p, true),
@@ -500,6 +502,7 @@ impl DragonTreeApp {
                 self.quick_open = Some(crate::quick_open::QuickOpen::default());
             }
             AppAction::RunCommand(cmd) => self.run_command(cmd),
+            AppAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }
 
@@ -549,6 +552,7 @@ impl DragonTreeApp {
             Command::Accounts => self.shared.actions.push(AppAction::ShowAccounts),
             Command::Settings => self.shared.actions.push(AppAction::ShowSettings),
             Command::ShowLog => self.shared.actions.push(AppAction::ShowLog),
+            Command::Quit => self.shared.actions.push(AppAction::Quit),
             Command::ToggleRepoList => {
                 self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
                 self.shared.settings_dirty = true;

@@ -34,6 +34,8 @@ pub enum Command {
     ReopenClosedTab,
     QuickOpen,
     Accounts,
+    /// Ferme l'application (pas de raccourci propre : Alt+F4 reste celui du système).
+    Quit,
     ShowChanges,
     ShowHistory,
     CurrentBranchOnly,
@@ -93,6 +95,8 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::QuickOpen),
             Cmd(Command::Accounts),
+            Separator,
+            Cmd(Command::Quit),
         ],
     ),
     (
@@ -178,6 +182,7 @@ impl Command {
         Command::ReopenClosedTab,
         Command::QuickOpen,
         Command::Accounts,
+        Command::Quit,
         Command::ShowChanges,
         Command::ShowHistory,
         Command::CurrentBranchOnly,
@@ -216,6 +221,7 @@ impl Command {
             Command::ReopenClosedTab => tr!("Rouvrir l'onglet fermé"),
             Command::QuickOpen => tr!("Palette de commandes"),
             Command::Accounts => tr!("Comptes…"),
+            Command::Quit => tr!("Quitter"),
             Command::ShowChanges => tr!("Modifications locales"),
             Command::ShowHistory => tr!("Tous les commits"),
             Command::CurrentBranchOnly => tr!("Branche courante seulement"),
@@ -255,6 +261,7 @@ impl Command {
             Command::ReopenClosedTab => icons::ARROW_COUNTER_CLOCKWISE,
             Command::QuickOpen => icons::MAGNIFYING_GLASS,
             Command::Accounts => icons::USER_CIRCLE,
+            Command::Quit => icons::SIGN_OUT,
             Command::ShowChanges => icons::GIT_DIFF,
             Command::ShowHistory => icons::GIT_COMMIT,
             Command::CurrentBranchOnly => icons::GIT_BRANCH,
@@ -290,6 +297,7 @@ impl Command {
             | Command::ReopenClosedTab
             | Command::QuickOpen
             | Command::Accounts
+            | Command::Quit
             | Command::ToggleRepoList
             | Command::ShowLog
             | Command::ZoomIn

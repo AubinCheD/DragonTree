@@ -101,7 +101,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | F1 | Nouvel onglet, Ouvrir, Cloner, Initialiser un dépôt, Fermer l'onglet, Palette Ctrl+P, Comptes, Réglages (Ctrl+,) | ✅ |
 | F2 | Rouvrir le dernier onglet fermé (Ctrl+Maj+T) | ✅ |
 | F3 | Gestion des clés SSH (générer, choisir, plusieurs clés) | 🆕 M |
-| F4 | Quitter | 🆕 P |
+| F4 | Quitter | ✅ |
 
 ### View
 
