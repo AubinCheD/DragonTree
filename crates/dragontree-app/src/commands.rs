@@ -87,6 +87,10 @@ pub enum Command {
     Stash,
     /// Enregistre un stash sans toucher aux modifications en cours.
     Snapshot,
+    /// Applique un patch lu dans un fichier choisi (aussi : fichier déposé sur la fenêtre).
+    ApplyPatch,
+    /// Applique un patch collé dans une zone de texte (le presse-papiers n'est lisible que par un collage).
+    PastePatch,
     OpenExplorer,
     OpenTerminal,
     OpenVsCode,
@@ -193,6 +197,9 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::Stash),
             Cmd(Command::Snapshot),
             Separator,
+            Cmd(Command::ApplyPatch),
+            Cmd(Command::PastePatch),
+            Separator,
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
             Cmd(Command::OpenVsCode),
@@ -279,6 +286,8 @@ impl Command {
         Command::CreateWorktree,
         Command::Stash,
         Command::Snapshot,
+        Command::ApplyPatch,
+        Command::PastePatch,
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenVsCode,
@@ -338,6 +347,8 @@ impl Command {
             Command::CreateWorktree => tr!("Créer un worktree…"),
             Command::Stash => "Stash…",
             Command::Snapshot => tr!("Snapshot…"),
+            Command::ApplyPatch => tr!("Appliquer un patch…"),
+            Command::PastePatch => tr!("Coller un patch…"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
             Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
@@ -395,6 +406,8 @@ impl Command {
             Command::CreateWorktree => icons::TREE_STRUCTURE,
             Command::Stash => icons::TRAY_ARROW_DOWN,
             Command::Snapshot => icons::CAMERA,
+            Command::ApplyPatch => icons::FILE_ARROW_DOWN,
+            Command::PastePatch => icons::CLIPBOARD_TEXT,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenVsCode => icons::CODE,
@@ -451,6 +464,8 @@ impl Command {
             | Command::CreateWorktree
             | Command::Stash
             | Command::Snapshot
+            | Command::ApplyPatch
+            | Command::PastePatch
             | Command::OpenExplorer
             | Command::OpenTerminal
             | Command::OpenVsCode => Scope::Repo,

@@ -7,6 +7,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{RichText, Ui};
 
 use super::actions::StashOp;
+use super::patches::{PatchPreview, PatchTarget};
 use super::{Refresh, RepoTab};
 use crate::app::{AppAction, Shared};
 use crate::icons;
@@ -35,7 +36,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// Dialogue modal de l'onglet. `CreateWorktree::pick` : la branche se choisit dans le dialogue (Dépôt › Créer un
 /// worktree…) ; `RemoveWorktree::force` (`--force`) : seulement si la case est cochée.
 /// `Stash::snapshot` : enregistre un stash sans toucher aux modifications (`untracked` et `keep_index` sans objet) ;
-/// `StashFiles` : seulement les fichiers choisis dans la vue Changements.
+/// `StashFiles` : seulement les fichiers choisis dans la vue Changements ; `ApplyPatch` : aperçu d'un patch lu (fichier
+/// déposé, texte collé) et cible choisie ; `PastePatch` : zone où coller le texte d'un patch.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -53,6 +55,8 @@ pub enum Dialog {
     Stash { message: String, untracked: bool, keep_index: bool, snapshot: bool },
     StashFiles { message: String, paths: Vec<String> },
     RenameStash { oid: Oid, label: String, message: String },
+    ApplyPatch { preview: Box<PatchPreview>, target: PatchTarget },
+    PastePatch { text: String },
     Push { remote: String, local: String, remote_branch: String, set_upstream: bool, force: bool, tags: bool },
     Pull { remote: String, branch: String, rebase: bool },
     Discard { tracked: Vec<String>, untracked: Vec<String> },
@@ -98,6 +102,11 @@ impl Dialog {
                 (tr!("Mettre de côté les fichiers").into(), tr!("Mettre de côté").into(), false)
             }
             Dialog::RenameStash { .. } => (tr!("Renommer le stash").into(), tr!("Renommer").into(), false),
+            Dialog::ApplyPatch { target: PatchTarget::Am, .. } => {
+                (tr!("Appliquer un patch").into(), tr!("Créer les commits").into(), false)
+            }
+            Dialog::ApplyPatch { .. } => (tr!("Appliquer un patch").into(), tr!("Appliquer").into(), false),
+            Dialog::PastePatch { .. } => (tr!("Coller un patch").into(), tr!("Aperçu").into(), false),
             Dialog::Push { .. } => ("Push".into(), "Push".into(), false),
             Dialog::Pull { .. } => ("Pull".into(), "Pull".into(), false),
             Dialog::Discard { .. } => {
@@ -447,6 +456,8 @@ impl RepoTab {
                 );
                 true
             }
+            Dialog::ApplyPatch { preview, target } => Self::apply_patch_body(ui, preview, target, p),
+            Dialog::PastePatch { text } => Self::paste_patch_body(ui, text, p),
             Dialog::DropStash { label, .. } => {
                 warn(ui, &tr!("{label} sera définitivement supprimé.", label));
                 true
@@ -534,6 +545,8 @@ impl RepoTab {
             }
             Dialog::StashFiles { message, paths } => self.op_stash_files(shared, message, paths),
             Dialog::RenameStash { oid, label, message } => self.op_stash_rename(shared, oid, label, message),
+            Dialog::ApplyPatch { preview, target } => self.op_apply_patch(shared, preview, target),
+            Dialog::PastePatch { text } => self.open_patch_text(shared, tr!("Presse-papiers").into(), text),
             Dialog::Push { remote, local, remote_branch, set_upstream, force, tags } => {
                 self.op_push(shared, remote, local, remote_branch.trim().to_string(), set_upstream, force, tags)
             }

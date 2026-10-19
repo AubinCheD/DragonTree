@@ -3,6 +3,7 @@
 //! Toutes les opérations passent par l'exécutable `git` de l'utilisateur,
 //! appelé avec des tableaux d'arguments — jamais via un shell — et des sorties `-z`.
 
+pub mod apply;
 pub mod blame;
 pub mod collapse;
 pub mod conflict;
@@ -25,6 +26,7 @@ pub mod stash;
 pub mod status;
 pub mod worktree;
 
+pub use apply::{ApplyTarget, PatchFile, is_mail_patch};
 pub use collapse::{CollapsedLog, collapse_merges};
 pub use diff::{ChangeKind, DiffLine, DiffOptions, FileChange, FileDiff, Hunk, LineKind};
 pub use error::GitError;

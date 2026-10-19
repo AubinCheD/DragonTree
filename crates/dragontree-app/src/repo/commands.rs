@@ -2,7 +2,7 @@
 //! (`can_run`) et ce qu'elles font (`run_command`), pour les menus, les raccourcis, la palette Ctrl+P et la
 //! barre d'outils.
 
-use dragontree_git::HeadState;
+use dragontree_git::{HeadState, OpState};
 use dragontree_i18n::tr;
 
 use super::{Dialog, Refresh, RepoTab, RepoView};
@@ -26,6 +26,8 @@ impl RepoTab {
             Command::Pull | Command::QuickPull | Command::Push | Command::QuickPush => has_remote && on_branch,
             Command::Stash | Command::Snapshot => self.status.as_ref().is_some_and(|s| !s.is_clean()),
             Command::NewBranch | Command::NewTag | Command::CreateWorktree => self.refs.is_some(),
+            // Une opération en cours (fusion, rebase, session am…) : un patch s'y mélangerait.
+            Command::ApplyPatch | Command::PastePatch => self.refs.is_some() && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
             Command::OpenVsCode => crate::util::vscode_available(),
@@ -94,6 +96,17 @@ impl RepoTab {
                 self.dialog =
                     Some(Dialog::Stash { message: String::new(), untracked: false, keep_index: false, snapshot: true })
             }
+            Command::ApplyPatch => {
+                let picked = rfd::FileDialog::new()
+                    .set_title(tr!("Choisir un patch"))
+                    .add_filter(tr!("Patchs"), &["patch", "diff"])
+                    .add_filter(tr!("Tous les fichiers"), &["*"])
+                    .pick_file();
+                if let Some(path) = picked {
+                    self.open_patch_file(shared, path);
+                }
+            }
+            Command::PastePatch => self.dialog = Some(Dialog::PastePatch { text: String::new() }),
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),
             Command::OpenVsCode => crate::util::open_in_vscode(&self.path),

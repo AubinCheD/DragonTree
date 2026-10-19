@@ -12,6 +12,7 @@ mod folding;
 mod graph_paint;
 mod history;
 mod image_diff;
+mod patches;
 mod rebase_ui;
 mod scope;
 mod sidebar;
@@ -42,6 +43,7 @@ use crate::toasts::Toast;
 pub use blame::FileHistoryWindow;
 pub use dialogs::Dialog;
 pub use diff_view::DiffViewState;
+pub use patches::is_patch_file;
 
 /// Nombre de commits du premier affichage (le reste suit en arrière-plan).
 const FIRST_BATCH: usize = 2000;
@@ -243,6 +245,7 @@ struct Gens {
     details: u64,
     commit_diff: u64,
     work_diff: u64,
+    patch: u64,
 }
 
 /// Détails lus d'un commit : infos, fichiers, et pour un stash le commit de ses fichiers non suivis avec l'indice du
@@ -270,6 +273,8 @@ pub enum RepoEvent {
     Details(u64, Oid, Result<DetailsData, GitError>),
     CommitDiff(u64, Result<FileDiff, GitError>),
     WorkDiff(u64, (Side, String), Result<FileDiff, GitError>),
+    /// Patch lu et vérifié, prêt pour le dialogue d'application.
+    PatchPreview(u64, Result<Box<patches::PatchPreview>, GitError>),
     OpProgress(u64, Progress),
     OpDone {
         id: u64,
@@ -764,6 +769,7 @@ impl RepoTab {
                     Err(e) => shared.toast(Toast::error(tr!("Diff impossible"), e.to_string())),
                 }
             }
+            RepoEvent::PatchPreview(g, res) if g == self.gens.patch => self.on_patch_preview(shared, res),
             RepoEvent::WorkDiff(g, key, res) if g == self.gens.work_diff => {
                 self.changes.diff_loading = false;
                 match res {

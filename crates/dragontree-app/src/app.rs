@@ -691,6 +691,23 @@ impl DragonTreeApp {
         }
     }
 
+    /// Fichiers déposés sur la fenêtre : un `.patch` ou `.diff` ouvre l'aperçu d'application dans l'onglet actif.
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        let Some(path) = dropped.iter().find(|p| crate::repo::is_patch_file(p)).cloned() else {
+            if !dropped.is_empty() {
+                self.shared.toast(Toast::info(tr!("Déposez un fichier .patch ou .diff pour l'appliquer")));
+            }
+            return;
+        };
+        match self.tabs.get_mut(self.active).map(|t| &mut t.kind) {
+            Some(TabKind::Repo(r)) if r.can_run(Command::ApplyPatch) => r.open_patch_file(&self.shared, path),
+            _ => self
+                .shared
+                .toast(Toast::info(tr!("Ouvrez un dépôt (et fermez le dialogue en cours) pour appliquer un patch"))),
+        }
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // Raccourcis du registre, les plus spécifiques d'abord. Celui d'une commande grisée est consommé quand
         // même : sinon un raccourci moins spécifique (Ctrl+T pour Ctrl+Maj+T) prendrait l'appui.
@@ -818,6 +835,7 @@ impl eframe::App for DragonTreeApp {
         let ctx = ui.ctx().clone();
         self.process_events();
         self.handle_shortcuts(&ctx);
+        self.handle_dropped_files(&ctx);
         let p = Palette::current(&ctx);
 
         // Retour au premier plan : rafraîchir l'onglet actif.
