@@ -99,6 +99,13 @@ pub enum Command {
     BisectStart,
     /// Termine la session de bisect et revient à la branche de départ.
     BisectReset,
+    /// Initialise Git Flow : branches, préfixes et tag de version (clés `gitflow.*`).
+    GitFlowInit,
+    GitFlowStartFeature,
+    GitFlowStartRelease,
+    GitFlowStartHotfix,
+    /// Termine la feature, la release ou le hotfix de la branche courante.
+    GitFlowFinish,
     OpenExplorer,
     OpenTerminal,
     OpenVsCode,
@@ -213,6 +220,18 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::PastePatch),
             Separator,
             Submenu(tr_mark!("Bisect"), &[Cmd(Command::BisectStart), Cmd(Command::BisectReset)]),
+            Submenu(
+                tr_mark!("Git Flow"),
+                &[
+                    Cmd(Command::GitFlowInit),
+                    Separator,
+                    Cmd(Command::GitFlowStartFeature),
+                    Cmd(Command::GitFlowStartRelease),
+                    Cmd(Command::GitFlowStartHotfix),
+                    Separator,
+                    Cmd(Command::GitFlowFinish),
+                ],
+            ),
             Separator,
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
@@ -308,6 +327,11 @@ impl Command {
         Command::PastePatch,
         Command::BisectStart,
         Command::BisectReset,
+        Command::GitFlowInit,
+        Command::GitFlowStartFeature,
+        Command::GitFlowStartRelease,
+        Command::GitFlowStartHotfix,
+        Command::GitFlowFinish,
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenVsCode,
@@ -374,6 +398,11 @@ impl Command {
             Command::PastePatch => tr!("Coller un patch…"),
             Command::BisectStart => tr!("Démarrer"),
             Command::BisectReset => tr!("Terminer"),
+            Command::GitFlowInit => tr!("Initialiser Git Flow…"),
+            Command::GitFlowStartFeature => tr!("Démarrer une feature…"),
+            Command::GitFlowStartRelease => tr!("Démarrer une release…"),
+            Command::GitFlowStartHotfix => tr!("Démarrer un hotfix…"),
+            Command::GitFlowFinish => tr!("Terminer la branche Git Flow…"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
             Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
@@ -382,6 +411,19 @@ impl Command {
             Command::Language(None) => tr!("Système"),
             // Chaque langue est nommée dans sa propre langue.
             Command::Language(Some(lang)) => lang.native_name(),
+        }
+    }
+
+    /// Libellé dans la palette Ctrl+P : celui du menu, précisé par la famille de la commande quand il serait
+    /// ambigu hors de son sous-menu (« Suivre un motif… » devient « Git LFS : suivre un motif… »).
+    pub fn palette_label(self) -> &'static str {
+        match self {
+            Command::GitFlowInit => tr!("Git Flow : initialiser…"),
+            Command::GitFlowStartFeature => tr!("Git Flow : démarrer une feature…"),
+            Command::GitFlowStartRelease => tr!("Git Flow : démarrer une release…"),
+            Command::GitFlowStartHotfix => tr!("Git Flow : démarrer un hotfix…"),
+            Command::GitFlowFinish => tr!("Git Flow : terminer la branche…"),
+            _ => self.label(),
         }
     }
 
@@ -437,6 +479,11 @@ impl Command {
             Command::ApplyPatch => icons::FILE_ARROW_DOWN,
             Command::PastePatch => icons::CLIPBOARD_TEXT,
             Command::BisectStart | Command::BisectReset => icons::BUG,
+            Command::GitFlowInit
+            | Command::GitFlowStartFeature
+            | Command::GitFlowStartRelease
+            | Command::GitFlowStartHotfix
+            | Command::GitFlowFinish => icons::FLOW_ARROW,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenVsCode => icons::CODE,
@@ -500,6 +547,11 @@ impl Command {
             | Command::PastePatch
             | Command::BisectStart
             | Command::BisectReset
+            | Command::GitFlowInit
+            | Command::GitFlowStartFeature
+            | Command::GitFlowStartRelease
+            | Command::GitFlowStartHotfix
+            | Command::GitFlowFinish
             | Command::OpenExplorer
             | Command::OpenTerminal
             | Command::OpenVsCode
@@ -696,6 +748,19 @@ mod tests {
         }
         for cmd in in_menus.iter().chain(NOT_IN_MENUS) {
             assert!(Command::ALL.contains(cmd), "{cmd:?} absent de Command::ALL");
+        }
+    }
+
+    #[test]
+    fn git_flow_and_lfs_commands_name_their_family_in_the_palette() {
+        for cmd in Command::ALL {
+            let label = format!("{cmd:?}");
+            let family = if label.starts_with("GitFlow") {
+                "Git Flow"
+            } else {
+                continue;
+            };
+            assert!(cmd.palette_label().starts_with(family), "{cmd:?} : {}", cmd.palette_label());
         }
     }
 

@@ -11,6 +11,7 @@ mod details;
 mod dialogs;
 pub mod diff_view;
 mod folding;
+mod gitflow;
 mod graph_paint;
 mod history;
 mod ignore;
@@ -33,9 +34,9 @@ use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
-    BisectState, CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState,
-    LogOptions, LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
-    Worktree,
+    BisectState, CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError,
+    GitFlowConfig, HeadState, LogOptions, LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry,
+    StatusSnapshot, Submodule, Worktree,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
@@ -268,6 +269,12 @@ struct Gens {
 /// premier d'entre eux dans la liste.
 type DetailsData = (CommitInfo, Vec<FileChange>, Option<(usize, Oid)>);
 
+/// Réglages de dépôt lus avec les stashs, remotes et sous-modules : Git Flow (clés `gitflow.*`).
+#[derive(Debug, Default)]
+pub struct Integrations {
+    pub gitflow: Option<GitFlowConfig>,
+}
+
 /// Événements des tâches d'arrière-plan de l'onglet.
 pub enum RepoEvent {
     Opened(Result<Arc<Repo>, GitError>),
@@ -284,7 +291,7 @@ pub enum RepoEvent {
         view: Box<CollapsedLog>,
         follow_selection: bool,
     },
-    Extras(u64, Vec<StashEntry>, Vec<Remote>, Vec<Submodule>, Vec<Worktree>),
+    Extras(u64, Vec<StashEntry>, Vec<Remote>, Vec<Submodule>, Vec<Worktree>, Box<Integrations>),
     /// Détails d'un commit ; pour un stash, le commit de ses fichiers non suivis et l'indice du premier d'entre eux.
     Details(u64, Oid, Result<DetailsData, GitError>),
     CommitDiff(u64, Result<FileDiff, GitError>),
@@ -349,6 +356,8 @@ pub struct RepoTab {
     pub submodules: Arc<Vec<Submodule>>,
     /// Worktrees du dépôt, le principal d'abord (lus avec les stashs, remotes et sous-modules).
     pub worktrees: Arc<Vec<Worktree>>,
+    /// Configuration de Git Flow, `None` tant que le dépôt n'est pas initialisé (lue avec les stashs, remotes…).
+    pub gitflow: Option<GitFlowConfig>,
     pub view: RepoView,
     pub history: HistoryState,
     pub changes: ChangesState,
@@ -393,6 +402,7 @@ impl RepoTab {
             remotes: Arc::new(Vec::new()),
             submodules: Arc::new(Vec::new()),
             worktrees: Arc::new(Vec::new()),
+            gitflow: None,
             view: RepoView::History,
             history: HistoryState::default(),
             changes: ChangesState { push_after: shared.settings.push_after_commit, ..Default::default() },
@@ -509,7 +519,11 @@ impl RepoTab {
                 let remotes = r.remotes().unwrap_or_default();
                 let subs = r.submodules().unwrap_or_default();
                 let worktrees = r.worktrees().unwrap_or_default();
-                Some(AppEvent::Repo(id, RepoEvent::Extras(g, stashes, remotes, subs, worktrees)))
+                let integrations = Integrations { gitflow: r.gitflow_config().unwrap_or_default() };
+                Some(AppEvent::Repo(
+                    id,
+                    RepoEvent::Extras(g, stashes, remotes, subs, worktrees, Box::new(integrations)),
+                ))
             });
         }
         if what.log {
@@ -766,7 +780,7 @@ impl RepoTab {
                 let list = CommitList { commits: Arc::new(commits), graph: Arc::new(graph), index: Arc::new(index) };
                 self.show_list(shared, list, folded, &hidden_in, follow_selection);
             }
-            RepoEvent::Extras(g, stashes, remotes, subs, worktrees) if g == self.gens.extras => {
+            RepoEvent::Extras(g, stashes, remotes, subs, worktrees, integrations) if g == self.gens.extras => {
                 self.stashes = Arc::new(stashes);
                 // Le stash sélectionné a disparu (pop, suppression) : ses détails n'ont plus d'objet.
                 if let Some((gone, _)) = self.history.external.clone()
@@ -786,6 +800,7 @@ impl RepoTab {
                 self.remotes = Arc::new(remotes);
                 self.submodules = Arc::new(subs);
                 self.worktrees = Arc::new(worktrees);
+                self.gitflow = integrations.gitflow;
             }
             RepoEvent::Details(g, oid, res) if g == self.gens.details => {
                 self.history.details_loading = false;

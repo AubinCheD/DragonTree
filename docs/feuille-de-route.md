@@ -137,7 +137,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | R10 | Sous-modules : ajouter, supprimer, déplacer, changer l'URL (la liste, la mise à jour et l'ouverture en onglet existent déjà : `crates/dragontree-app/src/repo/sidebar.rs:204-259`) | ✅ |
 | R11 | .gitignore : ajouter un motif avec un aperçu des fichiers concernés (« Ignorer » existe déjà) | ✅ |
 | R12 | Bisect (bon, mauvais, passer, bandeau d'état) | ✅ |
-| R13 | Git Flow (initialiser, start/finish feature, release, hotfix) | 🆕 M |
+| R13 | Git Flow (initialiser, start/finish feature, release, hotfix) | ✅ |
 | R14 | Git LFS (init, track, fetch/pull/prune, verrous) | 🆕 G |
 | R15 | Commandes personnalisées (sur le dépôt, une branche, un commit ou un fichier ; script ou URL) | 🆕 G |
 | R16 | Fast-forward ou push de plusieurs branches à la fois ; sélection des branches périmées à supprimer | 🆕 P |

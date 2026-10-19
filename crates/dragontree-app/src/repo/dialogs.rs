@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use dragontree_git::{HunkSelection, MergeMode, Oid, OpState, PatchMode, ResetMode, WorktreeStart};
+use dragontree_git::{
+    FlowKind, GitFlowConfig, HunkSelection, MergeMode, Oid, OpState, PatchMode, ResetMode, WorktreeStart,
+};
 use dragontree_i18n::{tr, trn};
 use egui::{RichText, Ui};
 
@@ -41,7 +43,10 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `push_url` est un champ séparé, seulement si le remote a une URL de push distincte ; `RepoSettings` : identité
 /// locale, modèle de message et liens vers les tickets ; `AddSubmodule` : `path` vide reprend le nom du dépôt cloné,
 /// `branch` est facultative ; `EditSubmoduleUrl`, `MoveSubmodule` et `RemoveSubmodule` portent sur le sous-module installé
-/// dans `path` (`old` pour le déplacement) ; `Ignore` : motif, fichier cible et aperçu des fichiers concernés.
+/// dans `path` (`old` pour le déplacement) ; `Ignore` : motif, fichier cible et aperçu des fichiers concernés ;
+/// `GitFlowInit` : réglages de Git Flow à écrire ; `GitFlowStart` : nature et nom court de la branche à créer ;
+/// `GitFlowFinish` : branche de travail à terminer (nature, nom court), `delete_branch` demande de la supprimer ensuite
+/// (jamais forcé).
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -76,6 +81,9 @@ pub enum Dialog {
     MoveSubmodule { old: String, new: String },
     RemoveSubmodule { path: String },
     Ignore(Box<super::ignore::IgnoreForm>),
+    GitFlowInit(Box<GitFlowConfig>),
+    GitFlowStart { kind: FlowKind, name: String },
+    GitFlowFinish { kind: FlowKind, name: String, delete_branch: bool },
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
     Confirm { title: String, text: String, action: ConfirmAction },
 }
@@ -145,6 +153,14 @@ impl Dialog {
                 (tr!("Supprimer le sous-module « {path} »", path), tr!("Supprimer").into(), true)
             }
             Dialog::Ignore(_) => (tr!("Ignorer des fichiers").into(), tr!("Ignorer").into(), false),
+            Dialog::GitFlowInit(_) => (tr!("Initialiser Git Flow").into(), tr!("Initialiser").into(), false),
+            Dialog::GitFlowStart { kind, .. } => {
+                let (title, ok, _) = super::gitflow::start_texts(*kind);
+                (title.into(), ok.into(), false)
+            }
+            Dialog::GitFlowFinish { .. } => {
+                (tr!("Terminer la branche Git Flow").into(), tr!("Terminer la branche").into(), false)
+            }
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
             Dialog::Confirm { title, action: ConfirmAction::CheckoutDetached(_), .. } => {
                 (title.clone(), tr!("Continuer").into(), false)
@@ -520,6 +536,11 @@ impl RepoTab {
             Dialog::MoveSubmodule { old, new } => self.move_submodule_body(ui, old, new, p),
             Dialog::RemoveSubmodule { path } => Self::remove_submodule_body(ui, path, p),
             Dialog::Ignore(form) => Self::ignore_body(ui, form, p),
+            Dialog::GitFlowInit(cfg) => self.gitflow_init_body(ui, cfg, p),
+            Dialog::GitFlowStart { kind, name } => self.gitflow_start_body(ui, *kind, name, p),
+            Dialog::GitFlowFinish { kind, name, delete_branch } => {
+                self.gitflow_finish_body(ui, *kind, name, delete_branch, p)
+            }
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
@@ -652,6 +673,11 @@ impl RepoTab {
             Dialog::Ignore(form) => {
                 let target = form.target();
                 self.op_add_ignore(shared, form.pattern, target);
+            }
+            Dialog::GitFlowInit(cfg) => self.op_gitflow_init(shared, *cfg),
+            Dialog::GitFlowStart { kind, name } => self.op_gitflow_start(shared, kind, name.trim().to_string()),
+            Dialog::GitFlowFinish { kind, name, delete_branch } => {
+                self.op_gitflow_finish(shared, kind, name, delete_branch)
             }
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
             Dialog::Confirm { action, .. } => match action {

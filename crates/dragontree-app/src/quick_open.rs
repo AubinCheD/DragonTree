@@ -61,7 +61,7 @@ impl QuickOpen {
         }
         // Recherche dans le libellé affiché, donc traduit.
         for &cmd in commands {
-            let label = cmd.label();
+            let label = cmd.palette_label();
             if let Some(s) = widgets::fuzzy_score(&self.query, label) {
                 items.push((s + 2, Item::Command(cmd), label.to_string(), cmd.icon()));
             }

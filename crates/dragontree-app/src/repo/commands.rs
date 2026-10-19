@@ -2,7 +2,7 @@
 //! (`can_run`) et ce qu'elles font (`run_command`), pour les menus, les raccourcis, la palette Ctrl+P et la
 //! barre d'outils.
 
-use dragontree_git::{HeadState, OpState};
+use dragontree_git::{FlowKind, HeadState, OpState};
 use dragontree_i18n::tr;
 
 use super::{Dialog, Refresh, RepoTab, RepoView};
@@ -35,6 +35,12 @@ impl RepoTab {
             Command::ApplyPatch | Command::PastePatch => self.refs.is_some() && self.op_state == OpState::None,
             Command::BisectStart => self.refs.is_some() && self.op_state == OpState::None && self.bisect.is_none(),
             Command::BisectReset => self.bisect.is_some(),
+            Command::GitFlowInit => self.refs.is_some() && self.op_state == OpState::None,
+            // Git Flow doit être initialisé ; terminer exige en plus d'être sur une branche de travail.
+            Command::GitFlowStartFeature | Command::GitFlowStartRelease | Command::GitFlowStartHotfix => {
+                self.gitflow.is_some() && self.refs.is_some() && self.op_state == OpState::None
+            }
+            Command::GitFlowFinish => self.current_flow_branch().is_some() && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
             Command::OpenVsCode => crate::util::vscode_available(),
@@ -118,6 +124,11 @@ impl RepoTab {
             Command::PastePatch => self.dialog = Some(Dialog::PastePatch { text: String::new() }),
             Command::BisectStart => self.op_bisect_start(shared),
             Command::BisectReset => self.op_bisect_reset(shared),
+            Command::GitFlowInit => self.open_gitflow_init(),
+            Command::GitFlowStartFeature => self.open_gitflow_start(FlowKind::Feature),
+            Command::GitFlowStartRelease => self.open_gitflow_start(FlowKind::Release),
+            Command::GitFlowStartHotfix => self.open_gitflow_start(FlowKind::Hotfix),
+            Command::GitFlowFinish => self.open_gitflow_finish(),
             Command::RepoSettings => self.open_repo_settings(shared),
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),

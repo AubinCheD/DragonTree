@@ -32,6 +32,10 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   éditeur de conflits par région, outil de merge externe (`git mergetool`).
 - **Bisect** : démarrer depuis le menu d'un commit ou Dépôt › Bisect, bandeau d'état (révisions restantes, Bon, Mauvais,
   Passer, Terminer), commits marqués étiquetés dans le graphe, premier mauvais commit annoncé.
+- **Git Flow** (Dépôt › Git Flow, sans l'extension git-flow) : initialiser (clés `gitflow.*` de git-flow, donc un dépôt déjà
+  initialisé est reconnu), démarrer une feature, une release ou un hotfix, et terminer la branche courante : fusions
+  `--no-ff`, tag annoté « Version x » pour une release ou un hotfix, suppression facultative (jamais forcée) ; sur
+  conflit la suite s'arrête dans l'état de fusion de git et le message dit ce qui reste à faire.
 - **Patchs** : appliquer un patch (fichier, glisser-déposer d'un `.patch`/`.diff`, texte collé) avec aperçu des fichiers
   touchés et vérification, vers la copie de travail, l'index ou en commits (`git am`, patchs `format-patch`) ; **enregistrer
   comme patch** (commit, commits jusqu'à HEAD en un fichier par commit, stash, fichiers sélectionnés) ou le copier.
@@ -173,6 +177,6 @@ des fichiers `tests/live*.rs`.
 ## Limites connues et suite
 
 - **À venir** : vue centralisée des pull requests de tous les comptes (l'architecture des forges est prête).
-- Non gérés pour l'instant : Git LFS (au-delà de ce que fait git lui-même), git-flow, commandes personnalisées,
+- Non gérés pour l'instant : Git LFS (au-delà de ce que fait git lui-même), commandes personnalisées,
   icône intégrée à l'exécutable.
 - Dépôts SHA-256 non pris en charge.
