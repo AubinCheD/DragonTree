@@ -71,6 +71,11 @@ impl Repo {
         self.run_with_paths(&["add", "-A"], paths)
     }
 
+    /// Indexe quand même des fichiers ignorés (`git add -f`) : action explicite, jamais en bloc.
+    pub fn stage_force(&self, paths: &[String]) -> Result<(), GitError> {
+        self.run_with_paths(&["add", "-f"], paths)
+    }
+
     /// Désindexe les chemins (fonctionne aussi avant le premier commit).
     pub fn unstage(&self, paths: &[String]) -> Result<(), GitError> {
         if self.head_exists() {

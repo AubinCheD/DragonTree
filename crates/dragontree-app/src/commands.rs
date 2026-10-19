@@ -55,6 +55,10 @@ pub enum Command {
     ShowRemoteBranches,
     /// Affiche (ou masque) les stashs dans le graphe.
     ShowStashes,
+    /// Affiche (ou masque) les fichiers ignorés dans la vue Changements.
+    ShowIgnoredFiles,
+    /// Masque (ou réaffiche) les fichiers non suivis dans la vue Changements.
+    HideUntrackedFiles,
     /// Réaffiche toutes les branches, dossiers et remotes masqués du graphe du dépôt.
     ShowHiddenRefs,
     /// Ajoute au graphe les commits que seul le reflog atteint (propre à l'onglet).
@@ -138,6 +142,9 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::CollapseAllMerges),
             Cmd(Command::ExpandAllMerges),
+            Separator,
+            Cmd(Command::ShowIgnoredFiles),
+            Cmd(Command::HideUntrackedFiles),
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
@@ -237,6 +244,8 @@ impl Command {
         Command::ShowTags,
         Command::ShowRemoteBranches,
         Command::ShowStashes,
+        Command::ShowIgnoredFiles,
+        Command::HideUntrackedFiles,
         Command::ShowHiddenRefs,
         Command::ShowLostCommits,
         Command::CollapseAllMerges,
@@ -290,6 +299,8 @@ impl Command {
             Command::ShowTags => tr!("Afficher les tags"),
             Command::ShowRemoteBranches => tr!("Afficher les branches distantes"),
             Command::ShowStashes => tr!("Afficher les stashs"),
+            Command::ShowIgnoredFiles => tr!("Afficher les fichiers ignorés"),
+            Command::HideUntrackedFiles => tr!("Masquer les fichiers non suivis"),
             Command::ShowHiddenRefs => tr!("Réafficher toutes les branches masquées"),
             Command::ShowLostCommits => tr!("Commits perdus"),
             Command::CollapseAllMerges => tr!("Replier toutes les fusions"),
@@ -343,6 +354,8 @@ impl Command {
             Command::ShowTags => icons::TAG,
             Command::ShowRemoteBranches => icons::CLOUD,
             Command::ShowStashes => icons::STACK,
+            Command::ShowIgnoredFiles => icons::FILE_DASHED,
+            Command::HideUntrackedFiles => icons::FILE_MINUS,
             Command::ShowHiddenRefs => icons::EYE,
             Command::ShowLostCommits => icons::GHOST,
             Command::CollapseAllMerges => icons::ARROWS_IN_LINE_VERTICAL,
@@ -387,6 +400,8 @@ impl Command {
             | Command::ShowTags
             | Command::ShowRemoteBranches
             | Command::ShowStashes
+            | Command::ShowIgnoredFiles
+            | Command::HideUntrackedFiles
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset
@@ -497,6 +512,8 @@ impl Command {
             Command::ShowTags => Some(cx.settings.show_tags),
             Command::ShowRemoteBranches => Some(cx.settings.show_remote_branches),
             Command::ShowStashes => Some(cx.settings.show_stashes),
+            Command::ShowIgnoredFiles => Some(cx.settings.show_ignored_files),
+            Command::HideUntrackedFiles => Some(cx.settings.hide_untracked_files),
             Command::Language(lang) => Some(cx.settings.language == lang),
             Command::Theme(choice) => Some(cx.settings.theme == choice),
             _ => None,

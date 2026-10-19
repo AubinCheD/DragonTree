@@ -155,6 +155,14 @@ impl RepoTab {
         self.run_simple(shared, tr!("Indexation"), Refresh::STATUS, move |r| r.stage(&paths).map(|_| None));
     }
 
+    /// Indexe quand même des fichiers ignorés (`git add -f`) : demandé explicitement, fichier par fichier.
+    pub(crate) fn op_stage_force(&mut self, shared: &Shared, paths: Vec<String>) {
+        if paths.is_empty() {
+            return;
+        }
+        self.run_simple(shared, tr!("Indexation"), Refresh::STATUS, move |r| r.stage_force(&paths).map(|_| None));
+    }
+
     pub(crate) fn op_unstage(&mut self, shared: &Shared, paths: Vec<String>) {
         if paths.is_empty() {
             return;

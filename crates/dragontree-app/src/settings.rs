@@ -67,6 +67,10 @@ pub struct Settings {
     pub show_tags: bool,
     /// Branches distantes parcourues par le graphe et étiquetées dans l'historique.
     pub show_remote_branches: bool,
+    /// Vue Changements : liste aussi les fichiers ignorés par git (atténués, sans indexation en bloc).
+    pub show_ignored_files: bool,
+    /// Vue Changements : masque les fichiers non suivis.
+    pub hide_untracked_files: bool,
     /// Stashs affichés comme des lignes du graphe (en mode « toutes les branches »).
     pub show_stashes: bool,
     /// Dépôt (chemin) -> références masquées du graphe : noms complets ou motifs (`refs/heads/x`,
@@ -111,6 +115,8 @@ impl Default for Settings {
             show_tags: true,
             show_remote_branches: true,
             show_stashes: true,
+            show_ignored_files: false,
+            hide_untracked_files: false,
             hidden_refs: BTreeMap::new(),
             repo_list_width: 280.0,
             favorites: Vec::new(),

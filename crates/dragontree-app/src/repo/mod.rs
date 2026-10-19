@@ -442,8 +442,10 @@ impl RepoTab {
         if what.status {
             self.gens.status += 1;
             let (g, r) = (self.gens.status, repo.clone());
+            // Le réglage est lu ici : le thread de travail ne touche pas aux réglages.
+            let show_ignored = shared.settings.show_ignored_files;
             shared.jobs.spawn("status", move || {
-                let res = r.status().map(|s| (s, r.operation_state()));
+                let res = r.status_with_ignored(show_ignored).map(|s| (s, r.operation_state()));
                 Some(AppEvent::Repo(id, RepoEvent::Status(g, res)))
             });
         }
@@ -836,10 +838,11 @@ impl RepoTab {
             self.ensure_change_selected(shared);
             return;
         }
+        let hide_untracked = shared.settings.hide_untracked_files;
         let exists = |side: Side, path: &str| -> bool {
             match side {
                 Side::Staged => status.staged().iter().any(|e| e.path == path),
-                Side::Unstaged => status.unstaged().iter().any(|e| e.path == path),
+                Side::Unstaged => Self::entries(&status, Side::Unstaged, hide_untracked).iter().any(|e| e.path == path),
                 Side::Conflict => status.conflicted().iter().any(|e| e.path == path),
             }
         };

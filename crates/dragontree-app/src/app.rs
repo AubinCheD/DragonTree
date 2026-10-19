@@ -608,6 +608,23 @@ impl DragonTreeApp {
                 self.shared.settings_dirty = true;
                 self.reload_logs();
             }
+            // Un nouveau statut : git relit (ou non) les fichiers ignorés, et la sélection se revalide
+            // (un fichier non suivi masqué ne reste pas sélectionné).
+            Command::ShowIgnoredFiles | Command::HideUntrackedFiles => {
+                let settings = &mut self.shared.settings;
+                let flag = if cmd == Command::ShowIgnoredFiles {
+                    &mut settings.show_ignored_files
+                } else {
+                    &mut settings.hide_untracked_files
+                };
+                *flag = !*flag;
+                self.shared.settings_dirty = true;
+                for tab in &mut self.tabs {
+                    if let TabKind::Repo(r) = &mut tab.kind {
+                        r.refresh(&self.shared, crate::repo::Refresh::STATUS);
+                    }
+                }
+            }
             Command::ToggleRepoList => {
                 self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
                 self.shared.settings_dirty = true;

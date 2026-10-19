@@ -9,7 +9,8 @@ use egui::{Frame, Key, RichText, Ui};
 use super::details::file_row;
 use super::diff_view::{self, DiffMode};
 use super::{Dialog, RepoTab, Side};
-use crate::app::Shared;
+use crate::app::{AppAction, Shared};
+use crate::commands::Command;
 use crate::icons;
 use crate::theme::Palette;
 use crate::widgets;
@@ -43,8 +44,13 @@ fn status_letter(e: &StatusEntry, side: Side, p: &Palette) -> (&'static str, egu
 }
 
 impl RepoTab {
-    fn entries(status: &StatusSnapshot, side: Side) -> Vec<StatusEntry> {
+    /// Fichiers sélectionnables d'une liste (les fichiers ignorés n'en font jamais partie : ils s'affichent à part
+    /// et ne s'indexent que par « Indexer quand même »). `hide_untracked` écarte les non suivis des non indexés.
+    pub(super) fn entries(status: &StatusSnapshot, side: Side, hide_untracked: bool) -> Vec<StatusEntry> {
         let v = match side {
+            Side::Unstaged if hide_untracked => {
+                status.unstaged().into_iter().filter(|e| e.worktree != FileState::Untracked).collect()
+            }
             Side::Unstaged => status.unstaged(),
             Side::Staged => status.staged(),
             Side::Conflict => status.conflicted(),
@@ -58,9 +64,9 @@ impl RepoTab {
             return;
         }
         let Some(status) = self.status.clone() else { return };
-        let first = [Side::Conflict, Side::Unstaged, Side::Staged]
-            .into_iter()
-            .find_map(|side| Self::entries(&status, side).first().map(|e| (side, e.path.clone())));
+        let first = [Side::Conflict, Side::Unstaged, Side::Staged].into_iter().find_map(|side| {
+            Self::entries(&status, side, shared.settings.hide_untracked_files).first().map(|e| (side, e.path.clone()))
+        });
         if let Some((side, path)) = first {
             self.select_change(shared, side, path);
         }
@@ -152,7 +158,7 @@ impl RepoTab {
             self.ask_discard_selection(status);
         }
         if down || up {
-            let entries = Self::entries(status, side);
+            let entries = Self::entries(status, side, shared.settings.hide_untracked_files);
             if let Some(i) = entries.iter().position(|e| e.path == path) {
                 let next = if down { (i + 1).min(entries.len().saturating_sub(1)) } else { i.saturating_sub(1) };
                 if next != i {
@@ -190,7 +196,13 @@ impl RepoTab {
     }
 
     fn file_list(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette, status: &Arc<StatusSnapshot>, side: Side) {
-        let entries = Self::entries(status, side);
+        let entries = Self::entries(status, side, shared.settings.hide_untracked_files);
+        // Fichiers ignorés : en fin de la liste des non indexés, seulement si le statut les a demandés.
+        let ignored: Vec<StatusEntry> = if side == Side::Unstaged && shared.settings.show_ignored_files {
+            status.ignored().into_iter().cloned().collect()
+        } else {
+            Vec::new()
+        };
         ui.horizontal(|ui| {
             ui.set_height(26.0);
             let (title, icon) = match side {
@@ -201,39 +213,44 @@ impl RepoTab {
             let color = if side == Side::Conflict { p.conflict_fg } else { p.text };
             ui.label(RichText::new(format!("{icon} {title}")).strong().color(color));
             widgets::count_pill(ui, entries.len(), p);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match side {
-                Side::Unstaged if !entries.is_empty() => {
-                    if ui.button(format!("{} {}", icons::PLUS, tr!("Tout indexer"))).clicked() {
-                        let all = entries.iter().map(|e| e.path.clone()).collect();
-                        self.op_stage(shared, all);
-                    }
-                    if ui
-                        .small_button(icons::ARROW_COUNTER_CLOCKWISE)
-                        .on_hover_text(tr!("Annuler toutes les modifications non indexées…"))
-                        .clicked()
-                    {
-                        let (mut tracked, mut untracked) = (Vec::new(), Vec::new());
-                        for e in &entries {
-                            if e.worktree == FileState::Untracked {
-                                untracked.push(e.path.clone());
-                            } else {
-                                tracked.push(e.path.clone());
-                            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if side == Side::Unstaged {
+                    self.display_options_menu(ui, shared);
+                }
+                match side {
+                    Side::Unstaged if !entries.is_empty() => {
+                        if ui.button(format!("{} {}", icons::PLUS, tr!("Tout indexer"))).clicked() {
+                            let all = entries.iter().map(|e| e.path.clone()).collect();
+                            self.op_stage(shared, all);
                         }
-                        self.dialog = Some(Dialog::Discard { tracked, untracked });
+                        if ui
+                            .small_button(icons::ARROW_COUNTER_CLOCKWISE)
+                            .on_hover_text(tr!("Annuler toutes les modifications non indexées…"))
+                            .clicked()
+                        {
+                            let (mut tracked, mut untracked) = (Vec::new(), Vec::new());
+                            for e in &entries {
+                                if e.worktree == FileState::Untracked {
+                                    untracked.push(e.path.clone());
+                                } else {
+                                    tracked.push(e.path.clone());
+                                }
+                            }
+                            self.dialog = Some(Dialog::Discard { tracked, untracked });
+                        }
                     }
+                    Side::Staged
+                        if !entries.is_empty()
+                            && ui.button(format!("{} {}", icons::MINUS, tr!("Tout désindexer"))).clicked() =>
+                    {
+                        let all = entries.iter().map(|e| e.path.clone()).collect();
+                        self.op_unstage(shared, all);
+                    }
+                    _ => {}
                 }
-                Side::Staged
-                    if !entries.is_empty()
-                        && ui.button(format!("{} {}", icons::MINUS, tr!("Tout désindexer"))).clicked() =>
-                {
-                    let all = entries.iter().map(|e| e.path.clone()).collect();
-                    self.op_unstage(shared, all);
-                }
-                _ => {}
             });
         });
-        if entries.is_empty() {
+        if entries.is_empty() && ignored.is_empty() {
             let msg = match side {
                 Side::Unstaged => tr!("Aucune modification non indexée"),
                 Side::Staged => tr!("Aucun fichier indexé"),
@@ -248,9 +265,13 @@ impl RepoTab {
         egui::ScrollArea::vertical().id_salt(("files", side, self.id)).auto_shrink([false, false]).show_rows(
             ui,
             ROW_H,
-            entries.len(),
+            entries.len() + ignored.len(),
             |ui, range| {
                 for i in range {
+                    if let Some(e) = i.checked_sub(entries.len()).map(|j| &ignored[j]) {
+                        self.ignored_row(ui, shared, p, e);
+                        continue;
+                    }
                     let e = &entries[i];
                     let key = (side, e.path.clone());
                     let selected = self.changes.multi.contains(&key);
@@ -306,6 +327,43 @@ impl RepoTab {
                 self.select_change(shared, side, path);
             }
         }
+    }
+
+    /// Menu « … » de la liste des non indexés : les mêmes options que le menu Affichage.
+    fn display_options_menu(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        ui.menu_button(icons::DOTS_THREE, |ui| {
+            for (cmd, on) in [
+                (Command::ShowIgnoredFiles, shared.settings.show_ignored_files),
+                (Command::HideUntrackedFiles, shared.settings.hide_untracked_files),
+            ] {
+                let mut checked = on;
+                if ui.checkbox(&mut checked, cmd.label()).clicked() {
+                    shared.actions.push(AppAction::RunCommand(cmd));
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text(tr!("Options d'affichage"));
+    }
+
+    /// Ligne d'un fichier ignoré : atténuée, icône propre, sans sélection ni indexation en bloc ;
+    /// seul le menu contextuel propose de l'indexer (`add -f`).
+    fn ignored_row(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette, e: &StatusEntry) {
+        let resp = ui
+            .scope(|ui| {
+                ui.multiply_opacity(0.55);
+                file_row(ui, (Side::Unstaged, "ignored", &e.path), icons::EYE_SLASH, p.weak, &e.path, None, false, p)
+            })
+            .inner
+            .on_hover_text(tr!("ignoré (.gitignore)"));
+        let path = e.path.clone();
+        resp.context_menu(|ui| {
+            if ui.button(format!("{} {}", icons::PLUS, tr!("Indexer quand même"))).clicked() {
+                self.op_stage_force(shared, vec![path.clone()]);
+                ui.close();
+            }
+        });
     }
 
     fn change_menu(

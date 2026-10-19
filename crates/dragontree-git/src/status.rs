@@ -69,6 +69,11 @@ impl StatusSnapshot {
             .collect()
     }
 
+    /// Fichiers ignorés par git (présents seulement si le statut les a demandés) ; jamais indexés par défaut.
+    pub fn ignored(&self) -> Vec<&StatusEntry> {
+        self.entries.iter().filter(|e| e.worktree == FileState::Ignored).collect()
+    }
+
     pub fn conflicted(&self) -> Vec<&StatusEntry> {
         self.entries.iter().filter(|e| e.conflict.is_some()).collect()
     }
@@ -104,6 +109,9 @@ fn conflict_from(xy: &str) -> ConflictKind {
 
 /// Arguments de la commande dont [`parse_status_v2`] lit la sortie.
 pub const STATUS_ARGS: &[&str] = &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"];
+
+/// Option ajoutée pour lister aussi les fichiers ignorés : un dossier ignoré n'est qu'une entrée (`target/`).
+pub const STATUS_IGNORED_ARG: &str = "--ignored=matching";
 
 /// Parse la sortie de `git status --porcelain=v2 -z --branch`.
 pub fn parse_status_v2(bytes: &[u8]) -> Result<StatusSnapshot, GitError> {

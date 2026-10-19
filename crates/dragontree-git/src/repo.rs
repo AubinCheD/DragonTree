@@ -14,7 +14,7 @@ use crate::oid::Oid;
 use crate::refs::{FOR_EACH_REF_FORMAT, RefsSnapshot, parse_refs, read_head};
 use crate::runner::{CancelToken, Git, GitCommand};
 use crate::stash::{STASH_FORMAT, StashEntry, parse_stash_list};
-use crate::status::{STATUS_ARGS, StatusSnapshot, parse_status_v2};
+use crate::status::{STATUS_ARGS, STATUS_IGNORED_ARG, StatusSnapshot, parse_status_v2};
 
 /// Arbre vide de git (SHA-1), utilisé comme parent d'un commit racine.
 pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -138,8 +138,14 @@ impl Repo {
     }
 
     pub fn status(&self) -> Result<StatusSnapshot, GitError> {
-        let out = self.read().args(STATUS_ARGS).run()?;
-        parse_status_v2(&out.stdout)
+        self.status_with_ignored(false)
+    }
+
+    /// Statut ; avec `show_ignored`, git liste aussi les fichiers ignorés (`StatusSnapshot::ignored`).
+    pub fn status_with_ignored(&self, show_ignored: bool) -> Result<StatusSnapshot, GitError> {
+        let cmd = self.read().args(STATUS_ARGS);
+        let cmd = if show_ignored { cmd.args([STATUS_IGNORED_ARG]) } else { cmd };
+        parse_status_v2(&cmd.run()?.stdout)
     }
 
     /// Historique ; vide pour un dépôt sans commit.
