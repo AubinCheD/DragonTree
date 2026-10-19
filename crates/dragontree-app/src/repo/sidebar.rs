@@ -826,7 +826,7 @@ impl RepoTab {
     }
 
     /// Commit menu partagé (historique, branches) : opérations sur un commit précis.
-    /// Menu contextuel d'un stash (barre latérale et lignes de stash du graphe) : appliquer, pop, supprimer.
+    /// Menu contextuel d'un stash (barre latérale et lignes de stash du graphe) : appliquer, pop, renommer, supprimer.
     pub(super) fn stash_menu(&mut self, ui: &mut Ui, shared: &mut Shared, oid: Oid, label: &str) {
         if ui.button(format!("{} {}", icons::TRAY_ARROW_UP, tr!("Appliquer"))).clicked() {
             self.op_stash(shared, oid, label.to_string(), StashOp::Apply);
@@ -834,6 +834,11 @@ impl RepoTab {
         }
         if ui.button(format!("{} {}", icons::TRAY_ARROW_UP, tr!("Appliquer et supprimer (pop)"))).clicked() {
             self.op_stash(shared, oid, label.to_string(), StashOp::Pop);
+            ui.close();
+        }
+        if ui.button(format!("{} {}", icons::PENCIL_SIMPLE, tr!("Renommer…"))).clicked() {
+            let message = self.stashes.iter().find(|s| s.oid == oid).map(|s| s.message.clone()).unwrap_or_default();
+            self.dialog = Some(Dialog::RenameStash { oid, label: label.to_string(), message });
             ui.close();
         }
         ui.separator();

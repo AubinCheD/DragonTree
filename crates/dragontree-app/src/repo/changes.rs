@@ -43,6 +43,21 @@ fn status_letter(e: &StatusEntry, side: Side, p: &Palette) -> (&'static str, egu
     }
 }
 
+/// Les chemins choisis plus l'ancien nom des renommages indexés qu'ils contiennent : sans lui, la suppression de
+/// l'ancien nom resterait en place (stash à moitié fait, patch qui n'efface pas l'ancien fichier).
+fn with_rename_origins(paths: &[String], status: &StatusSnapshot) -> Vec<String> {
+    let mut all = paths.to_vec();
+    for entry in &status.entries {
+        if let Some(orig) = &entry.orig_path
+            && paths.contains(&entry.path)
+            && !all.contains(orig)
+        {
+            all.push(orig.clone());
+        }
+    }
+    all
+}
+
 impl RepoTab {
     /// Fichiers sélectionnables d'une liste (les fichiers ignorés n'en font jamais partie : ils s'affichent à part
     /// et ne s'indexent que par « Indexer quand même »). `hide_untracked` écarte les non suivis des non indexés.
@@ -458,6 +473,15 @@ impl RepoTab {
                 }
             }
         }
+        if side != Side::Conflict {
+            ui.separator();
+            if ui.button(format!("{} {}", icons::TRAY_ARROW_DOWN, tr!("Stash des fichiers sélectionnés…"))).clicked()
+            {
+                self.dialog =
+                    Some(Dialog::StashFiles { message: String::new(), paths: with_rename_origins(&paths, status) });
+                ui.close();
+            }
+        }
         ui.separator();
         self.file_menu(ui, shared, path, None);
     }
@@ -699,5 +723,31 @@ impl RepoTab {
             let (amend, push) = (self.changes.amend, self.changes.push_after);
             self.op_commit(shared, msg, amend, push);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(path: &str, orig: Option<&str>) -> StatusEntry {
+        StatusEntry {
+            path: path.into(),
+            orig_path: orig.map(str::to_string),
+            index: FileState::Renamed,
+            worktree: FileState::Unmodified,
+            conflict: None,
+            is_submodule: false,
+        }
+    }
+
+    #[test]
+    fn a_staged_rename_brings_its_old_name() {
+        let entries = vec![entry("neuf.txt", Some("vieux.txt")), entry("b.txt", None)];
+        let status = StatusSnapshot { entries, ..Default::default() };
+        let chosen = ["neuf.txt".to_string(), "b.txt".to_string()];
+        assert_eq!(with_rename_origins(&chosen, &status), ["neuf.txt", "b.txt", "vieux.txt"]);
+        // Un renommage non choisi n'ajoute rien.
+        assert_eq!(with_rename_origins(&["b.txt".to_string()], &status), ["b.txt"]);
     }
 }

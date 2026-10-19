@@ -68,9 +68,9 @@ fn clicking_a_stash_row_shows_its_changes_against_its_base() {
     let mut h = open(repo, tmp.path());
     wait_until(&mut h, "ligne de stash", |h| rows(h, SUMMARY) == 1);
     h.get_by_label(SUMMARY).click();
-    // Le fichier suivi modifié est listé ; le fichier non suivi (3e parent) n'est pas une modification du stash.
+    // Le fichier suivi modifié est listé, et aussi le fichier non suivi (3e parent) du stash.
     wait_until(&mut h, "fichier du stash", |h| h.query_by_label("f.txt").is_some());
-    assert!(h.query_by_label("neuf.txt").is_none());
+    wait_until(&mut h, "fichier non suivi du stash", |h| h.query_by_label("neuf.txt").is_some());
 }
 
 #[test]

@@ -331,6 +331,16 @@ impl Repo {
         Ok(parse_stash_list(&out.stdout_str()))
     }
 
+    /// Fichiers non suivis d'un stash (`stash -u` les range dans un troisième parent, un commit racine) : le
+    /// commit qui les porte et ses fichiers. `None` si le stash n'en a pas.
+    pub fn stash_untracked(&self, stash: Oid) -> Result<Option<(Oid, Vec<FileChange>)>, GitError> {
+        let spec = format!("{}^3", stash.to_hex());
+        // `-q --verify` sort avec le code 1 quand il n'y a pas de troisième parent : seul cas attendu.
+        let out = self.read().args(["rev-parse", "-q", "--verify", &spec]).allow_codes(&[1]).run()?;
+        let Some(commit) = Oid::from_hex(out.stdout_str().trim()).filter(|_| out.code == 0) else { return Ok(None) };
+        Ok(Some((commit, self.commit_files(commit, None)?)))
+    }
+
     pub fn remotes(&self) -> Result<Vec<Remote>, GitError> {
         let out = self.read().args(["remote", "-v"]).run()?;
         let mut remotes: Vec<Remote> = Vec::new();

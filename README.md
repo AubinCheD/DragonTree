@@ -22,7 +22,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
 - **Opérations** : fetch, pull (merge ou rebase), push (upstream, force-with-lease, tags), branches (créer,
   renommer, supprimer localement et sur le remote, checkout, fast-forward), tags (annotés, push, suppression),
   merge (ff, no-ff, ff-only, squash), rebase, **rebase interactif** (réordonner, pick/reword/edit/squash/
-  fixup/drop), cherry-pick, revert, reset (soft/mixed/hard), stash (avec message, non suivis, garder l'index),
+  fixup/drop), cherry-pick, revert, reset (soft/mixed/hard), stash (avec message, non suivis, garder l'index,
+  choix du stash au pop, renommage, fichiers sélectionnés seulement, snapshot),
   remotes, sous-modules, **worktrees** (section de la barre latérale : ouvrir dans un onglet, créer depuis une
   branche, une branche distante ou un commit, supprimer, nettoyer ; les branches sorties ailleurs sont signalées).
 - **Conflits** : bandeau d'opération en cours (Continuer/Annuler/Passer), résolution « notre/leur version »,

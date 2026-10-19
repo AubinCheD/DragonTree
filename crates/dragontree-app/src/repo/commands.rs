@@ -24,7 +24,7 @@ impl RepoTab {
         match cmd {
             Command::Fetch => has_remote,
             Command::Pull | Command::QuickPull | Command::Push | Command::QuickPush => has_remote && on_branch,
-            Command::Stash => self.status.as_ref().is_some_and(|s| !s.is_clean()),
+            Command::Stash | Command::Snapshot => self.status.as_ref().is_some_and(|s| !s.is_clean()),
             Command::NewBranch | Command::NewTag | Command::CreateWorktree => self.refs.is_some(),
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
@@ -87,7 +87,12 @@ impl RepoTab {
             Command::NewTag => self.dialog = Some(Dialog::new_tag("HEAD".into(), "HEAD".into())),
             Command::CreateWorktree => self.open_create_worktree(None),
             Command::Stash => {
-                self.dialog = Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false })
+                self.dialog =
+                    Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false, snapshot: false })
+            }
+            Command::Snapshot => {
+                self.dialog =
+                    Some(Dialog::Stash { message: String::new(), untracked: false, keep_index: false, snapshot: true })
             }
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),

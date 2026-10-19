@@ -85,6 +85,8 @@ pub enum Command {
     /// Nouveau worktree, la branche choisie dans le dialogue (les menus contextuels en créent aussi).
     CreateWorktree,
     Stash,
+    /// Enregistre un stash sans toucher aux modifications en cours.
+    Snapshot,
     OpenExplorer,
     OpenTerminal,
     OpenVsCode,
@@ -189,6 +191,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::NewTag),
             Cmd(Command::CreateWorktree),
             Cmd(Command::Stash),
+            Cmd(Command::Snapshot),
             Separator,
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
@@ -275,6 +278,7 @@ impl Command {
         Command::NewTag,
         Command::CreateWorktree,
         Command::Stash,
+        Command::Snapshot,
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenVsCode,
@@ -333,6 +337,7 @@ impl Command {
             Command::NewTag => tr!("Nouveau tag…"),
             Command::CreateWorktree => tr!("Créer un worktree…"),
             Command::Stash => "Stash…",
+            Command::Snapshot => tr!("Snapshot…"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
             Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
@@ -389,6 +394,7 @@ impl Command {
             Command::NewTag => icons::TAG,
             Command::CreateWorktree => icons::TREE_STRUCTURE,
             Command::Stash => icons::TRAY_ARROW_DOWN,
+            Command::Snapshot => icons::CAMERA,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenVsCode => icons::CODE,
@@ -444,6 +450,7 @@ impl Command {
             | Command::NewTag
             | Command::CreateWorktree
             | Command::Stash
+            | Command::Snapshot
             | Command::OpenExplorer
             | Command::OpenTerminal
             | Command::OpenVsCode => Scope::Repo,

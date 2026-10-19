@@ -34,6 +34,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 
 /// Dialogue modal de l'onglet. `CreateWorktree::pick` : la branche se choisit dans le dialogue (Dépôt › Créer un
 /// worktree…) ; `RemoveWorktree::force` (`--force`) : seulement si la case est cochée.
+/// `Stash::snapshot` : enregistre un stash sans toucher aux modifications (`untracked` et `keep_index` sans objet) ;
+/// `StashFiles` : seulement les fichiers choisis dans la vue Changements.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -48,7 +50,9 @@ pub enum Dialog {
     Reset { rev: String, label: String, mode: ResetMode },
     CherryPick { ids: Vec<Oid>, label: String },
     Revert { id: Oid, label: String },
-    Stash { message: String, untracked: bool, keep_index: bool },
+    Stash { message: String, untracked: bool, keep_index: bool, snapshot: bool },
+    StashFiles { message: String, paths: Vec<String> },
+    RenameStash { oid: Oid, label: String, message: String },
     Push { remote: String, local: String, remote_branch: String, set_upstream: bool, force: bool, tags: bool },
     Pull { remote: String, branch: String, rebase: bool },
     Discard { tracked: Vec<String>, untracked: Vec<String> },
@@ -86,7 +90,14 @@ impl Dialog {
             Dialog::Reset { .. } => (tr!("Réinitialiser la branche").into(), tr!("Réinitialiser").into(), true),
             Dialog::CherryPick { .. } => ("Cherry-pick".into(), "Cherry-pick".into(), false),
             Dialog::Revert { .. } => ("Revert".into(), tr!("Créer le revert").into(), false),
+            Dialog::Stash { snapshot: true, .. } => {
+                (tr!("Enregistrer un snapshot").into(), tr!("Enregistrer").into(), false)
+            }
             Dialog::Stash { .. } => (tr!("Mettre de côté (stash)").into(), "Stash".into(), false),
+            Dialog::StashFiles { .. } => {
+                (tr!("Mettre de côté les fichiers").into(), tr!("Mettre de côté").into(), false)
+            }
+            Dialog::RenameStash { .. } => (tr!("Renommer le stash").into(), tr!("Renommer").into(), false),
             Dialog::Push { .. } => ("Push".into(), "Push".into(), false),
             Dialog::Pull { .. } => ("Pull".into(), "Pull".into(), false),
             Dialog::Discard { .. } => {
@@ -299,16 +310,50 @@ impl RepoTab {
                 ui.label(tr!("Créer un commit qui annule {label}.", label));
                 true
             }
-            Dialog::Stash { message, untracked, keep_index } => {
+            Dialog::Stash { message, untracked, keep_index, snapshot } => {
                 ui.add(
                     egui::TextEdit::singleline(message)
                         .hint_text(tr!("Message (facultatif)"))
                         .desired_width(f32::INFINITY),
                 )
                 .request_focus();
-                ui.checkbox(untracked, tr!("Inclure les fichiers non suivis"));
-                ui.checkbox(keep_index, tr!("Garder les modifications indexées"));
+                ui.add_enabled_ui(!*snapshot, |ui| {
+                    ui.checkbox(untracked, tr!("Inclure les fichiers non suivis"));
+                    ui.checkbox(keep_index, tr!("Garder les modifications indexées"));
+                });
+                ui.checkbox(snapshot, tr!("Snapshot : garder les modifications en place")).on_hover_text(tr!(
+                    "Enregistre un stash sans toucher à la copie de travail ni à l'index (fichiers suivis seulement)."
+                ));
                 true
+            }
+            Dialog::StashFiles { message, paths } => {
+                ui.label(
+                    RichText::new(trn!(
+                        paths.len(),
+                        "{n} fichier sera mis de côté, les autres modifications restent en place.",
+                        "{n} fichiers seront mis de côté, les autres modifications restent en place."
+                    ))
+                    .color(p.weak),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(message)
+                        .hint_text(tr!("Message (facultatif)"))
+                        .desired_width(f32::INFINITY),
+                )
+                .request_focus();
+                !paths.is_empty()
+            }
+            Dialog::RenameStash { label, message, .. } => {
+                ui.label(RichText::new(tr!("Nouveau message pour {label}", label)).color(p.weak));
+                ui.add(egui::TextEdit::singleline(message).desired_width(f32::INFINITY)).request_focus();
+                ui.label(
+                    RichText::new(tr!(
+                        "git n'a pas de renommage : le stash est supprimé puis recréé avec le même contenu, à la même place."
+                    ))
+                    .color(p.weak)
+                    .size(12.0),
+                );
+                !message.trim().is_empty()
             }
             Dialog::Push { remote, local, remote_branch, set_upstream, force, tags } => {
                 self.remote_combo(ui, remote);
@@ -483,9 +528,12 @@ impl RepoTab {
             Dialog::Reset { rev, mode, .. } => self.op_reset(shared, rev, mode),
             Dialog::CherryPick { ids, .. } => self.op_cherry_pick(shared, ids),
             Dialog::Revert { id, .. } => self.op_revert(shared, id),
-            Dialog::Stash { message, untracked, keep_index } => {
+            Dialog::Stash { message, snapshot: true, .. } => self.op_stash_snapshot(shared, message),
+            Dialog::Stash { message, untracked, keep_index, .. } => {
                 self.op_stash_save(shared, message, untracked, keep_index)
             }
+            Dialog::StashFiles { message, paths } => self.op_stash_files(shared, message, paths),
+            Dialog::RenameStash { oid, label, message } => self.op_stash_rename(shared, oid, label, message),
             Dialog::Push { remote, local, remote_branch, set_upstream, force, tags } => {
                 self.op_push(shared, remote, local, remote_branch.trim().to_string(), set_upstream, force, tags)
             }

@@ -128,7 +128,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | R1 | Actualiser, Fetch/Pull/Push (Ctrl+Maj+F/U/P), Nouvelle branche (Ctrl+Maj+B), Nouveau tag, Stash (Ctrl+Maj+H), ouvrir dans l'Explorateur, le Terminal ou VS Code | ✅ |
 | R2 | Fetch, Pull et Push rapides, sans dialogue (Ctrl+clic) | ✅ |
 | R3 | Créer un worktree… (voir Worktrees) | ✅ |
-| R4 | Stashs complets : liste déroulante sur Pop, renommer, stash des seuls fichiers sélectionnés, snapshot (garde les modifications), fichiers non suivis visibles dans le diff | 🆕 M |
+| R4 | Stashs complets : liste déroulante sur Pop, renommer, stash des seuls fichiers sélectionnés, snapshot (garde les modifications), fichiers non suivis visibles dans le diff | ✅ |
 | R5 | Appliquer un patch (fichier, glisser-déposer, presse-papiers) | 🆕 M |
 | R6 | Enregistrer comme patch (commit, plage de commits, stash, fichiers) | 🆕 M |
 | R7 | Comparer deux commits, deux branches, ou un commit avec les modifications locales | 🆕 M |

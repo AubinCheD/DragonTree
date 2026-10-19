@@ -95,6 +95,8 @@ impl RepoTab {
                 let (oid, label) = (top.oid, format!("stash@{{0}} {}", top.message));
                 self.op_stash(shared, oid, label, StashOp::Pop);
             }
+            // Flèche ▾ : choisir un autre stash (Pop, Appliquer… comme dans la barre latérale).
+            self.pop_dropdown(ui, shared, has_stash);
             ui.separator();
             if toolbar_button(ui, icons::GIT_BRANCH, tr!("Branche"), branch, false)
                 .on_hover_text(with_shortcut(tr!("Créer une branche à partir de HEAD"), Command::NewBranch))
@@ -131,6 +133,34 @@ impl RepoTab {
                     self.run_command(Command::OpenTerminal, shared);
                 }
             });
+        });
+    }
+
+    /// Flèche à côté de Pop : la liste des stashs, chacun avec le menu d'un stash (Pop, Appliquer, Renommer…).
+    fn pop_dropdown(&mut self, ui: &mut Ui, shared: &mut Shared, enabled: bool) {
+        let label = tr!("Choisir le stash");
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 46.0), egui::Sense::click());
+        crate::widgets::a11y(&resp, label, enabled);
+        let p = Palette::current(ui.ctx());
+        if enabled && resp.hovered() {
+            ui.painter().rect_filled(rect, egui::CornerRadius::same(6), p.hover);
+        }
+        ui.painter().text(
+            rect.center_top() + egui::vec2(0.0, 15.0),
+            egui::Align2::CENTER_CENTER,
+            icons::CARET_DOWN,
+            egui::FontId::proportional(13.0),
+            if enabled { p.text } else { p.weak.gamma_multiply(0.6) },
+        );
+        if !enabled {
+            return;
+        }
+        let stashes = self.stashes.clone();
+        egui::Popup::menu(&resp.on_hover_text(tr!("Choisir le stash à réappliquer"))).show(|ui| {
+            for s in stashes.iter() {
+                let label = super::scope::stash_label(s.index, &s.message);
+                ui.menu_button(label.clone(), |ui| self.stash_menu(ui, shared, s.oid, &label));
+            }
         });
     }
 

@@ -358,6 +358,29 @@ impl RepoTab {
         });
     }
 
+    /// Stash des seuls fichiers choisis.
+    pub(crate) fn op_stash_files(&mut self, shared: &Shared, message: String, paths: Vec<String>) {
+        self.run_simple(shared, "Stash", Refresh::STATUS.with_extras(), move |r| {
+            r.stash_push_paths(Some(&message), &paths)?;
+            Ok(Some(tr!("Fichiers mis de côté (stash)").into()))
+        });
+    }
+
+    /// Snapshot : un stash qui laisse les modifications en place.
+    pub(crate) fn op_stash_snapshot(&mut self, shared: &Shared, message: String) {
+        self.run_simple(shared, "Snapshot", Refresh::STATUS.with_extras(), move |r| {
+            r.stash_snapshot(Some(&message))?;
+            Ok(Some(tr!("Snapshot enregistré (stash)").into()))
+        });
+    }
+
+    pub(crate) fn op_stash_rename(&mut self, shared: &Shared, oid: Oid, label: String, message: String) {
+        self.run_simple(shared, tr!("Renommage du stash"), Refresh::STATUS.with_extras(), move |r| {
+            r.stash_rename_oid(oid, message.trim())?;
+            Ok(Some(tr!("Stash renommé : {label}", label)))
+        });
+    }
+
     /// Agit sur le stash `oid` (pas sur un index : la liste a pu changer depuis l'affichage).
     pub(crate) fn op_stash(&mut self, shared: &Shared, oid: Oid, label: String, kind: StashOp) {
         self.run_simple(shared, kind.title(), Refresh::STATUS.with_extras(), move |r| {

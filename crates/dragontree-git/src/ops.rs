@@ -254,6 +254,74 @@ impl Repo {
         self.run_write(args)
     }
 
+    /// Met de côté les seuls chemins donnés (suivis ou non), les autres modifications restent en place. Les
+    /// chemins sont pris littéralement (`:(literal)`) : `GIT_LITERAL_PATHSPECS` casserait l'option `-u`.
+    pub fn stash_push_paths(&self, message: Option<&str>, paths: &[String]) -> Result<(), GitError> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        // Un chemin dont la suppression est indexée (ancien nom d'un renommage indexé) n'est plus « connu de git » :
+        // `stash push` le refuserait. On le repasse en suppression non indexée, la nouvelle entrée reste indexée.
+        let staged_deleted = self
+            .read()
+            .args(["diff", "--cached", "--no-renames", "--name-only", "--diff-filter=D", "-z"])
+            .run()?
+            .stdout_str();
+        let to_unstage: Vec<String> =
+            staged_deleted.split('\0').filter(|d| paths.iter().any(|p| p == d)).map(str::to_string).collect();
+        self.unstage(&to_unstage)?;
+        let mut cmd = self.write().args(["stash", "push", "--include-untracked"]);
+        if let Some(m) = message.filter(|m| !m.trim().is_empty()) {
+            cmd = cmd.args(["-m", m]);
+        }
+        let literal: Vec<String> = paths.iter().map(|p| format!(":(literal){p}")).collect();
+        cmd.args(["--pathspec-from-file=-", "--pathspec-file-nul"]).stdin(nul_joined(&literal)).run().map(|_| ())
+    }
+
+    /// Enregistre les modifications suivies en cours comme un stash sans toucher à la copie de travail ni à
+    /// l'index (`git stash create` puis `git stash store`).
+    pub fn stash_snapshot(&self, message: Option<&str>) -> Result<(), GitError> {
+        let out = self.write().args(["stash", "create"]).run()?;
+        let created = out.stdout_str();
+        let Some(oid) = Oid::from_hex(created.trim()) else {
+            return Err(GitError::Refused(tr!("Aucune modification suivie à enregistrer.").into()));
+        };
+        let message = message.map(str::trim).filter(|m| !m.is_empty()).unwrap_or("Snapshot");
+        self.write().args(["stash", "store", "-m", message, &oid.to_hex()]).run().map(|_| ())
+    }
+
+    /// Renomme un stash : git n'a pas de renommage. On range d'abord la nouvelle entrée (`stash store`, même commit)
+    /// puis les stashs plus récents par-dessus pour garder la position, et seulement ensuite on supprime les anciennes
+    /// entrées : un échec en cours de route laisse des doublons, jamais un stash perdu.
+    pub fn stash_rename_oid(&self, oid: Oid, message: &str) -> Result<(), GitError> {
+        let all = self.stashes()?;
+        let Some(index) = all.iter().find(|s| s.oid == oid).map(|s| s.index) else {
+            return Err(GitError::Refused(
+                tr!("Ce stash n'existe plus (la liste a changé) : actualisez puis réessayez.").into(),
+            ));
+        };
+        let newer: Vec<_> = all.iter().filter(|s| s.index < index).collect();
+        let concerned = || newer.iter().map(|s| s.oid).chain([oid]).map(|o| o.to_hex()).collect::<Vec<_>>().join(" ");
+        let interrupted = |e: GitError| {
+            GitError::Refused(tr!(
+                "Renommage interrompu ({error}). Aucun stash n'est perdu ; des doublons peuvent rester. Commits concernés : {oids}",
+                error = e,
+                oids = concerned()
+            ))
+        };
+        let store = |oid: Oid, message: &str| self.run_write(["stash", "store", "-m", message, &oid.to_hex()]);
+        store(oid, message).map_err(interrupted)?;
+        for s in newer.iter().rev() {
+            store(s.oid, &s.message).map_err(interrupted)?;
+        }
+        // Les anciennes entrées sont maintenant juste sous les nouvelles ; de la plus profonde à la plus haute, les
+        // indices restent valables.
+        for i in (index + 1..=2 * index + 1).rev() {
+            self.stash_drop(i).map_err(interrupted)?;
+        }
+        Ok(())
+    }
+
     /// Index actuel d'un stash identifié par son commit (la liste a pu changer depuis l'affichage).
     fn stash_index_of(&self, oid: Oid) -> Result<usize, GitError> {
         self.stashes()?.into_iter().find(|s| s.oid == oid).map(|s| s.index).ok_or_else(|| {

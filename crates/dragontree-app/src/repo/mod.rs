@@ -129,6 +129,9 @@ pub struct HistoryState {
     pub filtered: Option<Vec<usize>>,
     pub scroll_to: Option<usize>,
     pub details: Option<(CommitInfo, Vec<FileChange>)>,
+    /// Stash affiché : indice du premier fichier non suivi dans `details` et commit qui les porte (leur diff se lit
+    /// depuis ce commit racine).
+    pub stash_untracked: Option<(usize, Oid)>,
     pub details_loading: bool,
     pub selected_file: Option<usize>,
     pub diff: Option<FileDiff>,
@@ -173,6 +176,7 @@ impl Default for HistoryState {
             filtered: None,
             scroll_to: None,
             details: None,
+            stash_untracked: None,
             details_loading: false,
             selected_file: None,
             diff: None,
@@ -241,6 +245,10 @@ struct Gens {
     work_diff: u64,
 }
 
+/// Détails lus d'un commit : infos, fichiers, et pour un stash le commit de ses fichiers non suivis avec l'indice du
+/// premier d'entre eux dans la liste.
+type DetailsData = (CommitInfo, Vec<FileChange>, Option<(usize, Oid)>);
+
 /// Événements des tâches d'arrière-plan de l'onglet.
 pub enum RepoEvent {
     Opened(Result<Arc<Repo>, GitError>),
@@ -258,7 +266,8 @@ pub enum RepoEvent {
         follow_selection: bool,
     },
     Extras(u64, Vec<StashEntry>, Vec<Remote>, Vec<Submodule>, Vec<Worktree>),
-    Details(u64, Oid, Result<(CommitInfo, Vec<FileChange>), GitError>),
+    /// Détails d'un commit ; pour un stash, le commit de ses fichiers non suivis et l'indice du premier d'entre eux.
+    Details(u64, Oid, Result<DetailsData, GitError>),
     CommitDiff(u64, Result<FileDiff, GitError>),
     WorkDiff(u64, (Side, String), Result<FileDiff, GitError>),
     OpProgress(u64, Progress),
@@ -556,13 +565,21 @@ impl RepoTab {
         let Some(repo) = self.repo.clone() else { return };
         self.gens.details += 1;
         self.history.details_loading = true;
+        self.history.stash_untracked = None;
         self.history.diff = None;
         self.history.selected_file = None;
         let (g, id) = (self.gens.details, self.id);
+        let is_stash = self.stashes.iter().any(|s| s.oid == oid);
         shared.jobs.spawn("details", move || {
             let res = repo.commit_info(oid).and_then(|info| {
-                let files = repo.commit_files(oid, info.parents.first().copied())?;
-                Ok((info, files))
+                let mut files = repo.commit_files(oid, info.parents.first().copied())?;
+                // Un stash montre aussi ses fichiers non suivis (3e parent), à la suite des autres.
+                let mut untracked = None;
+                if is_stash && let Some((commit, extra)) = repo.stash_untracked(oid)? {
+                    untracked = Some((files.len(), commit));
+                    files.extend(extra);
+                }
+                Ok((info, files, untracked))
             });
             Some(AppEvent::Repo(id, RepoEvent::Details(g, oid, res)))
         });
@@ -572,7 +589,13 @@ impl RepoTab {
         let Some(repo) = self.repo.clone() else { return };
         let Some((info, files)) = &self.history.details else { return };
         let Some(change) = files.get(file_index).cloned() else { return };
-        let (oid, parent) = (info.id, info.parents.first().copied());
+        let (mut oid, mut parent) = (info.id, info.parents.first().copied());
+        // Fichier non suivi d'un stash : son diff se lit depuis le commit racine qui le porte.
+        if let Some((start, commit)) = self.history.stash_untracked
+            && file_index >= start
+        {
+            (oid, parent) = (commit, None);
+        }
         self.history.selected_file = Some(file_index);
         self.history.diff_loading = true;
         self.history.diff_state = DiffViewState::default();
@@ -721,9 +744,10 @@ impl RepoTab {
             RepoEvent::Details(g, oid, res) if g == self.gens.details => {
                 self.history.details_loading = false;
                 match res {
-                    Ok(d) => {
-                        let has_files = !d.1.is_empty();
-                        self.history.details = Some(d);
+                    Ok((info, files, untracked)) => {
+                        let has_files = !files.is_empty();
+                        self.history.details = Some((info, files));
+                        self.history.stash_untracked = untracked;
                         if has_files {
                             self.load_commit_diff(shared, 0);
                         }
