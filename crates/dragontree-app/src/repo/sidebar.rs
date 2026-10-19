@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use dragontree_git::{LocalBranch, MergeMode, Oid, RemoteBranch, ResetMode, TagRef, WorktreeStart};
+use dragontree_git::{BisectMark, LocalBranch, MergeMode, Oid, RemoteBranch, ResetMode, TagRef, WorktreeStart};
 use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
@@ -960,6 +960,20 @@ impl RepoTab {
         {
             self.dialog =
                 Some(Dialog::Reset { rev: oid.to_hex(), label: format!("{short} {summary}"), mode: ResetMode::Mixed });
+            ui.close();
+        }
+        ui.separator();
+        // Bisect : marquer ce commit démarre la session au besoin (HEAD est alors mauvais par défaut).
+        // Pas de nouvelle session pendant une fusion, un rebase… (une session déjà ouverte peut continuer).
+        let can_bisect = self.op_state == dragontree_git::OpState::None || self.bisect.is_some();
+        let bad = egui::Button::new(format!("{} {}", icons::BUG, tr!("Bisect : marquer comme mauvais")));
+        if ui.add_enabled(can_bisect, bad).clicked() {
+            self.op_bisect_mark(shared, BisectMark::Bad, Some(oid));
+            ui.close();
+        }
+        let good = egui::Button::new(format!("{} {}", icons::CHECK, tr!("Bisect : marquer comme bon")));
+        if ui.add_enabled(can_bisect, good).clicked() {
+            self.op_bisect_mark(shared, BisectMark::Good, Some(oid));
             ui.close();
         }
         ui.separator();

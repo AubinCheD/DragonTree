@@ -4,6 +4,7 @@
 //! appelé avec des tableaux d'arguments — jamais via un shell — et des sorties `-z`.
 
 pub mod apply;
+pub mod bisect;
 pub mod blame;
 pub mod collapse;
 pub mod config;
@@ -31,6 +32,7 @@ pub mod submodule;
 pub mod worktree;
 
 pub use apply::{ApplyTarget, PatchFile, is_mail_patch};
+pub use bisect::{BisectMark, BisectState};
 pub use collapse::{CollapsedLog, collapse_merges};
 pub use diff::{ChangeKind, DiffLine, DiffOptions, FileChange, FileDiff, Hunk, LineKind};
 pub use error::GitError;

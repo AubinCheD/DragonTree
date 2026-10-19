@@ -33,6 +33,8 @@ impl RepoTab {
             | Command::RepoSettings => self.refs.is_some(),
             // Une opération en cours (fusion, rebase, session am…) : un patch s'y mélangerait.
             Command::ApplyPatch | Command::PastePatch => self.refs.is_some() && self.op_state == OpState::None,
+            Command::BisectStart => self.refs.is_some() && self.op_state == OpState::None && self.bisect.is_none(),
+            Command::BisectReset => self.bisect.is_some(),
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
             Command::OpenVsCode => crate::util::vscode_available(),
@@ -114,6 +116,8 @@ impl RepoTab {
                 }
             }
             Command::PastePatch => self.dialog = Some(Dialog::PastePatch { text: String::new() }),
+            Command::BisectStart => self.op_bisect_start(shared),
+            Command::BisectReset => self.op_bisect_reset(shared),
             Command::RepoSettings => self.open_repo_settings(shared),
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),

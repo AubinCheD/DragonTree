@@ -268,6 +268,7 @@ impl RepoTab {
         let labels = self.refs.as_ref().map(|r| r.labels.clone()).unwrap_or_default();
         let visibility = LabelVisibility::of(shared, &self.path);
         let lost = self.history.lost.clone();
+        let bisect = self.bisect.clone();
         let folded = self.history.folded.clone();
         let now = widgets::now_ts();
 
@@ -325,6 +326,10 @@ impl RepoTab {
                 }
                 if is_lost {
                     x += paint_lost_badge(ui, &painter, egui::pos2(x, rect.top() + 3.5), p) + 4.0;
+                }
+                if let Some(text) = bisect.as_ref().and_then(|b| super::bisect::badge_text(b, c.id)) {
+                    let bad = bisect.as_ref().is_some_and(|b| b.bad == Some(c.id));
+                    x += super::bisect::paint_badge(ui, &painter, egui::pos2(x, rect.top() + 3.5), text, bad, p) + 4.0;
                 }
                 for (n, l) in ls.iter().enumerate() {
                     if n >= 4 {
@@ -530,7 +535,7 @@ fn paint_lost_badge(ui: &Ui, painter: &egui::Painter, pos: egui::Pos2, p: &Palet
 }
 
 /// Pastille de texte (fond, texte) ; `outline` la cerne ; renvoie sa largeur.
-fn paint_badge(
+pub(super) fn paint_badge(
     ui: &Ui,
     painter: &egui::Painter,
     pos: egui::Pos2,

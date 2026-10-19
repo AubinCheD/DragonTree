@@ -1,6 +1,7 @@
 //! Onglet d'un dépôt : barre d'outils, navigation (branches…), historique et changements locaux.
 
 mod actions;
+mod bisect;
 mod blame;
 mod changes;
 mod commands;
@@ -32,8 +33,9 @@ use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
-    CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions,
-    LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule, Worktree,
+    BisectState, CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState,
+    LogOptions, LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
+    Worktree,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
@@ -246,6 +248,9 @@ enum AfterCommit {
 struct Gens {
     refs: u64,
     status: u64,
+    /// Dernières relectures des références et de l'état arrivées (voir `RepoTab::state_refreshing`).
+    refs_seen: u64,
+    status_seen: u64,
     log: u64,
     extras: u64,
     folding: u64,
@@ -267,7 +272,7 @@ type DetailsData = (CommitInfo, Vec<FileChange>, Option<(usize, Oid)>);
 pub enum RepoEvent {
     Opened(Result<Arc<Repo>, GitError>),
     Refs(u64, Result<RefsSnapshot, GitError>),
-    Status(u64, Result<(StatusSnapshot, OpState), GitError>),
+    Status(u64, Result<(StatusSnapshot, OpState, Option<BisectState>), GitError>),
     Log {
         generation: u64,
         complete: bool,
@@ -337,6 +342,8 @@ pub struct RepoTab {
     pub refs: Option<Arc<RefsSnapshot>>,
     pub status: Option<Arc<StatusSnapshot>>,
     pub op_state: OpState,
+    /// Session de bisect en cours (lue avec l'état du dépôt).
+    pub bisect: Option<BisectState>,
     pub stashes: Arc<Vec<StashEntry>>,
     pub remotes: Arc<Vec<Remote>>,
     pub submodules: Arc<Vec<Submodule>>,
@@ -381,6 +388,7 @@ impl RepoTab {
             refs: None,
             status: None,
             op_state: OpState::None,
+            bisect: None,
             stashes: Arc::new(Vec::new()),
             remotes: Arc::new(Vec::new()),
             submodules: Arc::new(Vec::new()),
@@ -489,7 +497,7 @@ impl RepoTab {
             // Le réglage est lu ici : le thread de travail ne touche pas aux réglages.
             let show_ignored = shared.settings.show_ignored_files;
             shared.jobs.spawn("status", move || {
-                let res = r.status_with_ignored(show_ignored).map(|s| (s, r.operation_state()));
+                let res = r.status_with_ignored(show_ignored).map(|s| (s, r.operation_state(), r.bisect_state()));
                 Some(AppEvent::Repo(id, RepoEvent::Status(g, res)))
             });
         }
@@ -676,6 +684,11 @@ impl RepoTab {
     // --- Événements ---------------------------------------------------------------------
 
     pub fn handle_event(&mut self, ev: RepoEvent, shared: &mut Shared) {
+        match &ev {
+            RepoEvent::Refs(g, _) => self.gens.refs_seen = self.gens.refs_seen.max(*g),
+            RepoEvent::Status(g, _) => self.gens.status_seen = self.gens.status_seen.max(*g),
+            _ => {}
+        }
         match ev {
             RepoEvent::Opened(Ok(repo)) => {
                 self.watcher = watcher::RepoWatcher::start(
@@ -715,7 +728,8 @@ impl RepoTab {
                 Err(e) => shared.toast(Toast::error(tr!("Lecture des branches impossible"), e.to_string())),
             },
             RepoEvent::Status(g, res) if g == self.gens.status => match res {
-                Ok((status, op)) => {
+                Ok((status, op, bisect)) => {
+                    self.bisect = bisect;
                     self.op_state = op;
                     self.status = Some(Arc::new(status));
                     self.quick_dirty = true;
@@ -1046,6 +1060,11 @@ impl RepoTab {
             egui::Panel::top(("op-banner", self.id))
                 .frame(Frame::new().fill(p.warning_bg).inner_margin(egui::Margin::symmetric(10, 6)))
                 .show(ui, |ui| self.op_banner(ui, shared, &p));
+        }
+        if self.bisect.is_some() {
+            egui::Panel::top(("bisect-banner", self.id))
+                .frame(Frame::new().fill(p.warning_bg).inner_margin(egui::Margin::symmetric(10, 6)))
+                .show(ui, |ui| self.bisect_banner(ui, shared, &p));
         }
         if let Some(op) = self.running.iter().find(|o| !o.silent) {
             let (title, progress, cancel) = (op.title.clone(), op.progress.clone(), op.cancel.clone());

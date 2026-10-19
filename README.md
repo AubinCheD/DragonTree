@@ -30,6 +30,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   branche, une branche distante ou un commit, supprimer, nettoyer ; les branches sorties ailleurs sont signalées).
 - **Conflits** : bandeau d'opération en cours (Continuer/Annuler/Passer), résolution « notre/leur version »,
   éditeur de conflits par région, outil de merge externe (`git mergetool`).
+- **Bisect** : démarrer depuis le menu d'un commit ou Dépôt › Bisect, bandeau d'état (révisions restantes, Bon, Mauvais,
+  Passer, Terminer), commits marqués étiquetés dans le graphe, premier mauvais commit annoncé.
 - **Patchs** : appliquer un patch (fichier, glisser-déposer d'un `.patch`/`.diff`, texte collé) avec aperçu des fichiers
   touchés et vérification, vers la copie de travail, l'index ou en commits (`git am`, patchs `format-patch`) ; **enregistrer
   comme patch** (commit, commits jusqu'à HEAD en un fichier par commit, stash, fichiers sélectionnés) ou le copier.

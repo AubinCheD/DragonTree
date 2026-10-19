@@ -95,6 +95,10 @@ pub enum Command {
     ApplyPatch,
     /// Applique un patch collé dans une zone de texte (le presse-papiers n'est lisible que par un collage).
     PastePatch,
+    /// Démarre une session de bisect avec HEAD mauvais.
+    BisectStart,
+    /// Termine la session de bisect et revient à la branche de départ.
+    BisectReset,
     OpenExplorer,
     OpenTerminal,
     OpenVsCode,
@@ -208,6 +212,8 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::ApplyPatch),
             Cmd(Command::PastePatch),
             Separator,
+            Submenu(tr_mark!("Bisect"), &[Cmd(Command::BisectStart), Cmd(Command::BisectReset)]),
+            Separator,
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
             Cmd(Command::OpenVsCode),
@@ -300,6 +306,8 @@ impl Command {
         Command::IgnoreFiles,
         Command::ApplyPatch,
         Command::PastePatch,
+        Command::BisectStart,
+        Command::BisectReset,
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenVsCode,
@@ -364,6 +372,8 @@ impl Command {
             Command::IgnoreFiles => tr!("Ignorer des fichiers…"),
             Command::ApplyPatch => tr!("Appliquer un patch…"),
             Command::PastePatch => tr!("Coller un patch…"),
+            Command::BisectStart => tr!("Démarrer"),
+            Command::BisectReset => tr!("Terminer"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
             Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
@@ -426,6 +436,7 @@ impl Command {
             Command::IgnoreFiles => icons::EYE_SLASH,
             Command::ApplyPatch => icons::FILE_ARROW_DOWN,
             Command::PastePatch => icons::CLIPBOARD_TEXT,
+            Command::BisectStart | Command::BisectReset => icons::BUG,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenVsCode => icons::CODE,
@@ -487,6 +498,8 @@ impl Command {
             | Command::IgnoreFiles
             | Command::ApplyPatch
             | Command::PastePatch
+            | Command::BisectStart
+            | Command::BisectReset
             | Command::OpenExplorer
             | Command::OpenTerminal
             | Command::OpenVsCode
@@ -546,6 +559,9 @@ impl Command {
                 | Command::Theme(_)
                 | Command::SortCommits(_)
                 | Command::Layout(_)
+                // « Démarrer » et « Terminer » n'ont de sens que sous le sous-menu Bisect.
+                | Command::BisectStart
+                | Command::BisectReset
         )
     }
 
