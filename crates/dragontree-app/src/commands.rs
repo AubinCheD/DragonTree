@@ -75,7 +75,11 @@ pub enum Command {
     Refresh,
     Fetch,
     Pull,
+    /// Pull de la branche suivie sans dialogue (aussi : Ctrl+clic sur Pull).
+    QuickPull,
     Push,
+    /// Push de la branche courante vers sa branche suivie, sans dialogue (aussi : Ctrl+clic sur Push).
+    QuickPush,
     NewBranch,
     NewTag,
     Stash,
@@ -175,7 +179,9 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::Fetch),
             Cmd(Command::Pull),
+            Cmd(Command::QuickPull),
             Cmd(Command::Push),
+            Cmd(Command::QuickPush),
             Separator,
             Cmd(Command::NewBranch),
             Cmd(Command::NewTag),
@@ -259,7 +265,9 @@ impl Command {
         Command::Refresh,
         Command::Fetch,
         Command::Pull,
+        Command::QuickPull,
         Command::Push,
+        Command::QuickPush,
         Command::NewBranch,
         Command::NewTag,
         Command::Stash,
@@ -314,7 +322,9 @@ impl Command {
             Command::Refresh => tr!("Actualiser"),
             Command::Fetch => "Fetch",
             Command::Pull => "Pull…",
+            Command::QuickPull => tr!("Pull rapide"),
             Command::Push => "Push…",
+            Command::QuickPush => tr!("Push rapide"),
             Command::NewBranch => tr!("Nouvelle branche…"),
             Command::NewTag => tr!("Nouveau tag…"),
             Command::Stash => "Stash…",
@@ -367,7 +377,9 @@ impl Command {
             Command::Refresh => icons::ARROWS_CLOCKWISE,
             Command::Fetch => icons::CLOUD_ARROW_DOWN,
             Command::Pull => icons::ARROW_LINE_DOWN,
+            Command::QuickPull => icons::LIGHTNING,
             Command::Push => icons::ARROW_LINE_UP,
+            Command::QuickPush => icons::LIGHTNING,
             Command::NewBranch => icons::GIT_BRANCH,
             Command::NewTag => icons::TAG,
             Command::Stash => icons::TRAY_ARROW_DOWN,
@@ -419,7 +431,9 @@ impl Command {
             | Command::Refresh
             | Command::Fetch
             | Command::Pull
+            | Command::QuickPull
             | Command::Push
+            | Command::QuickPush
             | Command::NewBranch
             | Command::NewTag
             | Command::Stash

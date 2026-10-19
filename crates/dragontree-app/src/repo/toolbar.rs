@@ -57,17 +57,27 @@ impl RepoTab {
             {
                 self.run_command(Command::Fetch, shared);
             }
+            // Ctrl+clic sur Pull ou Push : l'opération rapide, sans dialogue (Fetch n'en a pas).
+            let ctrl = |ui: &Ui| ui.input(|i| i.modifiers.command);
             if toolbar_button(ui, icons::ARROW_LINE_DOWN, "Pull", pull, busy(self, "Pull"))
-                .on_hover_text(with_shortcut(tr!("Récupérer et intégrer la branche suivie"), Command::Pull))
+                .on_hover_text(format!(
+                    "{}\n{}",
+                    with_shortcut(tr!("Récupérer et intégrer la branche suivie"), Command::Pull),
+                    tr!("Ctrl+clic : pull rapide, sans dialogue")
+                ))
                 .clicked()
             {
-                self.run_command(Command::Pull, shared);
+                self.run_command(if ctrl(ui) { Command::QuickPull } else { Command::Pull }, shared);
             }
             if toolbar_button(ui, icons::ARROW_LINE_UP, "Push", push, busy(self, "Push"))
-                .on_hover_text(with_shortcut(tr!("Envoyer la branche courante"), Command::Push))
+                .on_hover_text(format!(
+                    "{}\n{}",
+                    with_shortcut(tr!("Envoyer la branche courante"), Command::Push),
+                    tr!("Ctrl+clic : push rapide vers la branche suivie, sans dialogue")
+                ))
                 .clicked()
             {
-                self.run_command(Command::Push, shared);
+                self.run_command(if ctrl(ui) { Command::QuickPush } else { Command::Push }, shared);
             }
             ui.separator();
             if toolbar_button(ui, icons::TRAY_ARROW_DOWN, "Stash", stash, busy(self, "Stash"))
@@ -134,8 +144,27 @@ impl RepoTab {
         let (remote, branch) = self
             .current_upstream()
             .unwrap_or_else(|| (self.default_remote().unwrap_or_else(|| "origin".into()), current));
-        let _ = shared;
-        self.dialog = Some(Dialog::Pull { remote, branch, rebase: false });
+        self.dialog = Some(Dialog::Pull { remote, branch, rebase: shared.pull_rebase });
+    }
+
+    /// Pull rapide : la branche suivie, dans le dernier mode choisi pendant la session (fusion sinon). Sans
+    /// branche suivie, il n'y a rien à deviner : le dialogue s'ouvre.
+    pub(super) fn quick_pull(&mut self, shared: &Shared) {
+        match self.current_upstream() {
+            Some((remote, branch)) => self.op_pull(shared, remote, branch, shared.pull_rebase),
+            None => self.open_pull_dialog(shared),
+        }
+    }
+
+    /// Push rapide : vers la branche suivie, créée sur le remote par défaut s'il n'y en a pas ; sans force ni tags.
+    /// Comme `push.default=simple`, une branche qui suit une branche d'un autre nom (`feature` qui suit
+    /// `origin/main`) n'est pas poussée sans confirmation : le dialogue s'ouvre, prérempli.
+    pub(super) fn quick_push(&mut self, shared: &Shared) {
+        match self.default_push() {
+            Some(target) if target.remote_branch == target.local => self.push_to(shared, target),
+            Some(_) => self.open_push_dialog(),
+            None => {}
+        }
     }
 
     pub(super) fn open_push_dialog(&mut self) {

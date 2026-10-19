@@ -471,7 +471,11 @@ impl RepoTab {
             Dialog::Push { remote, local, remote_branch, set_upstream, force, tags } => {
                 self.op_push(shared, remote, local, remote_branch.trim().to_string(), set_upstream, force, tags)
             }
-            Dialog::Pull { remote, branch, rebase } => self.op_pull(shared, remote, branch.trim().to_string(), rebase),
+            Dialog::Pull { remote, branch, rebase } => {
+                // Mode retenu pour la session : repris par le prochain dialogue et par le pull rapide.
+                shared.pull_rebase = rebase;
+                self.op_pull(shared, remote, branch.trim().to_string(), rebase)
+            }
             Dialog::Discard { tracked, untracked } => self.op_discard(shared, tracked, untracked),
             Dialog::DiscardLines { selection } => {
                 self.op_patch(shared, PatchMode::Discard, selection);

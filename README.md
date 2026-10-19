@@ -87,6 +87,7 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Ctrl+Maj+C | Cloner |
 | Ctrl+, | Réglages |
 | Ctrl+Maj+F / Ctrl+Maj+U / Ctrl+Maj+P | Fetch / Pull… / Push… |
+| Ctrl+clic sur Pull / Push | Pull / Push rapides, sans dialogue (branche suivie) |
 | Ctrl+Maj+B / Ctrl+Maj+H | Nouvelle branche… / Stash… |
 | Ctrl+Maj+A | Historique : branche courante seulement (bascule) |
 | Ctrl+Maj+. | Historique : afficher les commits perdus du reflog (bascule, par onglet) |

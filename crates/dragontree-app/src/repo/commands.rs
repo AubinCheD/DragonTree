@@ -23,7 +23,7 @@ impl RepoTab {
         let on_branch = matches!(self.refs.as_ref().map(|r| &r.head), Some(HeadState::Branch(_)));
         match cmd {
             Command::Fetch => has_remote,
-            Command::Pull | Command::Push => has_remote && on_branch,
+            Command::Pull | Command::QuickPull | Command::Push | Command::QuickPush => has_remote && on_branch,
             Command::Stash => self.status.as_ref().is_some_and(|s| !s.is_clean()),
             Command::NewBranch | Command::NewTag => self.refs.is_some(),
             Command::CollapseAllMerges => !self.history.folding.is_all(),
@@ -73,7 +73,9 @@ impl RepoTab {
             Command::Refresh => self.refresh(shared, Refresh::ALL),
             Command::Fetch => self.op_fetch(shared, None, true, false),
             Command::Pull => self.open_pull_dialog(shared),
+            Command::QuickPull => self.quick_pull(shared),
             Command::Push => self.open_push_dialog(),
+            Command::QuickPush => self.quick_push(shared),
             Command::NewBranch => {
                 self.dialog = Some(Dialog::CreateBranch {
                     start: "HEAD".into(),

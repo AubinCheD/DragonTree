@@ -72,6 +72,9 @@ pub struct Shared {
     pub actions: Vec<AppAction>,
     pub profile_dir: Option<PathBuf>,
     pub ctx: egui::Context,
+    /// Dernier mode choisi dans le dialogue de pull pendant la session (`true` : rebase) : le dialogue suivant
+    /// et le pull rapide le reprennent.
+    pub pull_rebase: bool,
 }
 
 impl Shared {
@@ -96,6 +99,7 @@ impl Shared {
             actions: Vec::new(),
             profile_dir,
             ctx,
+            pull_rebase: false,
         };
         (shared, rx)
     }

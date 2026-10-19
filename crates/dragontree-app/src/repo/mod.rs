@@ -223,12 +223,7 @@ struct PendingCommit {
 /// Suite d'un commit réussi.
 enum AfterCommit {
     Nothing,
-    Push {
-        remote: String,
-        local: String,
-        remote_branch: String,
-        set_upstream: bool,
-    },
+    Push(actions::PushTarget),
     /// Push demandé mais non lancé ; le texte explique pourquoi.
     PushSkipped(String),
 }

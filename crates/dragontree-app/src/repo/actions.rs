@@ -122,6 +122,23 @@ impl RepoTab {
         });
     }
 
+    /// Push sans dialogue (rapide, ou après un commit) : ni force ni tags.
+    pub(crate) fn push_to(&mut self, shared: &Shared, t: PushTarget) {
+        self.op_push(shared, t.remote, t.local, t.remote_branch, t.set_upstream, false, false);
+    }
+
+    /// Push par défaut de la branche courante : vers sa branche suivie, sinon vers une branche du même nom sur le
+    /// remote par défaut, qui devient sa branche suivie. `None` : HEAD détachée ou aucun remote.
+    pub(crate) fn default_push(&self) -> Option<PushTarget> {
+        let local = self.refs.as_ref()?.current_branch()?.to_string();
+        Some(match self.current_upstream() {
+            Some((remote, remote_branch)) => PushTarget { remote, local, remote_branch, set_upstream: false },
+            None => {
+                PushTarget { remote: self.default_remote()?, remote_branch: local.clone(), local, set_upstream: true }
+            }
+        })
+    }
+
     /// Branche distante suivie par la branche courante : (remote, branche).
     pub(crate) fn current_upstream(&self) -> Option<(String, String)> {
         let refs = self.refs.as_ref()?;
@@ -230,24 +247,22 @@ impl RepoTab {
     /// Push qui suivra le commit. Jamais forcé : si le commit modifié (amend) était déjà poussé,
     /// le push réécrirait l'historique distant, ce que seul un push forcé explicite doit faire.
     fn push_after_commit(&self, amend: bool) -> AfterCommit {
-        let Some(local) = self.refs.as_ref().and_then(|r| r.current_branch().map(str::to_string)) else {
+        if self.refs.as_ref().and_then(|r| r.current_branch()).is_none() {
             return AfterCommit::PushSkipped(tr!("HEAD détachée : aucune branche à pousser.").into());
+        }
+        let Some(target) = self.default_push() else {
+            return AfterCommit::PushSkipped(tr!("Aucun remote n'est configuré.").into());
         };
-        if let Some((remote, remote_branch)) = self.current_upstream() {
-            let already_pushed = self.status.as_ref().is_some_and(|s| s.ahead == 0);
-            if amend && already_pushed {
-                return AfterCommit::PushSkipped(tr!(
-                    "Le commit d'origine était déjà sur {remote}/{remote_branch} : le remplacer demande un push forcé. Utilisez Push › Forcer si c'est voulu.",
-                    remote,
-                    remote_branch
-                ));
-            }
-            return AfterCommit::Push { remote, local, remote_branch, set_upstream: false };
+        let already_pushed = self.status.as_ref().is_some_and(|s| s.ahead == 0);
+        if amend && already_pushed && !target.set_upstream {
+            let PushTarget { remote, remote_branch, .. } = target;
+            return AfterCommit::PushSkipped(tr!(
+                "Le commit d'origine était déjà sur {remote}/{remote_branch} : le remplacer demande un push forcé. Utilisez Push › Forcer si c'est voulu.",
+                remote,
+                remote_branch
+            ));
         }
-        match self.default_remote() {
-            Some(remote) => AfterCommit::Push { remote, remote_branch: local.clone(), local, set_upstream: true },
-            None => AfterCommit::PushSkipped(tr!("Aucun remote n'est configuré.").into()),
-        }
+        AfterCommit::Push(target)
     }
 
     /// Après un commit réussi : vider la zone de saisie, puis pousser si c'était demandé.
@@ -258,9 +273,7 @@ impl RepoTab {
         self.changes.saved_message = None;
         match after {
             AfterCommit::Nothing => {}
-            AfterCommit::Push { remote, local, remote_branch, set_upstream } => {
-                self.op_push(shared, remote, local, remote_branch, set_upstream, false, false);
-            }
+            AfterCommit::Push(target) => self.push_to(shared, target),
             AfterCommit::PushSkipped(reason) => shared.toast(Toast {
                 kind: ToastKind::Info,
                 title: tr!("Le commit n'a pas été poussé").into(),
@@ -356,6 +369,15 @@ impl RepoTab {
             Ok(Some(tr!("{title} : {label}", title = kind.title(), label)))
         });
     }
+}
+
+/// Destination d'un push sans dialogue (voir `RepoTab::default_push`).
+pub(crate) struct PushTarget {
+    pub remote: String,
+    pub local: String,
+    pub remote_branch: String,
+    /// Pas encore de branche suivie : le push la crée (`--set-upstream`).
+    pub set_upstream: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
