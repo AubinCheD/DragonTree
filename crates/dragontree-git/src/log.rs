@@ -95,6 +95,10 @@ pub fn selection_args(sel: &RefSelection) -> Vec<String> {
             };
             if wanted {
                 push_excludes(&mut args, &sel.exclude, Some(prefix));
+                if option == "--remotes" {
+                    // `origin/HEAD` (symbolique) suit `origin/main` : parcourue, elle ferait fuir une branche masquée.
+                    args.push("--exclude=*/HEAD".into());
+                }
                 args.push(option.into());
             }
         }
@@ -102,8 +106,13 @@ pub fn selection_args(sel: &RefSelection) -> Vec<String> {
         for pick in &sel.only {
             if is_glob(pick) {
                 push_excludes(&mut args, &sel.exclude, None);
+                if pick.starts_with("refs/remotes/") {
+                    args.push("--exclude=refs/remotes/*/HEAD".into());
+                }
                 args.push(format!("--glob={pick}"));
-            } else if !sel.exclude.contains(pick) {
+            } else {
+                // Un choix précis l'emporte sur le masquage : les exclusions ne retirent que ce que les motifs
+                // (`--glob`) parcourent.
                 args.push(pick.clone());
             }
         }
@@ -357,7 +366,7 @@ mod tests {
             log_args(&LogOptions { scope: LogScope::Refs(RefSelection::default()), ..LogOptions::default() }),
             log_args(&LogOptions::default())
         );
-        assert_eq!(tail(RefSelection::default()), ["--branches", "--remotes", "--tags", "HEAD"]);
+        assert_eq!(tail(RefSelection::default()), ["--branches", "--exclude=*/HEAD", "--remotes", "--tags", "HEAD"]);
     }
 
     #[test]
@@ -365,7 +374,7 @@ mod tests {
         let args = tail(RefSelection { tags: false, remotes: false, ..RefSelection::default() });
         assert_eq!(args, ["--branches", "HEAD"]);
         let args = tail(RefSelection { tags: false, ..RefSelection::default() });
-        assert_eq!(args, ["--branches", "--remotes", "HEAD"]);
+        assert_eq!(args, ["--branches", "--exclude=*/HEAD", "--remotes", "HEAD"]);
     }
 
     #[test]
@@ -381,6 +390,7 @@ mod tests {
                 "--exclude=x",
                 "--branches",
                 "--exclude=origin/*",
+                "--exclude=*/HEAD",
                 "--remotes",
                 "--exclude=v1",
                 "--tags",
@@ -396,7 +406,7 @@ mod tests {
             exclude: strings(&["refs/tags/v1", "refs/heads/x"]),
             ..RefSelection::default()
         });
-        assert_eq!(args, ["--exclude=x", "--branches", "--remotes", "HEAD"]);
+        assert_eq!(args, ["--exclude=x", "--branches", "--exclude=*/HEAD", "--remotes", "HEAD"]);
     }
 
     #[test]
@@ -414,6 +424,7 @@ mod tests {
                 "--exclude=refs/heads/feature/b",
                 "--glob=refs/heads/feature/*",
                 "--exclude=refs/heads/feature/b",
+                "--exclude=refs/remotes/*/HEAD",
                 "--glob=refs/remotes/origin/*"
             ]
         );
@@ -423,7 +434,8 @@ mod tests {
             exclude: strings(&["refs/heads/a"]),
             ..RefSelection::default()
         });
-        assert_eq!(args, ["refs/heads/b"]);
+        // Un choix précis l'emporte sur le masquage.
+        assert_eq!(args, ["refs/heads/a", "refs/heads/b"]);
     }
 
     #[test]

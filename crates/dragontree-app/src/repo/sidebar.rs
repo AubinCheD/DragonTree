@@ -7,6 +7,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
 use super::actions::StashOp;
+use super::scope::{Visibility, branch_pattern, folder_pattern, remote_branch_pattern, remote_pattern, visibility};
 use super::{Dialog, RepoTab, RepoView};
 use crate::app::{AppAction, Shared};
 use crate::icons;
@@ -29,6 +30,13 @@ impl Default for SidebarState {
 }
 
 const ROW_H: f32 = 22.0;
+/// Largeur réservée à droite d'une ligne pour l'icône œil.
+const TOOL_W: f32 = 22.0;
+
+/// Place prise à droite de la ligne par les icônes quand elles sont dessinées.
+fn reserved(tools: bool) -> f32 {
+    if tools { TOOL_W } else { 0.0 }
+}
 
 /// Nœud d'arbre de noms `a/b/c`.
 struct Node<'a, T> {
@@ -118,10 +126,13 @@ impl RepoTab {
                     let key = format!("remote:{remote}");
                     // Remotes dépliés par défaut : la clé présente signifie « replié ».
                     let open = !self.sidebar.open_folders.contains(&key) || !filter.is_empty();
-                    let resp = folder_row(ui, &key, &remote, icons::CLOUD, branches.len(), open, 0, p);
+                    let pattern = remote_pattern(&remote);
+                    let state = visibility(shared.settings.hidden_refs_of(&self.path), &pattern);
+                    let resp = folder_row(ui, &key, &remote, icons::CLOUD, branches.len(), open, 0, Some(state), p);
                     if resp.clicked() {
                         toggle(&mut self.sidebar.open_folders, &key);
                     }
+                    self.eye_button(ui, shared, &resp, &remote, &pattern, state, p);
                     let remote_name = remote.clone();
                     resp.context_menu(|ui| {
                         if ui.button(format!("{} Fetch {remote_name}", icons::CLOUD_ARROW_DOWN)).clicked() {
@@ -135,6 +146,7 @@ impl RepoTab {
                             ui.close();
                         }
                         ui.separator();
+                        self.hide_menu_entry(ui, shared, &pattern);
                         if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer le remote…"))).clicked() {
                             self.dialog = Some(Dialog::RemoveRemote { name: remote_name.clone() });
                             ui.close();
@@ -354,9 +366,20 @@ impl RepoTab {
             if !child.children.is_empty() {
                 let key = format!("{prefix}:{full}");
                 let open = self.sidebar.open_folders.contains(&key);
-                let resp = folder_row(ui, &key, name, icons::FOLDER_SIMPLE, child.count(), open, indent, p);
+                // Les tags ne se masquent pas par l'œil : l'option « Afficher les tags » les couvre.
+                let hide = (prefix != "tag").then(|| {
+                    let pattern = folder_pattern(prefix, &full);
+                    let state = visibility(shared.settings.hidden_refs_of(&self.path), &pattern);
+                    (pattern, state)
+                });
+                let state = hide.as_ref().map(|(_, state)| *state);
+                let resp = folder_row(ui, &key, name, icons::FOLDER_SIMPLE, child.count(), open, indent, state, p);
                 if resp.clicked() {
                     toggle(&mut self.sidebar.open_folders, &key);
+                }
+                if let Some((pattern, state)) = &hide {
+                    self.eye_button(ui, shared, &resp, &full, pattern, *state, p);
+                    resp.context_menu(|ui| self.hide_menu_entry(ui, shared, pattern));
                 }
                 if open {
                     self.node_ui(ui, shared, prefix, &full, child, indent + 1, p);
@@ -405,7 +428,19 @@ impl RepoTab {
         };
         let (rect, resp) = widgets::row_response(ui, id_salt, ROW_H, selected, Sense::click());
         widgets::a11y(&resp, full, true);
-        let text_right = paint_ahead_behind(ui, rect, leaf, p);
+        // Œil : au survol, ou en permanence quand l'élément est masqué du graphe (ligne atténuée).
+        let hide_pattern = match leaf {
+            Leaf::Local(b) => Some(branch_pattern(&b.name)),
+            Leaf::Remote(b) => Some(remote_branch_pattern(&b.full)),
+            Leaf::Tag(_) => None,
+        };
+        let state = hide_pattern
+            .as_deref()
+            .map_or(Visibility::Shown, |pattern| visibility(shared.settings.hidden_refs_of(&self.path), pattern));
+        let tools = hide_pattern.is_some() && (ui.rect_contains_pointer(rect) || state != Visibility::Shown);
+        let content = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x - reserved(tools), rect.max.y));
+        let color = if state == Visibility::Shown { color } else { p.weak };
+        let text_right = paint_ahead_behind(ui, content, leaf, p);
         paint_row(
             ui,
             egui::Rect::from_min_max(rect.min, egui::pos2(text_right, rect.max.y)),
@@ -416,6 +451,9 @@ impl RepoTab {
             color,
             p,
         );
+        if let Some(pattern) = &hide_pattern {
+            self.eye_button(ui, shared, &resp, full, pattern, state, p);
+        }
 
         let resp = resp.on_hover_text(match leaf {
             Leaf::Local(b) => match &b.upstream {
@@ -453,6 +491,62 @@ impl RepoTab {
             Leaf::Tag(t) => self.tag_menu(ui, shared, t),
         });
         let _ = full;
+    }
+
+    /// Icône œil d'une ligne (dossier, branche, remote) : masque l'élément du graphe ou le réaffiche. Dessinée
+    /// au survol de la ligne, en permanence (œil barré) quand l'élément est masqué ; toujours cliquable et
+    /// exposée à l'accessibilité. Un élément masqué par un dossier se réaffiche par ce dossier.
+    #[allow(clippy::too_many_arguments)]
+    fn eye_button(
+        &mut self,
+        ui: &mut Ui,
+        shared: &mut Shared,
+        row: &egui::Response,
+        name: &str,
+        pattern: &str,
+        state: Visibility,
+        p: &Palette,
+    ) {
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(row.rect.right() - TOOL_W / 2.0, row.rect.center().y),
+            egui::vec2(TOOL_W - 2.0, ROW_H - 4.0),
+        );
+        let usable = state != Visibility::HiddenByFolder;
+        let resp = ui.interact(rect, row.id.with("eye"), if usable { Sense::click() } else { Sense::hover() });
+        let label = if state == Visibility::Shown {
+            tr!("Masquer du graphe : {name}", name)
+        } else {
+            tr!("Afficher dans le graphe : {name}", name)
+        };
+        widgets::a11y(&resp, &label, usable);
+        if ui.rect_contains_pointer(row.rect) || state != Visibility::Shown {
+            let (icon, color) = match (state, resp.hovered()) {
+                (_, true) => (if state == Visibility::Shown { icons::EYE } else { icons::EYE_SLASH }, p.text),
+                (Visibility::Shown, false) => (icons::EYE, p.weak),
+                _ => (icons::EYE_SLASH, p.weak),
+            };
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, icon, FontId::proportional(13.0), color);
+        }
+        let tip = match state {
+            Visibility::HiddenByFolder => tr!("Masqué par un dossier : réafficher le dossier").to_string(),
+            _ => label,
+        };
+        if resp.on_hover_text(tip).clicked() && usable {
+            self.toggle_hidden(shared, pattern);
+        }
+    }
+
+    /// Entrée « Masquer du graphe / Afficher dans le graphe » des menus contextuels.
+    fn hide_menu_entry(&mut self, ui: &mut Ui, shared: &mut Shared, pattern: &str) {
+        let (icon, text) = match visibility(shared.settings.hidden_refs_of(&self.path), pattern) {
+            Visibility::Shown => (icons::EYE_SLASH, tr!("Masquer du graphe")),
+            Visibility::Hidden => (icons::EYE, tr!("Afficher dans le graphe")),
+            Visibility::HiddenByFolder => return,
+        };
+        if ui.button(format!("{icon} {text}")).clicked() {
+            self.toggle_hidden(shared, pattern);
+            ui.close();
+        }
     }
 
     fn local_branch_menu(&mut self, ui: &mut Ui, shared: &mut Shared, b: &LocalBranch, current: Option<&str>) {
@@ -521,6 +615,7 @@ impl RepoTab {
             self.dialog = Some(Dialog::DeleteBranch { name: name.clone(), force: false, remote, delete_remote: false });
             ui.close();
         }
+        self.hide_menu_entry(ui, shared, &branch_pattern(&name));
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le nom"))).clicked() {
             ui.ctx().copy_text(name.clone());
             ui.close();
@@ -558,11 +653,11 @@ impl RepoTab {
             self.dialog = Some(Dialog::DeleteRemoteBranch { remote: b.remote.clone(), branch: b.name.clone() });
             ui.close();
         }
+        self.hide_menu_entry(ui, shared, &remote_branch_pattern(&b.full));
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le nom"))).clicked() {
             ui.ctx().copy_text(b.full.clone());
             ui.close();
         }
-        let _ = shared;
     }
 
     fn tag_menu(&mut self, ui: &mut Ui, shared: &mut Shared, t: &TagRef) {
@@ -726,10 +821,13 @@ fn folder_row(
     count: usize,
     open: bool,
     indent: usize,
+    hide: Option<Visibility>,
     p: &Palette,
 ) -> egui::Response {
     let (rect, resp) = widgets::row_response(ui, ("folder", key), ROW_H, false, Sense::click());
     widgets::a11y(&resp, name, true);
+    let dim = hide.is_some_and(|state| state != Visibility::Shown);
+    let tools = hide.is_some() && (dim || ui.rect_contains_pointer(rect));
     let x = rect.left() + 6.0 + indent as f32 * 12.0;
     let caret = if open { icons::CARET_DOWN } else { icons::CARET_RIGHT };
     ui.painter().text(egui::pos2(x, rect.center().y), Align2::LEFT_CENTER, caret, FontId::proportional(10.0), p.weak);
@@ -738,10 +836,10 @@ fn folder_row(
         Align2::LEFT_CENTER,
         format!("{icon} {name}"),
         FontId::proportional(13.0),
-        p.text,
+        if dim { p.weak } else { p.text },
     );
     ui.painter().text(
-        rect.right_center() - egui::vec2(6.0, 0.0),
+        rect.right_center() - egui::vec2(6.0 + reserved(tools), 0.0),
         Align2::RIGHT_CENTER,
         count.to_string(),
         FontId::proportional(11.0),

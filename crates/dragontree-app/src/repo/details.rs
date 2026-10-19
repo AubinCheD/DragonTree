@@ -217,7 +217,7 @@ impl RepoTab {
                 });
                 ui.end_row();
             }
-            let visibility = super::scope::LabelVisibility::of(shared);
+            let visibility = super::scope::LabelVisibility::of(shared, &self.path);
             let labels: Vec<_> = self
                 .refs
                 .as_ref()

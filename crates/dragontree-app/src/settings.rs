@@ -55,6 +55,9 @@ pub struct Settings {
     pub show_tags: bool,
     /// Branches distantes parcourues par le graphe et étiquetées dans l'historique.
     pub show_remote_branches: bool,
+    /// Dépôt (chemin) -> références masquées du graphe : noms complets ou motifs (`refs/heads/x`,
+    /// `refs/heads/feature/*`, `refs/remotes/origin/*`).
+    pub hidden_refs: BTreeMap<String, Vec<String>>,
     pub repo_list_width: f32,
     pub favorites: Vec<PathBuf>,
     pub hidden_repos: Vec<PathBuf>,
@@ -92,6 +95,7 @@ impl Default for Settings {
             topological_order: false,
             show_tags: true,
             show_remote_branches: true,
+            hidden_refs: BTreeMap::new(),
             repo_list_width: 280.0,
             favorites: Vec::new(),
             hidden_repos: Vec::new(),
@@ -240,6 +244,29 @@ impl Settings {
         let id = self.repo_accounts.get(&path_key(path))?;
         self.accounts.iter().find(|a| &a.id == id)
     }
+
+    /// Références masquées du graphe pour un dépôt (voir [`Settings::hidden_refs`]).
+    pub fn hidden_refs_of(&self, repo: &Path) -> &[String] {
+        self.hidden_refs.get(&path_key(repo)).map_or(&[], Vec::as_slice)
+    }
+
+    /// Masque la référence ou le motif `pattern` du graphe de `repo`, ou le réaffiche s'il l'était.
+    pub fn toggle_hidden_ref(&mut self, repo: &Path, pattern: &str) {
+        let list = self.hidden_refs.entry(path_key(repo)).or_default();
+        match list.iter().position(|p| p == pattern) {
+            Some(i) => {
+                list.remove(i);
+            }
+            None => list.push(pattern.to_string()),
+        }
+        if list.is_empty() {
+            self.hidden_refs.remove(&path_key(repo));
+        }
+    }
+
+    pub fn clear_hidden_refs(&mut self, repo: &Path) {
+        self.hidden_refs.remove(&path_key(repo));
+    }
 }
 
 #[cfg(test)]
@@ -333,6 +360,19 @@ mod tests {
         assert_eq!(path_key(&s.recent_repos[0]), "c:/dev/a");
     }
 
+    #[test]
+    fn hidden_refs_are_per_repo_and_toggle() {
+        let mut s = Settings::default();
+        assert!(s.hidden_refs_of(Path::new(r"C:\DEV\A")).is_empty());
+        s.toggle_hidden_ref(Path::new(r"C:\DEV\A"), "refs/heads/x");
+        s.toggle_hidden_ref(Path::new(r"c:\dev\a\"), "refs/heads/feature/*");
+        assert_eq!(s.hidden_refs_of(Path::new(r"C:\DEV\A")), ["refs/heads/x", "refs/heads/feature/*"]);
+        assert!(s.hidden_refs_of(Path::new(r"C:\DEV\B")).is_empty());
+        s.toggle_hidden_ref(Path::new(r"C:\DEV\A"), "refs/heads/x");
+        assert_eq!(s.hidden_refs_of(Path::new(r"C:\DEV\A")), ["refs/heads/feature/*"]);
+        s.clear_hidden_refs(Path::new(r"C:\DEV\A"));
+        assert!(s.hidden_refs.is_empty(), "plus d'entrée pour un dépôt sans référence masquée");
+    }
     #[test]
     fn favorites_toggle() {
         let mut s = Settings::default();

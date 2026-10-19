@@ -51,6 +51,8 @@ pub enum Command {
     ShowTags,
     /// Affiche (ou masque) les branches distantes dans le graphe.
     ShowRemoteBranches,
+    /// Réaffiche toutes les branches, dossiers et remotes masqués du graphe du dépôt.
+    ShowHiddenRefs,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -120,6 +122,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::ShowTags),
             Cmd(Command::ShowRemoteBranches),
+            Cmd(Command::ShowHiddenRefs),
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
@@ -212,6 +215,7 @@ impl Command {
         Command::SortCommits(true),
         Command::ShowTags,
         Command::ShowRemoteBranches,
+        Command::ShowHiddenRefs,
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -258,6 +262,7 @@ impl Command {
             Command::SortCommits(true) => tr!("Topologique"),
             Command::ShowTags => tr!("Afficher les tags"),
             Command::ShowRemoteBranches => tr!("Afficher les branches distantes"),
+            Command::ShowHiddenRefs => tr!("Réafficher toutes les branches masquées"),
             Command::ZoomIn => tr!("Zoom avant"),
             Command::ZoomOut => tr!("Zoom arrière"),
             Command::ZoomReset => tr!("Taille par défaut"),
@@ -304,6 +309,7 @@ impl Command {
             Command::SortCommits(_) => icons::SORT_ASCENDING,
             Command::ShowTags => icons::TAG,
             Command::ShowRemoteBranches => icons::CLOUD,
+            Command::ShowHiddenRefs => icons::EYE,
             Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
             Command::ZoomOut => icons::MAGNIFYING_GLASS_MINUS,
             Command::ZoomReset => icons::MAGNIFYING_GLASS,
@@ -352,6 +358,7 @@ impl Command {
             | Command::ShowHistory
             | Command::CurrentBranchOnly
             | Command::RevealHead
+            | Command::ShowHiddenRefs
             | Command::Refresh
             | Command::Fetch
             | Command::Pull
@@ -416,6 +423,10 @@ impl Command {
     pub fn enabled(self, cx: &CommandContext) -> bool {
         match self.scope() {
             Scope::App => self != Command::ReopenClosedTab || cx.can_reopen_tab,
+            // Rien à réafficher : l'entrée est grisée.
+            Scope::Repo if self == Command::ShowHiddenRefs => {
+                cx.repo.is_some_and(|tab| tab.can_run(self) && !cx.settings.hidden_refs_of(&tab.path).is_empty())
+            }
             Scope::Repo => cx.repo.is_some_and(|tab| tab.can_run(self)),
         }
     }

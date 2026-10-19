@@ -93,3 +93,119 @@ fn hiding_tags_also_removes_the_tag_label_of_a_visible_commit() {
     wait_until(&mut h, "étiquette retirée", |h| h.query_by_label("v2.0").is_none());
     assert!(h.query_all_by_label("Commit principal").next().is_some());
 }
+
+// --- Masquer une branche, un dossier ou un remote (œil de la barre latérale) --------------------
+
+/// `main` (commit principal), `autre`, `feature/a` et `feature/b` ont chacune un commit propre ; `origin/dev`
+/// pointe sur un commit propre (remote déclaré sans réseau).
+fn branches_repo(base: &std::path::Path) -> std::path::PathBuf {
+    let repo = base.join("northwind");
+    init_repo(&repo);
+    commit_file(&repo, "base.txt", "base\n", "Commit commun");
+    for (branch, summary) in [
+        ("autre", "Commit de autre"),
+        ("feature/a", "Commit de feature a"),
+        ("feature/b", "Commit de feature b"),
+        ("dev-distant", "Commit de dev distant"),
+    ] {
+        git(&repo, &["switch", "-q", "-c", branch, "main"]);
+        commit_file(&repo, &format!("{}.txt", branch.replace('/', "-")), "x\n", summary);
+    }
+    let tip = git(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["update-ref", "refs/remotes/origin/dev", tip.trim()]);
+    git(&repo, &["remote", "add", "origin", "file:///inexistant"]);
+    git(&repo, &["switch", "-q", "main"]);
+    git(&repo, &["branch", "-q", "-D", "dev-distant"]);
+    commit_file(&repo, "main.txt", "main\n", "Commit principal");
+    repo
+}
+
+fn open_branches(tmp: &std::path::Path) -> egui_kittest::Harness<'static, dragontree_app::DragonTreeApp> {
+    let repo = tmp.join("northwind");
+    let mut h = harness(StartOptions { open: vec![repo], view: Some("history".into()), ..start(tmp) });
+    wait_until(&mut h, "historique complet", |h| {
+        ["Commit de autre", "Commit de feature a", "Commit de feature b", "Commit de dev distant"]
+            .iter()
+            .all(|s| h.query_by_label(s).is_some())
+    });
+    h
+}
+
+#[test]
+fn the_eye_hides_a_branch_and_the_choice_is_kept_when_the_repo_is_reopened() {
+    let tmp = tempfile::tempdir().unwrap();
+    branches_repo(tmp.path());
+    let mut h = open_branches(tmp.path());
+
+    h.get_by_label("Masquer du graphe : autre").click();
+    wait_until(&mut h, "commit de autre masqué", |h| h.query_by_label("Commit de autre").is_none());
+    assert!(h.query_by_label("Commit de feature a").is_some(), "les autres branches restent");
+    // L'œil devient barré et permanent : il propose maintenant de réafficher.
+    wait_until(&mut h, "œil barré", |h| h.query_by_label("Afficher dans le graphe : autre").is_some());
+    wait_git(&mut h, "réglage enregistré", || {
+        let saved = Settings::load_from(&tmp.path().join("profil").join("settings.json"));
+        saved.hidden_refs.values().any(|v| v == &["refs/heads/autre".to_string()])
+    });
+    drop(h);
+
+    // Même profil, nouvelle fenêtre : la branche reste masquée.
+    let repo = tmp.path().join("northwind");
+    let mut h = harness(StartOptions { open: vec![repo], view: Some("history".into()), ..start(tmp.path()) });
+    wait_until(&mut h, "historique rouvert", |h| h.query_by_label("Commit de feature a").is_some());
+    wait_until(&mut h, "branche encore masquée", |h| h.query_by_label("Afficher dans le graphe : autre").is_some());
+    assert!(h.query_by_label("Commit de autre").is_none());
+
+    h.get_by_label("Afficher dans le graphe : autre").click();
+    wait_until(&mut h, "commit de autre réaffiché", |h| h.query_by_label("Commit de autre").is_some());
+}
+
+#[test]
+fn hiding_a_folder_then_showing_all_hidden_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    branches_repo(tmp.path());
+    let mut h = open_branches(tmp.path());
+
+    let entry = "Réafficher toutes les branches masquées";
+    open_menu(&mut h, "Affichage");
+    wait_until(&mut h, "entrée", |h| menu_item(h, entry).is_some());
+    assert!(menu_item_disabled(&h, entry), "rien n'est masqué : entrée grisée");
+    h.key_press(egui::Key::Escape);
+
+    h.get_by_label("Masquer du graphe : feature").click();
+    wait_until(&mut h, "commits du dossier masqués", |h| {
+        h.query_by_label("Commit de feature a").is_none() && h.query_by_label("Commit de feature b").is_none()
+    });
+    assert!(h.query_by_label("Commit de autre").is_some());
+
+    open_menu(&mut h, "Affichage");
+    wait_until(&mut h, "entrée", |h| menu_item(h, entry).is_some());
+    assert!(!menu_item_disabled(&h, entry));
+    click_menu_item(&mut h, entry);
+    wait_until(&mut h, "commits du dossier réaffichés", |h| {
+        h.query_by_label("Commit de feature a").is_some() && h.query_by_label("Commit de feature b").is_some()
+    });
+}
+
+#[test]
+fn hiding_a_remote_removes_its_branches_commits() {
+    let tmp = tempfile::tempdir().unwrap();
+    branches_repo(tmp.path());
+    let mut h = open_branches(tmp.path());
+    h.get_by_label("Masquer du graphe : origin").click();
+    wait_until(&mut h, "commit distant masqué", |h| h.query_by_label("Commit de dev distant").is_none());
+    assert!(h.query_by_label("Commit de autre").is_some());
+}
+
+#[test]
+fn hiding_the_current_branch_keeps_head_in_the_graph() {
+    let tmp = tempfile::tempdir().unwrap();
+    branches_repo(tmp.path());
+    let mut h = open_branches(tmp.path());
+    h.get_by_label("Masquer du graphe : main").click();
+    wait_until(&mut h, "œil barré sur main", |h| h.query_by_label("Afficher dans le graphe : main").is_some());
+    // Masquer aussi `autre` : quand son commit disparaît, le journal a été relu avec `main` déjà masquée.
+    h.get_by_label("Masquer du graphe : autre").click();
+    wait_until(&mut h, "commit de autre masqué", |h| h.query_by_label("Commit de autre").is_none());
+    // HEAD (donc le commit de main) reste parcourue malgré le masquage de sa branche.
+    assert!(h.query_all_by_label("Commit principal").next().is_some());
+}

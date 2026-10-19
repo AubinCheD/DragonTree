@@ -65,6 +65,7 @@ impl RepoTab {
                 self.history.current_branch_only = !self.history.current_branch_only;
                 self.load_log(shared);
             }
+            Command::ShowHiddenRefs => self.show_all_hidden(shared),
             Command::Refresh => self.refresh(shared, Refresh::ALL),
             Command::Fetch => self.op_fetch(shared, None, true, false),
             Command::Pull => self.open_pull_dialog(shared),

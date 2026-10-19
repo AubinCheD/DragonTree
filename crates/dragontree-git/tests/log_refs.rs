@@ -104,7 +104,7 @@ fn only_walks_the_chosen_refs_and_globs() {
 }
 
 #[test]
-fn excluded_ref_is_not_walked_even_if_chosen() {
+fn exclusions_never_remove_an_explicit_exact_pick() {
     let t = sample();
     let selection = RefSelection {
         head: false,
@@ -112,7 +112,56 @@ fn excluded_ref_is_not_walked_even_if_chosen() {
         exclude: vec!["refs/heads/feature/a".into(), "refs/heads/solo".into()],
         ..RefSelection::default()
     };
-    assert_eq!(summaries(&t, selection), ["base", "propre b"]);
+    // Le motif respecte le masquage de `feature/a` ; la branche choisie précisément reste affichée.
+    assert_eq!(summaries(&t, selection), ["base", "propre b", "propre solo"]);
+    // Tous les choix précis sont aussi masqués : on affiche toujours ces choix, jamais l'historique de HEAD.
+    let selection = RefSelection {
+        head: false,
+        only: vec!["refs/heads/solo".into()],
+        exclude: vec!["refs/heads/solo".into()],
+        ..RefSelection::default()
+    };
+    assert_eq!(summaries(&t, selection), ["base", "propre solo"]);
+}
+
+#[test]
+fn a_glob_matching_nothing_walks_nothing_instead_of_head() {
+    let t = sample();
+    let selection =
+        RefSelection { head: false, only: vec!["refs/heads/inexistant/*".into()], ..RefSelection::default() };
+    assert!(summaries(&t, selection).is_empty());
+}
+
+/// Dépôt cloné : `origin/HEAD` (référence symbolique) pointe sur `origin/main`, qui a un commit propre.
+fn cloned_like() -> TestRepo {
+    let t = TestRepo::new();
+    t.write("f", "0\n");
+    t.commit_all("base");
+    t.run(&["checkout", "-q", "-b", "pour-remote"]);
+    t.write("g", "propre origin main");
+    let tip = t.commit_all("propre origin main");
+    t.run(&["update-ref", "refs/remotes/origin/main", &tip]);
+    t.run(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    t.run(&["checkout", "-q", "main"]);
+    t.run(&["branch", "-q", "-D", "pour-remote"]);
+    t
+}
+
+#[test]
+fn hiding_the_default_remote_branch_is_not_defeated_by_origin_head() {
+    let t = cloned_like();
+    let hide = |only: &[&str], exclude: &[&str]| RefSelection {
+        head: only.is_empty(),
+        only: only.iter().map(|s| s.to_string()).collect(),
+        exclude: exclude.iter().map(|s| s.to_string()).collect(),
+        ..RefSelection::default()
+    };
+    assert_eq!(summaries(&t, hide(&[], &[])), ["base", "propre origin main"]);
+    assert_eq!(summaries(&t, hide(&[], &["refs/remotes/origin/main"])), ["base"]);
+    assert_eq!(
+        summaries(&t, hide(&["refs/remotes/origin/*", "refs/heads/main"], &["refs/remotes/origin/main"])),
+        ["base"]
+    );
 }
 
 #[test]

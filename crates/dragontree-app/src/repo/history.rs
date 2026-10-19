@@ -197,7 +197,7 @@ impl RepoTab {
         let head_oid = self.refs.as_ref().and_then(|r| r.head_oid);
         let head_row = head_oid.and_then(|o| self.history.index.get(&o).copied());
         let labels = self.refs.as_ref().map(|r| r.labels.clone()).unwrap_or_default();
-        let visibility = LabelVisibility::of(shared);
+        let visibility = LabelVisibility::of(shared, &self.path);
         let now = widgets::now_ts();
 
         let mut area = egui::ScrollArea::vertical().id_salt(("history-rows", self.id)).auto_shrink([false, false]);
