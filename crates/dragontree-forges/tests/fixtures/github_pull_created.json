@@ -1,0 +1,14 @@
+{
+  "url": "https://api.github.com/repos/contoso/northwind/pulls/1347",
+  "id": 1,
+  "node_id": "MDExOlB1bGxSZXF1ZXN0MQ==",
+  "html_url": "https://github.com/contoso/northwind/pull/1347",
+  "number": 1347,
+  "state": "open",
+  "draft": true,
+  "title": "Ajoute la page d'accueil",
+  "user": { "login": "contoso", "id": 1001 },
+  "body": "Description de la PR",
+  "head": { "label": "contoso:feature/accueil", "ref": "feature/accueil" },
+  "base": { "label": "contoso:main", "ref": "main" }
+}

@@ -2,7 +2,10 @@
 //! `cargo test -p dragontree-forges -- --ignored`
 //! Ils n'affichent jamais de jeton et ne font que des lectures.
 
-use dragontree_forges::{Account, ForgeError, ForgeKind, list_repos, new_account_id, secrets, verify};
+use dragontree_forges::{
+    Account, ForgeError, ForgeKind, PullRequestDraft, RepoLocation, create_pull_request, list_repos, new_account_id,
+    secrets, verify,
+};
 
 /// Vérifie un vrai jeton Azure DevOps (variable `AZURE_DEVOPS_EXT_PAT`) puis liste les
 /// dépôts de ses organisations. N'affiche que des nombres.
@@ -95,4 +98,73 @@ fn secrets_round_trip_windows_credential_manager() {
     secrets::delete_token(&id).unwrap();
     assert_eq!(secrets::load_token(&id).unwrap(), None);
     secrets::delete_token(&id).unwrap();
+}
+
+/// Un jeton invalide doit donner `Unauthorized` à la création d'une pull request (GitHub, GitLab, Azure DevOps).
+#[test]
+#[ignore = "réseau : appelle api.github.com, gitlab.com et dev.azure.com"]
+fn live_pull_request_with_an_invalid_token_is_unauthorized() {
+    let draft = PullRequestDraft {
+        source_branch: "feature/essai".into(),
+        target_branch: "main".into(),
+        title: "Essai DragonTree".into(),
+        ..Default::default()
+    };
+    for (kind, url) in [
+        (ForgeKind::GitHub, "https://github.com/contoso/northwind.git"),
+        (ForgeKind::GitLab, "https://gitlab.com/fabrikam/outils.git"),
+        (ForgeKind::AzureDevOps, "https://dev.azure.com/fabrikam/Projet/_git/api"),
+    ] {
+        let account = Account {
+            id: new_account_id(),
+            kind,
+            host: kind.default_host().into(),
+            username: "essai".into(),
+            display_name: String::new(),
+            orgs: vec![],
+            avatar_url: None,
+        };
+        let location = RepoLocation::parse(url, Some(&account)).expect("URL analysable");
+        let result = create_pull_request(&account, "jeton-invalide-dragontree", &location, &draft);
+        assert!(matches!(result, Err(ForgeError::Unauthorized)), "{}: {result:?}", kind.label());
+    }
+}
+
+/// Crée une vraie pull request (brouillon) : `DRAGONTREE_LIVE_PR_REMOTE` (URL du remote), `DRAGONTREE_LIVE_PR_TOKEN`,
+/// `DRAGONTREE_LIVE_PR_SOURCE` (branche déjà poussée) et `DRAGONTREE_LIVE_PR_TARGET`. À fermer à la main ensuite.
+/// N'affiche jamais le jeton, seulement le numéro et l'adresse de la pull request.
+#[test]
+#[ignore = "réseau : crée une vraie pull request (brouillon) avec les variables DRAGONTREE_LIVE_PR_*"]
+fn live_create_a_draft_pull_request() {
+    let var = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+    let (Some(remote), Some(token), Some(source), Some(target)) = (
+        var("DRAGONTREE_LIVE_PR_REMOTE"),
+        var("DRAGONTREE_LIVE_PR_TOKEN"),
+        var("DRAGONTREE_LIVE_PR_SOURCE"),
+        var("DRAGONTREE_LIVE_PR_TARGET"),
+    ) else {
+        eprintln!("variables DRAGONTREE_LIVE_PR_* absentes : rien à créer");
+        return;
+    };
+    let location = RepoLocation::parse(&remote, None).expect("forge non reconnue d'après l'URL");
+    let account = Account {
+        id: new_account_id(),
+        kind: location.kind(),
+        host: location.host().into(),
+        username: String::new(),
+        display_name: String::new(),
+        orgs: vec![],
+        avatar_url: None,
+    };
+    let draft = PullRequestDraft {
+        source_branch: source,
+        target_branch: target,
+        title: "Essai DragonTree (à fermer)".into(),
+        description: "Créée par le test réel de DragonTree.".into(),
+        draft: true,
+        reviewers: vec![],
+    };
+    let created = create_pull_request(&account, &token, &location, &draft)
+        .unwrap_or_else(|e| panic!("create_pull_request : {e}"));
+    println!("pull request n° {} : {}", created.number, created.url);
 }

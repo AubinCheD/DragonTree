@@ -145,7 +145,7 @@ pub(crate) fn check_response(status: u16, body: &str) -> Result<(), ForgeError> 
 }
 
 /// `https://dev.azure.com/<org>` (Services) ou `https://<hôte>/<collection>` (Server).
-fn org_base(host: &str, org: &str) -> String {
+pub(crate) fn org_base(host: &str, org: &str) -> String {
     let host = if is_services_host(host) { SERVICES_HOST } else { host };
     format!("https://{host}/{}", encode_path(org))
 }
@@ -161,7 +161,7 @@ fn clean_orgs(orgs: &[String]) -> Vec<&str> {
 }
 
 /// Encode chaque segment d'un chemin pour une URL (les `/` sont conservés).
-fn encode_path(path: &str) -> String {
+pub(crate) fn encode_path(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
     for b in path.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/') {

@@ -1,0 +1,12 @@
+{
+  "id": 8841,
+  "iid": 7,
+  "project_id": 3,
+  "title": "Draft: Ajoute la page d'accueil",
+  "description": "Description de la MR",
+  "state": "opened",
+  "source_branch": "feature/accueil",
+  "target_branch": "main",
+  "web_url": "https://gitlab.com/fabrikam/outils/cli/-/merge_requests/7",
+  "draft": true
+}

@@ -752,6 +752,12 @@ impl RepoTab {
             self.open_create_worktree(Some(WorktreeStart::Branch(name.clone())));
             ui.close();
         }
+        if !self.remotes.is_empty()
+            && ui.button(format!("{} {}", icons::GIT_PULL_REQUEST, tr!("Créer une pull request…"))).clicked()
+        {
+            self.open_pull_request(shared, Some(name.clone()));
+            ui.close();
+        }
         if b.is_head && ui.button(format!("{} Push…", icons::ARROW_LINE_UP)).clicked() {
             self.open_push_dialog();
             ui.close();

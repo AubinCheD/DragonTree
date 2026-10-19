@@ -31,7 +31,30 @@ pub(crate) fn get(url: &str, headers: &[(&str, &str)]) -> Result<Response, Forge
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
-    let mut response = request.call().map_err(map_transport_error)?;
+    read_response(request.call().map_err(map_transport_error)?)
+}
+
+/// Requête POST avec un corps JSON et les en-têtes donnés. Les statuts non 2xx sont renvoyés tels quels.
+pub(crate) fn post_json(url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, ForgeError> {
+    post_json_with(agent(), url, headers, body)
+}
+
+/// `post_json` avec un agent donné (les tests en passent un sans proxy, indépendant de l'environnement).
+fn post_json_with(
+    agent: &ureq::Agent,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Result<Response, ForgeError> {
+    let mut request = agent.post(url).header("Content-Type", "application/json");
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    read_response(request.send(body).map_err(map_transport_error)?)
+}
+
+/// Lit le statut, l'en-tête de limitation de débit et le corps d'une réponse.
+fn read_response(mut response: ureq::http::Response<ureq::Body>) -> Result<Response, ForgeError> {
     let status = response.status().as_u16();
     let ratelimit_remaining =
         response.headers().get("x-ratelimit-remaining").and_then(|v| v.to_str().ok()).map(str::to_owned);
@@ -209,6 +232,75 @@ mod tests {
         assert!(matches!(map_transport_error(ureq::Error::HostNotFound), ForgeError::Network(_)));
         assert!(matches!(map_transport_error(ureq::Error::ConnectionFailed), ForgeError::Network(_)));
         assert!(matches!(map_transport_error(ureq::Error::BadUri("x".into())), ForgeError::InvalidInput(_)));
+    }
+
+    /// Agent des tests de bouclage : sans proxy, quelles que soient `HTTP_PROXY` et `NO_PROXY` de la machine.
+    fn loopback_agent() -> ureq::Agent {
+        ureq::Agent::config_builder().proxy(None).http_status_as_error(false).build().new_agent()
+    }
+
+    /// Serveur local à usage unique : lit une requête complète, la renvoie par le canal et répond `status`.
+    fn one_shot_server(status: &'static str, reply: &'static str) -> (u16, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut data = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = stream.read(&mut chunk).unwrap();
+                data.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&data).into_owned();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let length = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0usize);
+                    if body.len() >= length || n == 0 {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            sender.send(String::from_utf8_lossy(&data).into_owned()).unwrap();
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        (port, receiver)
+    }
+
+    #[test]
+    fn post_json_sends_the_body_and_headers_and_returns_the_status() {
+        let (port, received) = one_shot_server("201 Created", r#"{"number":5}"#);
+        let url = format!("http://127.0.0.1:{port}/repos/o/r/pulls");
+        let response =
+            post_json_with(&loopback_agent(), &url, &[("Authorization", "Bearer jeton-de-test")], r#"{"title":"é"}"#)
+                .unwrap();
+        assert_eq!(response.status, 201);
+        assert_eq!(response.body, r#"{"number":5}"#);
+        let request = received.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert!(request.starts_with("POST /repos/o/r/pulls HTTP/1.1"), "{request}");
+        let lower = request.to_ascii_lowercase();
+        assert!(lower.contains("content-type: application/json"), "{request}");
+        assert!(lower.contains("authorization: bearer jeton-de-test"), "{request}");
+        assert!(request.ends_with(r#"{"title":"é"}"#), "{request}");
+    }
+
+    #[test]
+    fn post_json_returns_error_statuses_as_data() {
+        let (port, _received) = one_shot_server("422 Unprocessable Entity", r#"{"message":"Validation Failed"}"#);
+        let response = post_json_with(&loopback_agent(), &format!("http://127.0.0.1:{port}/x"), &[], "{}").unwrap();
+        assert_eq!(response.status, 422);
+        assert!(matches!(check_status(response), Err(ForgeError::Http { status: 422, .. })));
     }
 
     #[test]

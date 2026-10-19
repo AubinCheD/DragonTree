@@ -1,0 +1,18 @@
+{
+  "repository": {
+    "id": "7a7f3d0f-4a64-4a32-9a43-5d0b6f6f0b11",
+    "name": "api",
+    "url": "https://dev.azure.com/fabrikam/6f7d1c0e-0000-4000-8000-000000000001/_apis/git/repositories/7a7f3d0f-4a64-4a32-9a43-5d0b6f6f0b11",
+    "project": { "id": "6f7d1c0e-0000-4000-8000-000000000001", "name": "Mon Projet", "state": "wellFormed" }
+  },
+  "pullRequestId": 12,
+  "codeReviewId": 12,
+  "status": "active",
+  "createdBy": { "displayName": "Camille Martin", "uniqueName": "camille@example.com" },
+  "title": "Ajoute la page d'accueil",
+  "description": "Description de la PR",
+  "sourceRefName": "refs/heads/feature/accueil",
+  "targetRefName": "refs/heads/main",
+  "isDraft": true,
+  "url": "https://dev.azure.com/fabrikam/6f7d1c0e-0000-4000-8000-000000000001/_apis/git/repositories/7a7f3d0f-4a64-4a32-9a43-5d0b6f6f0b11/pullRequests/12"
+}

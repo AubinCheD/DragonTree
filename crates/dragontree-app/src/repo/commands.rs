@@ -50,6 +50,7 @@ impl RepoTab {
                 has_remote && self.refs.as_ref().is_some_and(|r| !r.pushable_branches().is_empty())
             }
             Command::DeleteStaleBranches => self.refs.is_some(),
+            Command::CreatePullRequest => has_remote && on_branch,
             Command::LfsPull => has_remote && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
@@ -116,6 +117,7 @@ impl RepoTab {
             Command::UpdateBranches => self.open_update_branches(),
             Command::PushBranches => self.open_push_branches(),
             Command::DeleteStaleBranches => self.open_delete_stale(shared),
+            Command::CreatePullRequest => self.open_pull_request(shared, None),
             Command::Stash => {
                 self.dialog =
                     Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false, snapshot: false })

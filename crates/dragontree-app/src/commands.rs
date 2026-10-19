@@ -96,6 +96,8 @@ pub enum Command {
     PushBranches,
     /// Supprime les branches locales périmées (amont disparu ou fusionnées dans la branche par défaut).
     DeleteStaleBranches,
+    /// Crée une pull request (merge request, selon la forge) de la branche courante vers la branche cible choisie.
+    CreatePullRequest,
     /// Ajoute un motif au .gitignore, avec un aperçu des fichiers concernés.
     IgnoreFiles,
     /// Applique un patch lu dans un fichier choisi (aussi : fichier déposé sur la fenêtre).
@@ -243,6 +245,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::UpdateBranches),
             Cmd(Command::PushBranches),
             Cmd(Command::DeleteStaleBranches),
+            Cmd(Command::CreatePullRequest),
             Separator,
             Cmd(Command::ApplyPatch),
             Cmd(Command::PastePatch),
@@ -374,6 +377,7 @@ impl Command {
         Command::UpdateBranches,
         Command::PushBranches,
         Command::DeleteStaleBranches,
+        Command::CreatePullRequest,
         Command::IgnoreFiles,
         Command::ApplyPatch,
         Command::PastePatch,
@@ -456,6 +460,7 @@ impl Command {
             Command::UpdateBranches => tr!("Mettre à jour les branches locales…"),
             Command::PushBranches => tr!("Pousser plusieurs branches…"),
             Command::DeleteStaleBranches => tr!("Supprimer les branches périmées…"),
+            Command::CreatePullRequest => tr!("Créer une pull request…"),
             Command::IgnoreFiles => tr!("Ignorer des fichiers…"),
             Command::ApplyPatch => tr!("Appliquer un patch…"),
             Command::PastePatch => tr!("Coller un patch…"),
@@ -559,6 +564,7 @@ impl Command {
             Command::UpdateBranches => icons::ARROW_LINE_DOWN,
             Command::PushBranches => icons::ARROW_LINE_UP,
             Command::DeleteStaleBranches => icons::BROOM,
+            Command::CreatePullRequest => icons::GIT_PULL_REQUEST,
             Command::IgnoreFiles => icons::EYE_SLASH,
             Command::ApplyPatch => icons::FILE_ARROW_DOWN,
             Command::PastePatch => icons::CLIPBOARD_TEXT,
@@ -638,6 +644,7 @@ impl Command {
             | Command::UpdateBranches
             | Command::PushBranches
             | Command::DeleteStaleBranches
+            | Command::CreatePullRequest
             | Command::IgnoreFiles
             | Command::ApplyPatch
             | Command::PastePatch

@@ -9,13 +9,17 @@ mod azure;
 mod github;
 mod gitlab;
 mod http;
+mod location;
 mod model;
+mod pullrequest;
 pub mod secrets;
 
 use dragontree_i18n::tr;
 
 pub use auth::{account_matches_url, git_auth_env, recommended_scopes, token_creation_url};
+pub use location::RepoLocation;
 pub use model::{Account, ForgeError, ForgeKind, RemoteRepo, VerifiedUser, new_account_id};
+pub use pullrequest::{CreatedPullRequest, PullRequestDraft, create_pull_request, supports_reviewers};
 
 /// Vérifie un jeton et renvoie l'identité associée. `orgs_hint` : organisations saisies
 /// par l'utilisateur (Azure : indispensables pour un jeton limité à une organisation ou

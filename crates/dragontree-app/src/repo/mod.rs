@@ -20,6 +20,7 @@ mod ignore;
 mod image_diff;
 mod lfs;
 mod patches;
+mod pull_request;
 mod rebase_ui;
 mod repo_settings;
 mod restore;
@@ -337,6 +338,10 @@ pub enum RepoEvent {
     LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
     /// Branches périmées lues pour le dialogue qui les attend.
     StaleBranches(Result<Vec<dragontree_git::StaleBranch>, GitError>),
+    /// Branche par défaut du remote, lue pour le dialogue de pull request.
+    PullRequestDefault(u64, Option<String>),
+    /// Réponse de la forge à la création d'une pull request.
+    PullRequest(u64, Result<dragontree_forges::CreatedPullRequest, dragontree_forges::ForgeError>),
     /// Fichier examiné avant une remise (`dirty` : il a des modifications locales).
     RestoreChecked {
         path: String,
@@ -417,6 +422,10 @@ pub struct RepoTab {
     auth_warned: bool,
     /// Dossier à ouvrir dans un onglet quand l'opération (numéro) réussit : un worktree qui vient d'être créé.
     open_after_op: Option<(u64, PathBuf)>,
+    /// Numéro du push demandé par le dialogue de pull request : la création suit quand il réussit.
+    pr_after_push: Option<(u64, u64)>,
+    /// Numéro du dernier dialogue de pull request ouvert (voir `PullRequestForm::generation`).
+    pr_generation: u64,
 }
 
 impl RepoTab {
@@ -461,6 +470,8 @@ impl RepoTab {
             quick_dirty: false,
             auth_warned: false,
             open_after_op: None,
+            pr_after_push: None,
+            pr_generation: 0,
         };
         tab.reopen(shared);
         tab
@@ -936,6 +947,7 @@ impl RepoTab {
                 }
                 self.refresh(shared, refresh);
                 self.after_lfs_op(shared, id);
+                self.after_pr_push(shared, id, succeeded);
                 if self.open_after_op.as_ref().is_some_and(|(op, _)| *op == id)
                     && let Some((_, path)) = self.open_after_op.take()
                     && succeeded
@@ -971,6 +983,8 @@ impl RepoTab {
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
             RepoEvent::StaleBranches(found) => self.on_stale_branches(shared, found),
+            RepoEvent::PullRequestDefault(generation, default) => self.on_pull_request_default(generation, default),
+            RepoEvent::PullRequest(generation, result) => self.on_pull_request(shared, generation, result),
             RepoEvent::RestoreChecked { path, rev, label, dirty } => {
                 self.on_restore_checked(shared, path, rev, label, dirty)
             }

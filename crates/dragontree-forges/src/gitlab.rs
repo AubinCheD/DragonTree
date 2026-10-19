@@ -27,7 +27,7 @@ pub(crate) fn list_repos(host: &str, token: &str, account_id: &str) -> Result<Ve
 
 /// En-têtes d'authentification : `Authorization: Bearer` (accepté par GitLab pour les PAT),
 /// que le client HTTP ne transmet pas lors d'une redirection vers un autre hôte.
-fn auth_headers(token: &str) -> Vec<(&'static str, String)> {
+pub(crate) fn auth_headers(token: &str) -> Vec<(&'static str, String)> {
     vec![("Authorization", format!("Bearer {token}")), ("Accept", "application/json".to_string())]
 }
 

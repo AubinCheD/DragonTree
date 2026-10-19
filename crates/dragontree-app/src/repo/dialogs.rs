@@ -54,7 +54,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// (ou son URL) complète affichée ; `UpdateBranches`, `PushBranches` et `DeleteStaleBranches` : branches à cocher (voir
 /// `branch_batch`), `DeleteStaleBranches::items` vaut `None` tant que la liste est lue et `force` demande `-D` ;
 /// `RestoreFile` : fichier à remettre dans son état à `rev` (`label` décrit la version), demandé seulement quand il a
-/// des modifications locales.
+/// des modifications locales ; `PullRequest` : formulaire de création d'une pull request, qui reste ouvert pendant le push
+/// et l'appel à la forge (voir `pull_request`).
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -95,6 +96,7 @@ pub enum Dialog {
     LfsTrack { pattern: String },
     LfsUntrack { pattern: String },
     RestoreFile { path: String, rev: String, label: String },
+    PullRequest(Box<super::pull_request::PullRequestForm>),
     UpdateBranches { items: Vec<super::branch_batch::BranchChoice> },
     PushBranches { items: Vec<super::branch_batch::BranchChoice> },
     DeleteStaleBranches { items: Option<Vec<super::branch_batch::BranchChoice>>, force: bool },
@@ -183,6 +185,10 @@ impl Dialog {
             Dialog::RestoreFile { path, .. } => {
                 (tr!("Remettre « {path} »", path), tr!("Remettre le fichier").into(), true)
             }
+            Dialog::PullRequest(form) => {
+                let (title, ok) = form.title_and_ok();
+                (title, ok, false)
+            }
             Dialog::UpdateBranches { .. } => {
                 (tr!("Mettre à jour les branches locales").into(), tr!("Mettre à jour").into(), false)
             }
@@ -259,7 +265,11 @@ impl RepoTab {
             });
             // Entrée valide les dialogues sans risque ; les destructeurs exigent un clic.
             let enter = ui.ctx().input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
-            if enter && valid && !danger && !matches!(dialog, Dialog::CreateTag { annotated: true, .. }) {
+            if enter
+                && valid
+                && !danger
+                && !matches!(dialog, Dialog::CreateTag { annotated: true, .. } | Dialog::PullRequest(_))
+            {
                 confirmed = true;
             }
         });
@@ -581,6 +591,7 @@ impl RepoTab {
             Dialog::LfsTrack { pattern } => self.lfs_track_body(ui, pattern, p),
             Dialog::LfsUntrack { pattern } => self.lfs_untrack_body(ui, pattern, p),
             Dialog::RestoreFile { path, label, .. } => Self::restore_file_body(ui, path, label, p),
+            Dialog::PullRequest(form) => Self::pull_request_body(ui, form, p),
             Dialog::UpdateBranches { items } => Self::update_branches_body(ui, items, p),
             Dialog::PushBranches { items } => Self::push_branches_body(ui, items, p),
             Dialog::DeleteStaleBranches { items, force } => Self::delete_stale_body(ui, items, force, p),
@@ -726,6 +737,7 @@ impl RepoTab {
             Dialog::LfsTrack { pattern } => self.op_lfs_track(shared, pattern),
             Dialog::LfsUntrack { pattern } => self.op_lfs_untrack(shared, pattern),
             Dialog::RestoreFile { path, rev, label } => self.op_restore_file(shared, path, rev, label, true),
+            Dialog::PullRequest(form) => self.submit_pull_request(shared, *form),
             Dialog::UpdateBranches { items } => self.op_update_branches(shared, items),
             Dialog::PushBranches { items } => self.op_push_branches(shared, items),
             Dialog::DeleteStaleBranches { items, force } => {

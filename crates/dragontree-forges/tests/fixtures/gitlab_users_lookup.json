@@ -1,0 +1,9 @@
+[
+  {
+    "id": 42,
+    "username": "jdoe",
+    "name": "Jeanne Doe",
+    "state": "active",
+    "web_url": "https://gitlab.com/jdoe"
+  }
+]

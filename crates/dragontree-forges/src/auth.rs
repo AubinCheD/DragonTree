@@ -112,12 +112,12 @@ fn azure_services_match(orgs: &[&str], remote: &RemoteUrl) -> bool {
 }
 
 /// Hôte (minuscules, sans port) et chemin (sans `/` initial) d'une URL de remote.
-struct RemoteUrl {
-    host: String,
-    path: String,
+pub(crate) struct RemoteUrl {
+    pub(crate) host: String,
+    pub(crate) path: String,
 }
 
-fn parse_remote_url(url: &str) -> Option<RemoteUrl> {
+pub(crate) fn parse_remote_url(url: &str) -> Option<RemoteUrl> {
     let url = url.trim();
     let (authority, path) = if let Some((scheme, rest)) = url.split_once("://") {
         if !matches!(scheme.to_ascii_lowercase().as_str(), "https" | "http" | "ssh" | "git+ssh" | "ssh+git" | "git") {
