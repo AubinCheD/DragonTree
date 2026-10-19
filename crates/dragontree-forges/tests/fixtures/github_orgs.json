@@ -1,0 +1,30 @@
+[
+  {
+    "login": "github",
+    "id": 9919,
+    "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+    "url": "https://api.github.com/orgs/github",
+    "repos_url": "https://api.github.com/orgs/github/repos",
+    "events_url": "https://api.github.com/orgs/github/events",
+    "hooks_url": "https://api.github.com/orgs/github/hooks",
+    "issues_url": "https://api.github.com/orgs/github/issues",
+    "members_url": "https://api.github.com/orgs/github/members{/member}",
+    "public_members_url": "https://api.github.com/orgs/github/public_members{/member}",
+    "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+    "description": "How people build software."
+  },
+  {
+    "login": "fabrikam-labs",
+    "id": 12345678,
+    "node_id": "O_kgDOALxhTg",
+    "url": "https://api.github.com/orgs/fabrikam-labs",
+    "repos_url": "https://api.github.com/orgs/fabrikam-labs/repos",
+    "events_url": "https://api.github.com/orgs/fabrikam-labs/events",
+    "hooks_url": "https://api.github.com/orgs/fabrikam-labs/hooks",
+    "issues_url": "https://api.github.com/orgs/fabrikam-labs/issues",
+    "members_url": "https://api.github.com/orgs/fabrikam-labs/members{/member}",
+    "public_members_url": "https://api.github.com/orgs/fabrikam-labs/public_members{/member}",
+    "avatar_url": "https://avatars.githubusercontent.com/u/12345678?v=4",
+    "description": null
+  }
+]

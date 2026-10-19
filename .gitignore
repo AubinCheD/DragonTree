@@ -1,0 +1,7 @@
+/target/
+/target-*/
+/.tools/
+/.superpowers/
+*.png
+!/assets/**/*.png
+/.cargo/config.toml

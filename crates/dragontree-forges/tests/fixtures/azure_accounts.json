@@ -1,0 +1,17 @@
+{
+  "count": 2,
+  "value": [
+    {
+      "accountId": "8c0f5e1a-2b3c-4d5e-9f01-23456789abcd",
+      "accountUri": "https://vssps.dev.azure.com/fabrikam/",
+      "accountName": "fabrikam",
+      "properties": {}
+    },
+    {
+      "accountId": "1d2e3f4a-5b6c-4d7e-8f90-abcdef012345",
+      "accountUri": "https://vssps.dev.azure.com/contoso-labs/",
+      "accountName": "contoso-labs",
+      "properties": {}
+    }
+  ]
+}

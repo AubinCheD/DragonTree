@@ -1,0 +1,91 @@
+//! Comptes GitHub / GitLab / Azure DevOps de DragonTree : vérification des jetons, liste des
+//! dépôts distants, jetons dans le Gestionnaire d'identifiants Windows et authentification
+//! des processus git.
+//!
+//! Toutes les fonctions réseau sont bloquantes : à appeler hors du thread de l'interface.
+
+mod auth;
+mod azure;
+mod github;
+mod gitlab;
+mod http;
+mod model;
+pub mod secrets;
+
+use dragontree_i18n::tr;
+
+pub use auth::{account_matches_url, git_auth_env, recommended_scopes, token_creation_url};
+pub use model::{Account, ForgeError, ForgeKind, RemoteRepo, VerifiedUser, new_account_id};
+
+/// Vérifie un jeton et renvoie l'identité associée. `orgs_hint` : organisations saisies
+/// par l'utilisateur (Azure : indispensables pour un jeton limité à une organisation ou
+/// pour Azure DevOps Server), ajoutées aux organisations découvertes, sans doublon.
+pub fn verify(kind: ForgeKind, host: &str, token: &str, orgs_hint: &[String]) -> Result<VerifiedUser, ForgeError> {
+    let token = clean_token(token)?;
+    let host = model::normalize_host(host, kind);
+    let mut user = match kind {
+        ForgeKind::GitHub => github::verify(&host, token)?,
+        ForgeKind::GitLab => gitlab::verify(&host, token)?,
+        ForgeKind::AzureDevOps => azure::verify(&host, token, orgs_hint)?,
+    };
+    user.orgs = merge_orgs(user.orgs, orgs_hint);
+    Ok(user)
+}
+
+/// Dépôts visibles par le compte, du plus récemment actif au plus ancien, puis par nom.
+pub fn list_repos(account: &Account, token: &str) -> Result<Vec<RemoteRepo>, ForgeError> {
+    let token = clean_token(token)?;
+    let host = model::normalize_host(&account.host, account.kind);
+    let repos = match account.kind {
+        ForgeKind::GitHub => github::list_repos(&host, token, &account.id)?,
+        ForgeKind::GitLab => gitlab::list_repos(&host, token, &account.id)?,
+        ForgeKind::AzureDevOps => azure::list_repos(&host, &account.orgs, token, &account.id)?,
+    };
+    Ok(model::finalize_repos(repos))
+}
+
+/// Jeton sans espaces ni retour à la ligne (copier-coller), jamais vide.
+fn clean_token(token: &str) -> Result<&str, ForgeError> {
+    let token = token.trim();
+    if token.is_empty() { Err(ForgeError::InvalidInput(tr!("le jeton est vide").into())) } else { Ok(token) }
+}
+
+/// Organisations découvertes puis indiquées, sans doublon (casse ignorée), dans l'ordre.
+fn merge_orgs(found: Vec<String>, hint: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(found.len() + hint.len());
+    for org in found.iter().chain(hint) {
+        let org = org.trim();
+        if !org.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(org)) {
+            out.push(org.to_string());
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_orgs_dedupes_case_insensitively_and_keeps_order() {
+        let found = vec!["fabrikam".to_string(), "Contoso".to_string()];
+        let hint = [" contoso ".to_string(), "northwind".to_string(), String::new()];
+        assert_eq!(merge_orgs(found, &hint), ["fabrikam", "Contoso", "northwind"]);
+    }
+
+    #[test]
+    fn empty_token_is_rejected_without_network() {
+        let err = verify(ForgeKind::GitHub, "github.com", "  \n", &[]).unwrap_err();
+        assert!(matches!(err, ForgeError::InvalidInput(_)), "{err:?}");
+        let account = Account {
+            id: "0123456789abcdef".into(),
+            kind: ForgeKind::GitLab,
+            host: "gitlab.com".into(),
+            username: "jsmith".into(),
+            display_name: "Jean Smith".into(),
+            orgs: vec![],
+            avatar_url: None,
+        };
+        assert!(matches!(list_repos(&account, ""), Err(ForgeError::InvalidInput(_))));
+    }
+}

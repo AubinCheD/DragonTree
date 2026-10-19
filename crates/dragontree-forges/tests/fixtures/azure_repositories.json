@@ -1,0 +1,69 @@
+{
+  "value": [
+    {
+      "id": "5febef5a-833d-4e14-b9c0-14cb638f91e6",
+      "name": "Fabrikam-Fiber",
+      "url": "https://dev.azure.com/fabrikam/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/git/repositories/5febef5a-833d-4e14-b9c0-14cb638f91e6",
+      "project": {
+        "id": "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+        "name": "Fabrikam Web",
+        "description": "Site web de Fabrikam",
+        "url": "https://dev.azure.com/fabrikam/_apis/projects/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+        "state": "wellFormed",
+        "revision": 411,
+        "visibility": "private",
+        "lastUpdateTime": "2024-02-12T16:20:31.53Z"
+      },
+      "defaultBranch": "refs/heads/main",
+      "size": 1846293,
+      "remoteUrl": "https://fabrikam@dev.azure.com/fabrikam/Fabrikam%20Web/_git/Fabrikam-Fiber",
+      "sshUrl": "git@ssh.dev.azure.com:v3/fabrikam/Fabrikam%20Web/Fabrikam-Fiber",
+      "webUrl": "https://dev.azure.com/fabrikam/Fabrikam%20Web/_git/Fabrikam-Fiber",
+      "isDisabled": false,
+      "isInMaintenance": false
+    },
+    {
+      "id": "0e9c8b7a-6d5e-4f30-a2b1-c0d9e8f7a6b5",
+      "name": "Legacy-Tfvc-Import",
+      "url": "https://dev.azure.com/fabrikam/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c/_apis/git/repositories/0e9c8b7a-6d5e-4f30-a2b1-c0d9e8f7a6b5",
+      "project": {
+        "id": "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+        "name": "Fabrikam Web",
+        "description": "Site web de Fabrikam",
+        "url": "https://dev.azure.com/fabrikam/_apis/projects/6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
+        "state": "wellFormed",
+        "revision": 411,
+        "visibility": "private",
+        "lastUpdateTime": "2024-02-12T16:20:31.53Z"
+      },
+      "defaultBranch": "refs/heads/master",
+      "size": 0,
+      "remoteUrl": "https://fabrikam@dev.azure.com/fabrikam/Fabrikam%20Web/_git/Legacy-Tfvc-Import",
+      "sshUrl": "git@ssh.dev.azure.com:v3/fabrikam/Fabrikam%20Web/Legacy-Tfvc-Import",
+      "webUrl": "https://dev.azure.com/fabrikam/Fabrikam%20Web/_git/Legacy-Tfvc-Import",
+      "isDisabled": true,
+      "isInMaintenance": false
+    },
+    {
+      "id": "a7b6c5d4-e3f2-4a1b-9c8d-7e6f5a4b3c2d",
+      "name": "docs",
+      "url": "https://dev.azure.com/fabrikam/2b3c4d5e-6f70-4812-93a4-b5c6d7e8f901/_apis/git/repositories/a7b6c5d4-e3f2-4a1b-9c8d-7e6f5a4b3c2d",
+      "project": {
+        "id": "2b3c4d5e-6f70-4812-93a4-b5c6d7e8f901",
+        "name": "OpenDocs",
+        "url": "https://dev.azure.com/fabrikam/_apis/projects/2b3c4d5e-6f70-4812-93a4-b5c6d7e8f901",
+        "state": "wellFormed",
+        "revision": 87,
+        "visibility": "public",
+        "lastUpdateTime": "2023-09-01T07:00:00Z"
+      },
+      "size": 0,
+      "remoteUrl": "https://fabrikam@dev.azure.com/fabrikam/OpenDocs/_git/docs",
+      "sshUrl": "git@ssh.dev.azure.com:v3/fabrikam/OpenDocs/docs",
+      "webUrl": "https://dev.azure.com/fabrikam/OpenDocs/_git/docs",
+      "isDisabled": false,
+      "isInMaintenance": false
+    }
+  ],
+  "count": 3
+}

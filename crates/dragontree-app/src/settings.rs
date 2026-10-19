@@ -1,0 +1,299 @@
+//! Réglages persistants (`%APPDATA%\DragonTree\settings.json`). Aucun secret ici : les jetons
+//! des comptes sont dans le Gestionnaire d'identifiants Windows.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use dragontree_forges::Account;
+use dragontree_i18n::{Lang, tr};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ThemeChoice {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    pub theme: ThemeChoice,
+    /// Langue de l'interface ; `None` : celle de Windows.
+    pub language: Option<Lang>,
+    pub ui_scale: f32,
+    /// Exécutable git imposé (sinon détecté dans le PATH).
+    pub git_path: Option<PathBuf>,
+    /// Dossiers racines scannés pour la liste de droite.
+    pub scan_roots: Vec<PathBuf>,
+    pub scan_max_depth: usize,
+    pub scan_skip_dirs: Vec<String>,
+    /// Chercher aussi dans les dépôts (sous-modules, dépôts imbriqués).
+    pub scan_deep: bool,
+    /// Calculer l'état (modifié, en avance, en retard) des dépôts listés.
+    pub status_sweep: bool,
+    pub repo_list_visible: bool,
+    pub repo_list_width: f32,
+    pub favorites: Vec<PathBuf>,
+    pub hidden_repos: Vec<PathBuf>,
+    pub default_clone_dir: Option<PathBuf>,
+    pub open_tabs: Vec<PathBuf>,
+    pub active_tab: usize,
+    pub recent_repos: Vec<PathBuf>,
+    pub accounts: Vec<Account>,
+    /// Dépôt (chemin) → identifiant du compte utilisé pour fetch/pull/push.
+    pub repo_accounts: BTreeMap<String, String>,
+    pub diff_context: u32,
+    pub ignore_whitespace: bool,
+    pub split_diff: bool,
+    pub syntax_highlight: bool,
+    pub push_after_commit: bool,
+    /// Minutes entre deux fetch automatiques des onglets ouverts (0 = jamais).
+    pub auto_fetch_minutes: u32,
+    pub show_read_commands_in_log: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            theme: ThemeChoice::System,
+            language: None,
+            ui_scale: 1.0,
+            git_path: None,
+            scan_roots: Vec::new(),
+            scan_max_depth: 8,
+            scan_skip_dirs: dragontree_git::discovery::DEFAULT_SKIP_DIRS.iter().map(|s| s.to_string()).collect(),
+            scan_deep: false,
+            status_sweep: true,
+            repo_list_visible: true,
+            repo_list_width: 280.0,
+            favorites: Vec::new(),
+            hidden_repos: Vec::new(),
+            default_clone_dir: None,
+            open_tabs: Vec::new(),
+            active_tab: 0,
+            recent_repos: Vec::new(),
+            accounts: Vec::new(),
+            repo_accounts: BTreeMap::new(),
+            diff_context: 3,
+            ignore_whitespace: false,
+            split_diff: false,
+            syntax_highlight: true,
+            push_after_commit: false,
+            auto_fetch_minutes: 10,
+            show_read_commands_in_log: false,
+        }
+    }
+}
+
+/// Clé stable d'un chemin de dépôt (minuscules, séparateurs `/`, sans `/` final).
+pub fn path_key(p: &Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    s.trim_end_matches('/').to_lowercase()
+}
+
+pub fn config_dir() -> PathBuf {
+    dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("DragonTree")
+}
+
+pub fn cache_dir() -> PathBuf {
+    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("DragonTree")
+}
+
+/// Fichier de réglages : il n'est jamais écrasé s'il existait mais n'a pas pu être lu.
+#[derive(Debug, Clone)]
+pub struct SettingsFile {
+    path: PathBuf,
+    writable: bool,
+}
+
+impl SettingsFile {
+    /// Charge les réglages de `path` ; l'éventuel message d'erreur est à afficher.
+    ///
+    /// - absent : réglages par défaut ;
+    /// - contenu invalide : le fichier est mis de côté (`settings.illisible-<horodatage>.json`) ;
+    /// - illisible (verrouillé, droits…) : réglages par défaut et aucun enregistrement pendant la
+    ///   session, pour ne jamais écraser un fichier qu'on n'a pas pu lire.
+    pub fn load(path: &Path) -> (SettingsFile, Settings, Option<String>) {
+        let file = |writable| SettingsFile { path: path.to_path_buf(), writable };
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (file(true), Settings::default(), None),
+            Err(e) => {
+                let msg = tr!(
+                    "Réglages illisibles ({e}) : réglages par défaut utilisés, et rien ne sera enregistré pendant cette session pour ne pas écraser {path}.",
+                    e,
+                    path = path.display()
+                );
+                return (file(false), Settings::default(), Some(msg));
+            }
+        };
+        match serde_json::from_slice(&bytes) {
+            Ok(s) => (file(true), s, None),
+            Err(e) => {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let backup = path.with_file_name(format!("settings.illisible-{stamp}.json"));
+                if std::fs::rename(path, &backup).is_ok() {
+                    let msg = tr!(
+                        "Réglages illisibles ({e}) : fichier mis de côté dans {backup} — réglages par défaut utilisés.",
+                        e,
+                        backup = backup.display()
+                    );
+                    (file(true), Settings::default(), Some(msg))
+                } else {
+                    let msg = tr!(
+                        "Réglages illisibles ({e}) : réglages par défaut utilisés, et rien ne sera enregistré pendant cette session pour ne pas écraser {path}.",
+                        e,
+                        path = path.display()
+                    );
+                    (file(false), Settings::default(), Some(msg))
+                }
+            }
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Enregistre (sauf si le fichier d'origine n'a pas pu être lu).
+    pub fn save(&self, settings: &Settings) -> std::io::Result<()> {
+        if !self.writable {
+            return Ok(());
+        }
+        settings.save_to(&self.path)
+    }
+}
+
+impl Settings {
+    pub fn file() -> PathBuf {
+        config_dir().join("settings.json")
+    }
+
+    pub fn load_from(path: &Path) -> Settings {
+        SettingsFile::load(path).1
+    }
+
+    /// Écriture atomique : fichier temporaire puis renommage.
+    pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, path)
+    }
+
+    /// Mémorise un dépôt ouvert récemment (20 au plus, le plus récent en tête).
+    pub fn push_recent(&mut self, path: &Path) {
+        let key = path_key(path);
+        self.recent_repos.retain(|p| path_key(p) != key);
+        self.recent_repos.insert(0, path.to_path_buf());
+        self.recent_repos.truncate(20);
+    }
+
+    pub fn is_favorite(&self, path: &Path) -> bool {
+        let key = path_key(path);
+        self.favorites.iter().any(|p| path_key(p) == key)
+    }
+
+    pub fn toggle_favorite(&mut self, path: &Path) {
+        let key = path_key(path);
+        if self.is_favorite(path) {
+            self.favorites.retain(|p| path_key(p) != key);
+        } else {
+            self.favorites.push(path.to_path_buf());
+        }
+    }
+
+    pub fn account_for_repo(&self, path: &Path) -> Option<&Account> {
+        let id = self.repo_accounts.get(&path_key(path))?;
+        self.accounts.iter().find(|a| &a.id == id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_roundtrip_and_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sub").join("settings.json");
+        assert_eq!(Settings::load_from(&file), Settings::default());
+        let mut s = Settings::default();
+        s.scan_roots.push(PathBuf::from(r"C:\Users\x\DEV"));
+        s.theme = ThemeChoice::Dark;
+        s.save_to(&file).unwrap();
+        assert_eq!(Settings::load_from(&file), s);
+    }
+
+    #[test]
+    fn corrupt_settings_are_backed_up_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, "{ contenu invalide").unwrap();
+        let (_, s, err) = SettingsFile::load(&file);
+        assert_eq!(s, Settings::default());
+        let msg = err.expect("erreur signalée");
+        assert!(!file.exists(), "le fichier illisible est déplacé, pas écrasé plus tard");
+        let backups: Vec<_> = std::fs::read_dir(dir.path()).unwrap().filter_map(Result::ok).collect();
+        assert_eq!(backups.len(), 1);
+        let backup = backups[0].path();
+        assert!(msg.contains(&backup.display().to_string()), "{msg}");
+        assert!(std::fs::read_to_string(backup).unwrap().contains("invalide"));
+        let (_, s, err) = SettingsFile::load(&dir.path().join("absent.json"));
+        assert_eq!((s, err), (Settings::default(), None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_settings_file_is_never_overwritten() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, r#"{"theme":"Dark"}"#).unwrap();
+        // Fichier verrouillé par un autre programme (antivirus, synchronisation…) au démarrage.
+        let lock = std::fs::OpenOptions::new().read(true).share_mode(0).open(&file).unwrap();
+        let (store, settings, error) = SettingsFile::load(&file);
+        drop(lock);
+        assert_eq!(settings, Settings::default());
+        assert!(error.is_some(), "l'erreur de lecture est signalée");
+        store.save(&Settings::default()).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), r#"{"theme":"Dark"}"#, "le fichier n'est jamais écrasé");
+    }
+
+    #[test]
+    fn settings_tolerate_unknown_and_missing_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, r#"{"theme":"Light","champ_inconnu":42}"#).unwrap();
+        let s = Settings::load_from(&file);
+        assert_eq!(s.theme, ThemeChoice::Light);
+        assert_eq!(s.diff_context, 3);
+    }
+
+    #[test]
+    fn recent_repos_are_deduplicated_case_insensitively() {
+        let mut s = Settings::default();
+        s.push_recent(Path::new(r"C:\DEV\A"));
+        s.push_recent(Path::new(r"C:\DEV\B"));
+        s.push_recent(Path::new(r"c:\dev\a\"));
+        assert_eq!(s.recent_repos.len(), 2);
+        assert_eq!(path_key(&s.recent_repos[0]), "c:/dev/a");
+    }
+
+    #[test]
+    fn favorites_toggle() {
+        let mut s = Settings::default();
+        s.toggle_favorite(Path::new(r"C:\DEV\A"));
+        assert!(s.is_favorite(Path::new(r"c:\dev\A")));
+        s.toggle_favorite(Path::new(r"C:\DEV\a"));
+        assert!(!s.is_favorite(Path::new(r"C:\DEV\A")));
+    }
+}
