@@ -95,6 +95,20 @@ impl RepoTab {
         });
     }
 
+    /// Teste la connexion à un remote (`git ls-remote --heads`, avec le compte associé comme pour un fetch) ; la
+    /// notification donne le résultat, ou le message de git en cas d'échec.
+    pub(crate) fn test_remote_connection(&mut self, shared: &Shared, remote: String) {
+        self.run_net(shared, tr!("Test de la connexion"), Refresh::NONE, false, move |r, n, _| {
+            let heads = r.ls_remote_heads(&remote, n)?;
+            Ok(Some(trn!(
+                heads.len(),
+                "Connexion à {remote} réussie : {n} branche",
+                "Connexion à {remote} réussie : {n} branches",
+                remote
+            )))
+        });
+    }
+
     pub(crate) fn op_pull(&mut self, shared: &Shared, remote: String, branch: String, rebase: bool) {
         self.run_net(shared, "Pull", Refresh::ALL, false, move |r, n, on| {
             r.pull(&remote, &branch, rebase, n, on)?;

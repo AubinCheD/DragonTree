@@ -92,6 +92,20 @@ impl Repo {
         run_with_progress(cmd, on)
     }
 
+    /// Teste la connexion à un remote : `git ls-remote --heads <remote>` ; renvoie les noms de ses branches, triés.
+    /// Un remote injoignable ou refusé donne l'erreur de git.
+    pub fn ls_remote_heads(&self, remote: &str, n: &NetOptions) -> Result<Vec<String>, GitError> {
+        let out = self.net(n).args(["ls-remote", "--heads", remote]).run()?;
+        let mut heads: Vec<String> = out
+            .stdout_str()
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(_, name)| name.strip_prefix("refs/heads/").unwrap_or(name).to_string())
+            .collect();
+        heads.sort();
+        Ok(heads)
+    }
+
     /// `git submodule update --init --recursive`.
     pub fn update_submodules(&self, n: &NetOptions, on: &mut dyn FnMut(Progress)) -> Result<(), GitError> {
         run_with_progress(self.net(n).args(["submodule", "update", "--init", "--recursive", "--progress"]), on)

@@ -37,8 +37,9 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// worktree…) ; `RemoveWorktree::force` (`--force`) : seulement si la case est cochée.
 /// `Stash::snapshot` : enregistre un stash sans toucher aux modifications (`untracked` et `keep_index` sans objet) ;
 /// `StashFiles` : seulement les fichiers choisis dans la vue Changements ; `ApplyPatch` : aperçu d'un patch lu (fichier
-/// déposé, texte collé) et cible choisie ; `PastePatch` : zone où coller le texte d'un patch ; `RepoSettings` :
-/// identité locale, modèle de message et liens vers les tickets.
+/// déposé, texte collé) et cible choisie ; `PastePatch` : zone où coller le texte d'un patch ; `EditRemoteUrl` :
+/// `push_url` est un champ séparé, seulement si le remote a une URL de push distincte ; `RepoSettings` : identité
+/// locale, modèle de message et liens vers les tickets.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -63,6 +64,7 @@ pub enum Dialog {
     Discard { tracked: Vec<String>, untracked: Vec<String> },
     DiscardLines { selection: Vec<HunkSelection> },
     AddRemote { name: String, url: String },
+    EditRemoteUrl { name: String, url: String, push_url: Option<String> },
     RemoveRemote { name: String },
     DropStash { oid: Oid, label: String },
     CreateWorktree { start: WorktreeStart, path: String, pick: bool },
@@ -116,6 +118,9 @@ impl Dialog {
             }
             Dialog::DiscardLines { .. } => (tr!("Annuler des lignes").into(), tr!("Annuler les lignes").into(), true),
             Dialog::AddRemote { .. } => (tr!("Ajouter un remote").into(), tr!("Ajouter").into(), false),
+            Dialog::EditRemoteUrl { name, .. } => {
+                (tr!("Modifier l'URL de « {name} »", name), tr!("Enregistrer").into(), false)
+            }
             Dialog::RemoveRemote { name } => {
                 (tr!("Supprimer le remote « {name} »", name), tr!("Supprimer").into(), true)
             }
@@ -452,6 +457,25 @@ impl RepoTab {
                 }
                 valid_ref_name(name.trim()) && !url.trim().is_empty() && !taken
             }
+            Dialog::EditRemoteUrl { url, push_url, .. } => {
+                egui::Grid::new("remote-url-grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+                    ui.label("URL");
+                    let field = ui
+                        .add(egui::TextEdit::singleline(url).hint_text(tr!("https://… ou git@…")).desired_width(340.0));
+                    // Le focus n'est pris qu'à l'ouverture : il ne doit pas revenir ici quand on passe au champ de push.
+                    if ui.memory(|m| m.focused().is_none()) {
+                        field.request_focus();
+                    }
+                    ui.end_row();
+                    if let Some(push) = push_url {
+                        ui.label(tr!("URL de push"));
+                        ui.add(egui::TextEdit::singleline(push).desired_width(340.0))
+                            .on_hover_text(tr!("Vide : le push utilise l'URL ci-dessus."));
+                        ui.end_row();
+                    }
+                });
+                !url.trim().is_empty()
+            }
             Dialog::RemoveRemote { name } => {
                 warn(
                     ui,
@@ -569,6 +593,13 @@ impl RepoTab {
                 self.run_simple(shared, tr!("Ajout du remote"), Refresh::REFS.with_extras(), move |r| {
                     r.add_remote(&name, &url)?;
                     Ok(Some(tr!("Remote {name} ajouté", name)))
+                });
+            }
+            Dialog::EditRemoteUrl { name, url, push_url } => {
+                let (url, push_url) = (url.trim().to_string(), push_url.map(|p| p.trim().to_string()));
+                self.run_simple(shared, tr!("Modification de l'URL"), Refresh::REFS.with_extras(), move |r| {
+                    r.set_remote_urls(&name, &url, push_url.as_deref())?;
+                    Ok(Some(tr!("URL du remote {name} modifiée", name)))
                 });
             }
             Dialog::RemoveRemote { name } => {

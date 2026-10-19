@@ -166,6 +166,21 @@ impl RepoTab {
                             ui.ctx().copy_text(r.fetch_url.clone());
                             ui.close();
                         }
+                        if let Some(r) = self.remotes.iter().find(|r| r.name == remote_name).cloned()
+                            && ui.button(format!("{} {}", icons::PENCIL_SIMPLE, tr!("Modifier l'URL…"))).clicked()
+                        {
+                            let push_url = (r.push_url != r.fetch_url).then(|| r.push_url.clone());
+                            self.dialog = Some(Dialog::EditRemoteUrl {
+                                name: remote_name.clone(),
+                                url: r.fetch_url.clone(),
+                                push_url,
+                            });
+                            ui.close();
+                        }
+                        if ui.button(format!("{} {}", icons::PLUGS_CONNECTED, tr!("Tester la connexion"))).clicked() {
+                            self.test_remote_connection(shared, remote_name.clone());
+                            ui.close();
+                        }
                         ui.separator();
                         self.hide_menu_entry(ui, shared, &pattern);
                         self.filter_menu_entry(ui, shared, &pattern);

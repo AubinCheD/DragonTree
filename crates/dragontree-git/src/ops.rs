@@ -379,6 +379,22 @@ impl Repo {
         self.run_write(["remote", "remove", name])
     }
 
+    /// Change l'URL de lecture d'un remote (`git remote set-url`) et, selon `push`, son URL de push : `Some(url)`
+    /// distincte de `fetch` la fixe (`--push`), `None` ou une valeur vide ou égale à `fetch` retire l'URL de push
+    /// propre (le push reprend alors l'URL de lecture).
+    pub fn set_remote_urls(&self, name: &str, fetch: &str, push: Option<&str>) -> Result<(), GitError> {
+        self.run_write(["remote", "set-url", name, fetch])?;
+        match push.map(str::trim).filter(|p| !p.is_empty() && *p != fetch) {
+            Some(push) => self.run_write(["remote", "set-url", "--push", name, push]),
+            None => self
+                .write()
+                .args(["config", "--unset-all", &format!("remote.{name}.pushurl")])
+                .allow_codes(&[5])
+                .run()
+                .map(|_| ()),
+        }
+    }
+
     pub fn set_upstream(&self, local: &str, remote_branch: &str) -> Result<(), GitError> {
         self.run_write(["branch", &format!("--set-upstream-to={remote_branch}"), local])
     }
