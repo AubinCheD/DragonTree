@@ -291,6 +291,37 @@ impl Repo {
         Ok(pick_diff(&out.stdout, change.old_path.as_deref(), &change.path))
     }
 
+    /// Fichiers qui diffèrent entre la révision `a` et la révision `b`, ou la copie de travail (fichiers suivis)
+    /// quand `b` est `None`. Les révisions sont des noms de branche, de tag ou des SHA.
+    pub fn compare_files(&self, a: &str, b: Option<&str>) -> Result<Vec<FileChange>, GitError> {
+        let args = ["-c", "core.quotepath=false", "diff", "--no-ext-diff", "-z", "--name-status", "-M"];
+        let mut cmd = self.read().args(args).arg(a);
+        if let Some(b) = b {
+            cmd = cmd.arg(b);
+        }
+        Ok(parse_name_status_z(&cmd.arg("--").run()?.stdout))
+    }
+
+    /// Diff d'un fichier de `compare_files` (mêmes révisions).
+    pub fn compare_file_diff(
+        &self,
+        a: &str,
+        b: Option<&str>,
+        change: &FileChange,
+        o: &DiffOptions,
+    ) -> Result<FileDiff, GitError> {
+        let mut cmd = self.read_paths().args(diff_base_args(o)).arg("-M").arg(a);
+        if let Some(b) = b {
+            cmd = cmd.arg(b);
+        }
+        cmd = cmd.arg("--");
+        if let Some(old) = &change.old_path {
+            cmd = cmd.arg(old);
+        }
+        let out = cmd.arg(&change.path).run()?;
+        Ok(pick_diff(&out.stdout, change.old_path.as_deref(), &change.path))
+    }
+
     /// Diff d'un fichier de la copie de travail : indexé (`staged`), non indexé, ou non suivi.
     pub fn diff_worktree_file(
         &self,

@@ -4,6 +4,7 @@ mod actions;
 mod blame;
 mod changes;
 mod commands;
+mod compare;
 mod conflicts;
 mod details;
 mod dialogs;
@@ -246,6 +247,7 @@ struct Gens {
     commit_diff: u64,
     work_diff: u64,
     patch: u64,
+    compare: u64,
 }
 
 /// Détails lus d'un commit : infos, fichiers, et pour un stash le commit de ses fichiers non suivis avec l'indice du
@@ -292,6 +294,7 @@ pub enum RepoEvent {
     },
     LastMessage(String),
     Blame(blame::BlameEvent),
+    Compare(compare::CompareEvent),
     RebaseList(Result<Vec<Commit>, GitError>),
     Images {
         history: bool,
@@ -331,6 +334,10 @@ pub struct RepoTab {
     pub dialog: Option<Dialog>,
     pub running: Vec<RunningOp>,
     pub file_history: Option<FileHistoryWindow>,
+    /// Fenêtre « Comparaison A ↔ B » ouverte.
+    pub compare: Option<compare::CompareWindow>,
+    /// Commit marqué par « Marquer pour comparaison » (session).
+    pub compare_mark: Option<Oid>,
     pub rebase: Option<rebase_ui::RebaseEditor>,
     pub conflict_editor: Option<conflicts::ConflictEditor>,
     /// Sélection initiale demandée en ligne de commande (`--select`).
@@ -370,6 +377,8 @@ impl RepoTab {
             dialog: None,
             running: Vec::new(),
             file_history: None,
+            compare: None,
+            compare_mark: None,
             rebase: None,
             conflict_editor: None,
             select_commit_on_load: None,
@@ -862,6 +871,7 @@ impl RepoTab {
                     w.handle(ev);
                 }
             }
+            RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::RebaseList(res) => match res {
                 Ok(list) => {
                     if let Some(editor) = &mut self.rebase {
@@ -1067,6 +1077,11 @@ impl RepoTab {
                 self.view = RepoView::History;
                 self.select_commit(shared, oid, true);
             }
+        }
+        if let Some(w) = &mut self.compare
+            && !w.ui(&ctx, shared, &p)
+        {
+            self.compare = None;
         }
         self.rebase_window(&ctx, shared, &p);
         self.conflict_window(&ctx, shared, &p);

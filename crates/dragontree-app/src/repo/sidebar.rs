@@ -737,6 +737,7 @@ impl RepoTab {
             self.dialog = Some(Dialog::DeleteBranch { name: name.clone(), force: false, remote, delete_remote: false });
             ui.close();
         }
+        self.compare_branch_entry(ui, shared, &name, current);
         self.hide_menu_entry(ui, shared, &branch_pattern(&name));
         self.filter_menu_entry(ui, shared, &branch_pattern(&name));
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le nom"))).clicked() {
@@ -781,6 +782,7 @@ impl RepoTab {
             self.dialog = Some(Dialog::DeleteRemoteBranch { remote: b.remote.clone(), branch: b.name.clone() });
             ui.close();
         }
+        self.compare_branch_entry(ui, shared, &b.full, current);
         self.hide_menu_entry(ui, shared, &remote_branch_pattern(&b.full));
         self.filter_menu_entry(ui, shared, &remote_branch_pattern(&b.full));
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le nom"))).clicked() {
@@ -918,6 +920,8 @@ impl RepoTab {
                 Some(Dialog::Reset { rev: oid.to_hex(), label: format!("{short} {summary}"), mode: ResetMode::Mixed });
             ui.close();
         }
+        ui.separator();
+        self.compare_commit_entries(ui, shared, oid);
         ui.separator();
         self.patch_menu_entries(ui, shared, PatchSource::Commit(oid, summary.to_string()));
         if ui.button(format!("{} {}", icons::FLOPPY_DISK, tr!("Enregistrer les patchs jusqu'à HEAD…"))).clicked() {
