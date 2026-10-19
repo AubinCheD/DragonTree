@@ -3,6 +3,7 @@
 mod actions;
 mod blame;
 mod changes;
+mod commands;
 mod conflicts;
 mod details;
 mod dialogs;
@@ -811,7 +812,6 @@ impl RepoTab {
             });
             return;
         }
-        self.handle_repo_shortcuts(ui.ctx(), shared);
 
         egui::Panel::top(("toolbar", self.id))
             .frame(
@@ -881,22 +881,6 @@ impl RepoTab {
         }
         self.rebase_window(&ctx, shared, &p);
         self.conflict_window(&ctx, shared, &p);
-    }
-
-    fn handle_repo_shortcuts(&mut self, ctx: &egui::Context, shared: &mut Shared) {
-        use egui::{Key, KeyboardShortcut, Modifiers};
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F5)) {
-            self.refresh(shared, Refresh::ALL);
-        }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::L)))
-        {
-            shared.actions.push(AppAction::ShowLog);
-        }
-        if ctx.memory(|m| m.focused().is_none())
-            && ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1)))
-        {
-            self.view = RepoView::Changes;
-        }
     }
 
     fn error_page(&mut self, ui: &mut Ui, shared: &mut Shared, err: &GitError, p: &Palette) {

@@ -271,6 +271,7 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 
 - **Contexte :** l'utilisateur a demandé, le 2026-10-17, un menu File/View/Repo/Config « avec une majorité d'options qui existent sur Fork ». Il doit choisir les numéros dans les tableaux ci-dessus ; ce choix n'est pas fait.
 - **État :**
+  - barre de menus faite (registre `commands.rs`) ;
   - il n'y a aucune barre de menus : le seul panneau du haut est la barre d'onglets (`crates/dragontree-app/src/app.rs:611-617`) ;
   - les options ✅ passent par la barre d'outils (`crates/dragontree-app/src/repo/toolbar.rs`), les menus contextuels, la palette Ctrl+P (`crates/dragontree-app/src/quick_open.rs:46-59`) et la fenêtre Réglages ;
   - raccourcis présents : `crates/dragontree-app/src/app.rs:451-486` et `crates/dragontree-app/src/repo/mod.rs:886-900`. Il manque Ctrl+, (F1), Ctrl+Maj+A (V2), Ctrl+= et Ctrl+- (V13), ainsi que Ctrl+Maj+F/L/P, Ctrl+Maj+B et Ctrl+Maj+H (R1).

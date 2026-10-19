@@ -7,6 +7,7 @@ use egui::{RichText, Ui};
 use super::actions::StashOp;
 use super::{Dialog, RepoTab};
 use crate::app::{AppAction, Shared};
+use crate::commands::Command;
 use crate::icons;
 use crate::theme::Palette;
 use crate::widgets::toolbar_button;
@@ -15,8 +16,10 @@ impl RepoTab {
     pub(super) fn toolbar_ui(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
         let busy = |tab: &RepoTab, name: &str| tab.running.iter().any(|o| !o.silent && o.title.starts_with(name));
         let head = self.refs.as_ref().map(|r| r.head.clone());
-        let on_branch = matches!(head, Some(HeadState::Branch(_)));
-        let has_remote = !self.remotes.is_empty();
+        // Les boutons tirés du registre de commandes ont le même état grisé et la même action que les menus.
+        let can = |cmd| self.can_run(cmd);
+        let (fetch, pull, push, stash, branch) =
+            (can(Command::Fetch), can(Command::Pull), can(Command::Push), can(Command::Stash), can(Command::NewBranch));
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
@@ -45,31 +48,30 @@ impl RepoTab {
             });
             ui.separator();
 
-            if toolbar_button(ui, icons::CLOUD_ARROW_DOWN, "Fetch", has_remote, busy(self, "Fetch"))
+            if toolbar_button(ui, icons::CLOUD_ARROW_DOWN, "Fetch", fetch, busy(self, "Fetch"))
                 .on_hover_text(tr!("Récupérer les nouveautés de tous les remotes (fetch --all --prune)"))
                 .clicked()
             {
-                self.op_fetch(shared, None, true, false);
+                self.run_command(Command::Fetch, shared);
             }
-            if toolbar_button(ui, icons::ARROW_LINE_DOWN, "Pull", has_remote && on_branch, busy(self, "Pull"))
+            if toolbar_button(ui, icons::ARROW_LINE_DOWN, "Pull", pull, busy(self, "Pull"))
                 .on_hover_text(tr!("Récupérer et intégrer la branche suivie"))
                 .clicked()
             {
-                self.open_pull_dialog(shared);
+                self.run_command(Command::Pull, shared);
             }
-            if toolbar_button(ui, icons::ARROW_LINE_UP, "Push", has_remote && on_branch, busy(self, "Push"))
+            if toolbar_button(ui, icons::ARROW_LINE_UP, "Push", push, busy(self, "Push"))
                 .on_hover_text(tr!("Envoyer la branche courante"))
                 .clicked()
             {
-                self.open_push_dialog();
+                self.run_command(Command::Push, shared);
             }
             ui.separator();
-            let dirty = self.status.as_ref().is_some_and(|s| !s.is_clean());
-            if toolbar_button(ui, icons::TRAY_ARROW_DOWN, "Stash", dirty, busy(self, "Stash"))
+            if toolbar_button(ui, icons::TRAY_ARROW_DOWN, "Stash", stash, busy(self, "Stash"))
                 .on_hover_text(tr!("Mettre de côté les modifications en cours"))
                 .clicked()
             {
-                self.dialog = Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false });
+                self.run_command(Command::Stash, shared);
             }
             let has_stash = !self.stashes.is_empty();
             if toolbar_button(ui, icons::TRAY_ARROW_UP, "Pop", has_stash, busy(self, StashOp::Pop.title()))
@@ -81,25 +83,19 @@ impl RepoTab {
                 self.op_stash(shared, oid, label, StashOp::Pop);
             }
             ui.separator();
-            if toolbar_button(ui, icons::GIT_BRANCH, tr!("Branche"), self.refs.is_some(), false)
+            if toolbar_button(ui, icons::GIT_BRANCH, tr!("Branche"), branch, false)
                 .on_hover_text(tr!("Créer une branche à partir de HEAD"))
                 .clicked()
             {
-                self.dialog = Some(Dialog::CreateBranch {
-                    start: "HEAD".into(),
-                    start_label: "HEAD".into(),
-                    name: String::new(),
-                    checkout: true,
-                });
+                self.run_command(Command::NewBranch, shared);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                let path = self.path.clone();
                 if toolbar_button(ui, icons::ARROWS_CLOCKWISE, tr!("Actualiser"), true, false)
                     .on_hover_text(tr!("Actualiser (F5)"))
                     .clicked()
                 {
-                    self.refresh(shared, super::Refresh::ALL);
+                    self.run_command(Command::Refresh, shared);
                 }
                 if toolbar_button(ui, icons::LIST, tr!("Journal"), true, false)
                     .on_hover_text(tr!("Journal des commandes git (Ctrl+Maj+L)"))
@@ -107,18 +103,19 @@ impl RepoTab {
                 {
                     shared.actions.push(AppAction::ShowLog);
                 }
-                if crate::util::vscode_available()
+                // Bouton masqué (plutôt que grisé) quand VS Code n'est pas installé.
+                if self.can_run(Command::OpenVsCode)
                     && toolbar_button(ui, icons::CODE, "VS Code", true, false)
                         .on_hover_text(tr!("Ouvrir dans VS Code"))
                         .clicked()
                 {
-                    crate::util::open_in_vscode(&path);
+                    self.run_command(Command::OpenVsCode, shared);
                 }
                 if toolbar_button(ui, icons::FOLDER_OPEN, tr!("Explorateur"), true, false).clicked() {
-                    crate::util::open_in_explorer(&path);
+                    self.run_command(Command::OpenExplorer, shared);
                 }
                 if toolbar_button(ui, icons::TERMINAL_WINDOW, "Terminal", true, false).clicked() {
-                    crate::util::open_terminal(&path);
+                    self.run_command(Command::OpenTerminal, shared);
                 }
             });
         });
@@ -127,30 +124,6 @@ impl RepoTab {
     /// Checkout demandé depuis la palette Ctrl+P.
     pub fn quick_checkout(&mut self, shared: &mut Shared, name: String) {
         self.op_checkout(shared, name);
-    }
-
-    /// Commande de la palette Ctrl+P appliquée à l'onglet.
-    pub fn quick_command(&mut self, shared: &mut Shared, cmd: &str) {
-        match cmd {
-            "fetch" => self.op_fetch(shared, None, true, false),
-            "pull" => self.open_pull_dialog(shared),
-            "push" => self.open_push_dialog(),
-            "branch" => {
-                self.dialog = Some(Dialog::CreateBranch {
-                    start: "HEAD".into(),
-                    start_label: "HEAD".into(),
-                    name: String::new(),
-                    checkout: true,
-                })
-            }
-            "stash" => self.dialog = Some(Dialog::Stash { message: String::new(), untracked: true, keep_index: false }),
-            "refresh" => self.refresh(shared, super::Refresh::ALL),
-            "changes" => {
-                self.view = super::RepoView::Changes;
-                self.ensure_change_selected(shared);
-            }
-            _ => self.view = super::RepoView::History,
-        }
     }
 
     pub(super) fn open_pull_dialog(&mut self, shared: &Shared) {

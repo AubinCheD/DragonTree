@@ -2,10 +2,11 @@
 
 use std::path::PathBuf;
 
-use dragontree_i18n::{tr, tr_mark, tr_str};
+use dragontree_i18n::tr;
 use egui::{Key, RichText};
 
 use crate::app::{AppAction, Shared};
+use crate::commands::Command;
 use crate::icons;
 use crate::repo::RepoTab;
 use crate::repo_list::RepoListState;
@@ -26,47 +27,16 @@ enum Item {
     Command(Command),
 }
 
-#[derive(Clone, Copy)]
-enum Command {
-    Fetch,
-    Pull,
-    Push,
-    NewBranch,
-    Stash,
-    Refresh,
-    Changes,
-    History,
-    Clone,
-    Accounts,
-    Settings,
-    Log,
-    Open,
-}
-
-const COMMANDS: &[(Command, &str, &str)] = &[
-    (Command::Fetch, icons::CLOUD_ARROW_DOWN, "Fetch"),
-    (Command::Pull, icons::ARROW_LINE_DOWN, "Pull…"),
-    (Command::Push, icons::ARROW_LINE_UP, "Push…"),
-    (Command::NewBranch, icons::GIT_BRANCH, tr_mark!("Nouvelle branche…")),
-    (Command::Stash, icons::TRAY_ARROW_DOWN, "Stash…"),
-    (Command::Refresh, icons::ARROWS_CLOCKWISE, tr_mark!("Actualiser")),
-    (Command::Changes, icons::GIT_DIFF, tr_mark!("Modifications locales")),
-    (Command::History, icons::GIT_COMMIT, tr_mark!("Tous les commits")),
-    (Command::Clone, icons::DOWNLOAD_SIMPLE, tr_mark!("Cloner un dépôt…")),
-    (Command::Accounts, icons::USER_CIRCLE, tr_mark!("Comptes…")),
-    (Command::Settings, icons::GEAR_SIX, tr_mark!("Réglages…")),
-    (Command::Log, icons::LIST, tr_mark!("Journal git")),
-    (Command::Open, icons::FOLDER_OPEN, tr_mark!("Ouvrir un dépôt…")),
-];
-
 impl QuickOpen {
-    /// Renvoie faux quand la palette se ferme.
+    /// Renvoie faux quand la palette se ferme. `commands` : commandes du registre proposées (utilisables),
+    /// choisies par l'application ; celle choisie lui revient par `AppAction::RunCommand`.
     pub fn ui(
         &mut self,
         ctx: &egui::Context,
         shared: &mut Shared,
         list: &RepoListState,
         tab: Option<&mut RepoTab>,
+        commands: &[Command],
         p: &Palette,
     ) -> bool {
         let mut items: Vec<(i32, Item, String, &'static str)> = Vec::new();
@@ -89,11 +59,11 @@ impl QuickOpen {
                 }
             }
         }
-        for (cmd, icon, label) in COMMANDS {
-            // Recherche dans le libellé affiché, donc traduit.
-            let label = tr_str(label);
+        // Recherche dans le libellé affiché, donc traduit.
+        for &cmd in commands {
+            let label = cmd.label();
             if let Some(s) = widgets::fuzzy_score(&self.query, label) {
-                items.push((s + 2, Item::Command(*cmd), label.to_string(), icon));
+                items.push((s + 2, Item::Command(cmd), label.to_string(), cmd.icon()));
             }
         }
         if !self.query.trim().is_empty() {
@@ -181,30 +151,7 @@ impl QuickOpen {
                         t.quick_checkout(shared, name);
                     }
                 }
-                Item::Command(cmd) => match cmd {
-                    Command::Clone => shared.actions.push(AppAction::ShowClone),
-                    Command::Accounts => shared.actions.push(AppAction::ShowAccounts),
-                    Command::Settings => shared.actions.push(AppAction::ShowSettings),
-                    Command::Log => shared.actions.push(AppAction::ShowLog),
-                    Command::Open => shared.actions.push(AppAction::PickAndOpenRepo),
-                    other => {
-                        if let Some(t) = tab {
-                            t.quick_command(
-                                shared,
-                                match other {
-                                    Command::Fetch => "fetch",
-                                    Command::Pull => "pull",
-                                    Command::Push => "push",
-                                    Command::NewBranch => "branch",
-                                    Command::Stash => "stash",
-                                    Command::Refresh => "refresh",
-                                    Command::Changes => "changes",
-                                    _ => "history",
-                                },
-                            );
-                        }
-                    }
-                },
+                Item::Command(cmd) => shared.actions.push(AppAction::RunCommand(cmd)),
             }
         }
         keep

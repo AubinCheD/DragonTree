@@ -84,6 +84,7 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Ctrl+P | Palette (dépôts, branches, commandes) |
 | Ctrl+O | Ouvrir un dépôt |
 | Ctrl+Maj+C | Cloner |
+| Ctrl+, | Réglages |
 | Ctrl+B | Afficher/masquer la liste des dépôts |
 | F5 | Actualiser |
 | Ctrl+Maj+L | Journal des commandes git |

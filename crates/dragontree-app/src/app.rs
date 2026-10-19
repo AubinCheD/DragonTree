@@ -11,6 +11,7 @@ use egui::{Frame, Key, KeyboardShortcut, Modifiers};
 
 use crate::accounts::{AccountsWindow, ForgeEvent};
 use crate::clone::{CloneEvent, CloneWindow};
+use crate::commands::{self, Command, CommandContext, Scope};
 use crate::jobs::Jobs;
 use crate::repo::{RepoEvent, RepoTab};
 use crate::repo_list::{RepoListState, ScanEvent};
@@ -49,6 +50,8 @@ pub enum AppAction {
     Rescan,
     TrustRepo(PathBuf),
     QuickOpen,
+    /// Commande du registre choisie dans une vue (palette Ctrl+P).
+    RunCommand(Command),
 }
 
 /// État partagé passé aux vues.
@@ -371,66 +374,11 @@ impl DragonTreeApp {
     }
 
     fn process_actions(&mut self, ctx: &egui::Context) {
-        let actions = std::mem::take(&mut self.shared.actions);
-        for action in actions {
-            match action {
-                AppAction::OpenRepo(p) => self.open_repo(&p, false),
-                AppAction::OpenRepoNewTab(p) => self.open_repo(&p, true),
-                AppAction::PickAndOpenRepo => {
-                    if let Some(p) = Self::pick_folder(tr!("Ouvrir un dépôt git")) {
-                        self.open_repo(&p, false);
-                    }
-                }
-                AppAction::InitRepo => {
-                    if let (Some(p), Some(git)) =
-                        (Self::pick_folder(tr!("Dossier du nouveau dépôt")), self.shared.git.clone())
-                    {
-                        self.shared.jobs.spawn("init", move || {
-                            let r = dragontree_git::init_repo(&git, &p);
-                            Some(AppEvent::Initialized(p, r))
-                        });
-                    }
-                }
-                AppAction::ShowClone => {
-                    if self.clone.is_none() {
-                        self.clone = Some(CloneWindow::new(&self.shared));
-                    }
-                }
-                AppAction::ShowAccounts => self.accounts.open = true,
-                AppAction::ShowSettings => {
-                    if self.settings_window.is_none() {
-                        self.settings_window = Some(SettingsWindow::new(&self.shared.settings));
-                    }
-                }
-                AppAction::ShowLog => self.log_open = true,
-                AppAction::AddScanRoot => {
-                    if let Some(p) = Self::pick_folder(tr!("Dossier contenant vos dépôts (scan récursif)")) {
-                        if !self.shared.settings.scan_roots.iter().any(|r| path_key(r) == path_key(&p)) {
-                            self.shared.settings.scan_roots.push(p);
-                            self.shared.settings_dirty = true;
-                        }
-                        self.repo_list.start_scan(&self.shared);
-                    }
-                }
-                AppAction::RemoveScanRoot(p) => {
-                    self.shared.settings.scan_roots.retain(|r| path_key(r) != path_key(&p));
-                    self.shared.settings_dirty = true;
-                    self.repo_list.start_scan(&self.shared);
-                }
-                AppAction::Rescan => {
-                    self.repo_list.start_scan(&self.shared);
-                }
-                AppAction::TrustRepo(p) => {
-                    if let Some(git) = self.shared.git.clone() {
-                        self.shared.jobs.spawn("trust", move || {
-                            let r = dragontree_git::trust_directory(&git, &p);
-                            Some(AppEvent::Trusted(p, r))
-                        });
-                    }
-                }
-                AppAction::QuickOpen => {
-                    self.quick_open = Some(crate::quick_open::QuickOpen::default());
-                }
+        // Une commande peut demander une autre action (Réglages…) : traitée dans la même image.
+        while !self.shared.actions.is_empty() {
+            let actions = std::mem::take(&mut self.shared.actions);
+            for action in actions {
+                self.apply_action(action);
             }
         }
         if self.shared.settings_dirty {
@@ -448,33 +396,142 @@ impl DragonTreeApp {
         }
     }
 
+    fn apply_action(&mut self, action: AppAction) {
+        match action {
+            AppAction::OpenRepo(p) => self.open_repo(&p, false),
+            AppAction::OpenRepoNewTab(p) => self.open_repo(&p, true),
+            AppAction::PickAndOpenRepo => {
+                if let Some(p) = Self::pick_folder(tr!("Ouvrir un dépôt git")) {
+                    self.open_repo(&p, false);
+                }
+            }
+            AppAction::InitRepo => {
+                if let (Some(p), Some(git)) =
+                    (Self::pick_folder(tr!("Dossier du nouveau dépôt")), self.shared.git.clone())
+                {
+                    self.shared.jobs.spawn("init", move || {
+                        let r = dragontree_git::init_repo(&git, &p);
+                        Some(AppEvent::Initialized(p, r))
+                    });
+                }
+            }
+            AppAction::ShowClone => {
+                if self.clone.is_none() {
+                    self.clone = Some(CloneWindow::new(&self.shared));
+                }
+            }
+            AppAction::ShowAccounts => self.accounts.open = true,
+            AppAction::ShowSettings => {
+                if self.settings_window.is_none() {
+                    self.settings_window = Some(SettingsWindow::new(&self.shared.settings));
+                }
+            }
+            AppAction::ShowLog => self.log_open = true,
+            AppAction::AddScanRoot => {
+                if let Some(p) = Self::pick_folder(tr!("Dossier contenant vos dépôts (scan récursif)")) {
+                    if !self.shared.settings.scan_roots.iter().any(|r| path_key(r) == path_key(&p)) {
+                        self.shared.settings.scan_roots.push(p);
+                        self.shared.settings_dirty = true;
+                    }
+                    self.repo_list.start_scan(&self.shared);
+                }
+            }
+            AppAction::RemoveScanRoot(p) => {
+                self.shared.settings.scan_roots.retain(|r| path_key(r) != path_key(&p));
+                self.shared.settings_dirty = true;
+                self.repo_list.start_scan(&self.shared);
+            }
+            AppAction::Rescan => {
+                self.repo_list.start_scan(&self.shared);
+            }
+            AppAction::TrustRepo(p) => {
+                if let Some(git) = self.shared.git.clone() {
+                    self.shared.jobs.spawn("trust", move || {
+                        let r = dragontree_git::trust_directory(&git, &p);
+                        Some(AppEvent::Trusted(p, r))
+                    });
+                }
+            }
+            AppAction::QuickOpen => {
+                self.quick_open = Some(crate::quick_open::QuickOpen::default());
+            }
+            AppAction::RunCommand(cmd) => self.run_command(cmd),
+        }
+    }
+
+    /// État lu par le registre de commandes pour griser ou cocher les entrées : seul point qui le construit
+    /// (barre de menus, raccourcis, palette).
+    fn command_context(&self) -> CommandContext<'_> {
+        let repo = match self.tabs.get(self.active).map(|t| &t.kind) {
+            Some(TabKind::Repo(r)) if r.repo.is_some() => Some(r.as_ref()),
+            _ => None,
+        };
+        CommandContext { settings: &self.shared.settings, repo }
+    }
+
+    /// Commandes proposées par la palette Ctrl+P : celles du registre utilisables en ce moment.
+    fn palette_commands(&self) -> Vec<Command> {
+        let cx = self.command_context();
+        Command::ALL.iter().copied().filter(|c| c.in_palette() && c.enabled(&cx)).collect()
+    }
+
+    /// Exécute une commande du registre (barre de menus, raccourci, palette) si elle est utilisable ; une
+    /// commande de dépôt va à l'onglet actif.
+    fn run_command(&mut self, cmd: Command) {
+        if !cmd.enabled(&self.command_context()) {
+            return;
+        }
+        match cmd.scope() {
+            Scope::App => self.run_app_command(cmd),
+            // `enabled` a vérifié que l'onglet actif est un dépôt ouvert.
+            Scope::Repo => {
+                if let Some(TabKind::Repo(r)) = self.tabs.get_mut(self.active).map(|t| &mut t.kind) {
+                    r.run_command(cmd, &mut self.shared);
+                }
+            }
+        }
+    }
+
+    /// Commande de portée App ; une commande sans traitement ici est un oubli : assertion en debug.
+    fn run_app_command(&mut self, cmd: Command) {
+        match cmd {
+            Command::NewTab => self.new_welcome_tab(),
+            Command::CloseTab => self.close_tab(self.active),
+            Command::OpenRepo => self.shared.actions.push(AppAction::PickAndOpenRepo),
+            Command::Clone => self.shared.actions.push(AppAction::ShowClone),
+            Command::InitRepo => self.shared.actions.push(AppAction::InitRepo),
+            Command::QuickOpen => self.shared.actions.push(AppAction::QuickOpen),
+            Command::Accounts => self.shared.actions.push(AppAction::ShowAccounts),
+            Command::Settings => self.shared.actions.push(AppAction::ShowSettings),
+            Command::ShowLog => self.shared.actions.push(AppAction::ShowLog),
+            Command::ToggleRepoList => {
+                self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
+                self.shared.settings_dirty = true;
+            }
+            Command::Language(lang) => {
+                self.shared.settings.language = lang;
+                self.shared.settings_dirty = true;
+            }
+            _ => debug_assert!(false, "{cmd:?} : commande App sans traitement dans DragonTreeApp::run_app_command"),
+        }
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        // Raccourcis du registre, les plus spécifiques d'abord. Celui d'une commande grisée est consommé quand
+        // même : sinon un raccourci moins spécifique (Ctrl+T pour Ctrl+Maj+T) prendrait l'appui.
+        for (shortcut, cmd) in commands::shortcuts() {
+            if ctx.input_mut(|i| i.consume_shortcut(&shortcut)) {
+                self.run_command(cmd);
+            }
+        }
+        // Changement d'onglet, hors registre.
         let sc = |m: Modifiers, k: Key| KeyboardShortcut::new(m, k);
         let consume = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
-        if consume(sc(Modifiers::COMMAND, Key::T)) {
-            self.new_welcome_tab();
-        }
-        if consume(sc(Modifiers::COMMAND, Key::W)) {
-            self.close_tab(self.active);
-        }
         if consume(sc(Modifiers::COMMAND | Modifiers::SHIFT, Key::Tab)) {
             self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
         }
         if consume(sc(Modifiers::COMMAND, Key::Tab)) {
             self.active = (self.active + 1) % self.tabs.len();
-        }
-        if consume(sc(Modifiers::COMMAND, Key::B)) {
-            self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
-            self.shared.settings_dirty = true;
-        }
-        if consume(sc(Modifiers::COMMAND, Key::O)) {
-            self.shared.actions.push(AppAction::PickAndOpenRepo);
-        }
-        if consume(sc(Modifiers::COMMAND, Key::P)) {
-            self.shared.actions.push(AppAction::QuickOpen);
-        }
-        if consume(sc(Modifiers::COMMAND | Modifiers::SHIFT, Key::C)) {
-            self.shared.actions.push(AppAction::ShowClone);
         }
         let digits =
             [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
@@ -608,6 +665,14 @@ impl eframe::App for DragonTreeApp {
             self.window_title = title;
         }
 
+        let chosen = egui::Panel::top("menu-bar")
+            .frame(Frame::new().fill(p.sidebar).inner_margin(egui::Margin { left: 6, right: 6, top: 2, bottom: 0 }))
+            .show(ui, |ui| crate::menu_bar::show(ui, &self.command_context()))
+            .inner;
+        if let Some(cmd) = chosen {
+            self.run_command(cmd);
+        }
+
         egui::Panel::top("tab-bar")
             .frame(Frame::new().fill(p.sidebar).inner_margin(egui::Margin { left: 6, right: 6, top: 4, bottom: 0 }))
             .show(ui, |ui| {
@@ -684,12 +749,13 @@ impl eframe::App for DragonTreeApp {
             }
             self.log_open = open;
         }
+        let palette_commands = if self.quick_open.is_some() { self.palette_commands() } else { Vec::new() };
         if let Some(q) = &mut self.quick_open {
             let mut tabs_repo: Vec<&mut RepoTab> = Vec::new();
             if let Some(TabKind::Repo(r)) = self.tabs.get_mut(self.active).map(|t| &mut t.kind) {
                 tabs_repo.push(r);
             }
-            let keep = q.ui(&ctx, &mut self.shared, &self.repo_list, tabs_repo.pop(), &p);
+            let keep = q.ui(&ctx, &mut self.shared, &self.repo_list, tabs_repo.pop(), &palette_commands, &p);
             if !keep {
                 self.quick_open = None;
             }
