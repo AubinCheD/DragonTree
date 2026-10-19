@@ -45,6 +45,8 @@ pub enum Command {
     /// Passe à l'historique et sélectionne le commit de HEAD.
     RevealHead,
     ToggleDetailsPanel,
+    /// Tri des commits de l'historique : `true` topologique, `false` par date.
+    SortCommits(bool),
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -110,6 +112,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::ShowChanges),
             Cmd(Command::ShowHistory),
             Cmd(Command::CurrentBranchOnly),
+            Submenu(tr_mark!("Tri des commits"), &[Cmd(Command::SortCommits(false)), Cmd(Command::SortCommits(true))]),
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
@@ -198,6 +201,8 @@ impl Command {
         Command::ShowLog,
         Command::RevealHead,
         Command::ToggleDetailsPanel,
+        Command::SortCommits(false),
+        Command::SortCommits(true),
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -240,6 +245,8 @@ impl Command {
             Command::ShowLog => tr!("Journal git"),
             Command::RevealHead => tr!("Révéler HEAD"),
             Command::ToggleDetailsPanel => tr!("Panneau de détails"),
+            Command::SortCommits(false) => tr!("Par date"),
+            Command::SortCommits(true) => tr!("Topologique"),
             Command::ZoomIn => tr!("Zoom avant"),
             Command::ZoomOut => tr!("Zoom arrière"),
             Command::ZoomReset => tr!("Taille par défaut"),
@@ -283,6 +290,7 @@ impl Command {
             Command::ShowLog => icons::LIST,
             Command::RevealHead => icons::CROSSHAIR,
             Command::ToggleDetailsPanel => icons::SIDEBAR_SIMPLE,
+            Command::SortCommits(_) => icons::SORT_ASCENDING,
             Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
             Command::ZoomOut => icons::MAGNIFYING_GLASS_MINUS,
             Command::ZoomReset => icons::MAGNIFYING_GLASS,
@@ -318,6 +326,7 @@ impl Command {
             | Command::ToggleRepoList
             | Command::ShowLog
             | Command::ToggleDetailsPanel
+            | Command::SortCommits(_)
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset
@@ -384,7 +393,7 @@ impl Command {
 
     /// La commande figure dans la palette Ctrl+P.
     pub fn in_palette(self) -> bool {
-        !matches!(self, Command::QuickOpen | Command::Language(_) | Command::Theme(_))
+        !matches!(self, Command::QuickOpen | Command::Language(_) | Command::Theme(_) | Command::SortCommits(_))
     }
 
     /// La commande est utilisable (sinon son entrée est grisée et elle ne fait rien) : une commande de dépôt
@@ -405,6 +414,7 @@ impl Command {
             Command::CurrentBranchOnly => Some(cx.repo.is_some_and(|tab| tab.history.current_branch_only)),
             Command::ToggleRepoList => Some(cx.settings.repo_list_visible),
             Command::ToggleDetailsPanel => Some(cx.settings.details_panel_visible),
+            Command::SortCommits(topological) => Some(cx.settings.topological_order == topological),
             Command::Language(lang) => Some(cx.settings.language == lang),
             Command::Theme(choice) => Some(cx.settings.theme == choice),
             _ => None,

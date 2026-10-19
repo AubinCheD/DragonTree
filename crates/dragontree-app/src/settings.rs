@@ -49,6 +49,8 @@ pub struct Settings {
     pub repo_list_visible: bool,
     /// Panneau de détails du commit visible sous l'historique.
     pub details_panel_visible: bool,
+    /// Historique trié topologiquement (sinon par date).
+    pub topological_order: bool,
     pub repo_list_width: f32,
     pub favorites: Vec<PathBuf>,
     pub hidden_repos: Vec<PathBuf>,
@@ -83,6 +85,7 @@ impl Default for Settings {
             status_sweep: true,
             repo_list_visible: true,
             details_panel_visible: true,
+            topological_order: false,
             repo_list_width: 280.0,
             favorites: Vec::new(),
             hidden_repos: Vec::new(),

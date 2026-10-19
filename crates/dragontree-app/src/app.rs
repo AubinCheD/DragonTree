@@ -573,6 +573,18 @@ impl DragonTreeApp {
                 self.shared.settings.details_panel_visible = !self.shared.settings.details_panel_visible;
                 self.shared.settings_dirty = true;
             }
+            Command::SortCommits(topological) => {
+                if self.shared.settings.topological_order != topological {
+                    self.shared.settings.topological_order = topological;
+                    self.shared.settings_dirty = true;
+                    // Le tri est global : le journal de chaque dépôt ouvert est relu.
+                    for tab in &mut self.tabs {
+                        if let TabKind::Repo(r) = &mut tab.kind {
+                            r.load_log(&self.shared);
+                        }
+                    }
+                }
+            }
             Command::ToggleRepoList => {
                 self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
                 self.shared.settings_dirty = true;
