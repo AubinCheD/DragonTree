@@ -1012,6 +1012,7 @@ dependencies = [
  "image",
  "notify",
  "notify-debouncer-mini",
+ "regex",
  "rfd",
  "serde",
  "serde_json",

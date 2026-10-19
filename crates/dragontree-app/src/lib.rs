@@ -20,6 +20,7 @@ pub mod settings_ui;
 pub mod ssh_keys;
 pub mod tabbar;
 pub mod theme;
+pub mod tickets;
 pub mod toasts;
 pub mod util;
 pub mod welcome;

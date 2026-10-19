@@ -37,7 +37,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// worktree…) ; `RemoveWorktree::force` (`--force`) : seulement si la case est cochée.
 /// `Stash::snapshot` : enregistre un stash sans toucher aux modifications (`untracked` et `keep_index` sans objet) ;
 /// `StashFiles` : seulement les fichiers choisis dans la vue Changements ; `ApplyPatch` : aperçu d'un patch lu (fichier
-/// déposé, texte collé) et cible choisie ; `PastePatch` : zone où coller le texte d'un patch.
+/// déposé, texte collé) et cible choisie ; `PastePatch` : zone où coller le texte d'un patch ; `RepoSettings` :
+/// identité locale, modèle de message et liens vers les tickets.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -66,6 +67,7 @@ pub enum Dialog {
     DropStash { oid: Oid, label: String },
     CreateWorktree { start: WorktreeStart, path: String, pick: bool },
     RemoveWorktree { path: PathBuf, force: bool },
+    RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
     Confirm { title: String, text: String, action: ConfirmAction },
 }
 
@@ -120,6 +122,7 @@ impl Dialog {
             Dialog::DropStash { .. } => (tr!("Supprimer le stash").into(), tr!("Supprimer").into(), true),
             Dialog::CreateWorktree { .. } => (tr!("Créer un worktree").into(), tr!("Créer").into(), false),
             Dialog::RemoveWorktree { .. } => (tr!("Supprimer le worktree").into(), tr!("Supprimer").into(), true),
+            Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
             Dialog::Confirm { title, action: ConfirmAction::CheckoutDetached(_), .. } => {
                 (title.clone(), tr!("Continuer").into(), false)
             }
@@ -159,7 +162,7 @@ impl RepoTab {
         let mut confirmed = false;
         let mut cancelled = false;
         let response = egui::Modal::new(egui::Id::unique(("dialog", self.id))).show(ctx, |ui| {
-            ui.set_width(470.0);
+            ui.set_width(if matches!(dialog, Dialog::RepoSettings(_)) { 640.0 } else { 470.0 });
             ui.label(RichText::new(title).strong().size(16.0));
             ui.add_space(10.0);
             let valid = self.dialog_body(ui, &mut dialog, p);
@@ -464,6 +467,7 @@ impl RepoTab {
             }
             Dialog::CreateWorktree { start, path, pick } => self.create_worktree_body(ui, start, path, *pick, p),
             Dialog::RemoveWorktree { path, force } => Self::remove_worktree_body(ui, path, force, p),
+            Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
                 true
@@ -581,6 +585,7 @@ impl RepoTab {
             Dialog::RemoveWorktree { path, force } => {
                 shared.actions.push(AppAction::RemoveWorktree { tab: self.id, path, force })
             }
+            Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
             Dialog::Confirm { action, .. } => match action {
                 ConfirmAction::CheckoutDetached(oid) => self.op_checkout(shared, oid.to_hex()),
                 ConfirmAction::AbortOp(state) => {

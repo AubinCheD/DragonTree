@@ -6,6 +6,7 @@
 pub mod apply;
 pub mod blame;
 pub mod collapse;
+pub mod config;
 pub mod conflict;
 pub mod diff;
 pub mod discovery;

@@ -104,7 +104,10 @@ impl RepoTab {
             ui.centered_and_justified(|ui| ui.spinner());
             return;
         };
-        if self.op_state == OpState::Merge && self.changes.subject.is_empty() && !self.changes.merge_msg_loaded {
+        // Le modèle de message intact compte pour une zone vide : le message de la fusion le remplace.
+        let c = &self.changes;
+        let template_only = c.template_prefill.as_ref().is_some_and(|(s, b)| *s == c.subject && *b == c.body);
+        if self.op_state == OpState::Merge && (c.subject.is_empty() || template_only) && !c.merge_msg_loaded {
             self.changes.merge_msg_loaded = true;
             if let Some(repo) = &self.repo
                 && let Ok(msg) = std::fs::read_to_string(repo.git_dir.join("MERGE_MSG"))
@@ -113,6 +116,7 @@ impl RepoTab {
                 let (s, b) = super::split_message(&cleaned);
                 self.changes.subject = s;
                 self.changes.body = b;
+                self.changes.template_prefill = None;
             }
         }
         if self.op_state == OpState::None {

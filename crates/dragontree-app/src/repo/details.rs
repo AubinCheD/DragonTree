@@ -8,7 +8,9 @@ use super::RepoTab;
 use super::diff_view::{self, DiffMode};
 use crate::app::Shared;
 use crate::icons;
+use crate::settings::TicketRule;
 use crate::theme::Palette;
+use crate::tickets::Segment;
 use crate::widgets;
 
 pub fn change_badge(kind: ChangeKind, p: &Palette) -> (&'static str, egui::Color32, &'static str) {
@@ -68,6 +70,31 @@ pub fn file_row(
     let galley = ui.painter().layout_job(job);
     ui.painter().galley(egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y / 2.0), galley, p.text);
     resp.on_hover_text(path)
+}
+
+/// Texte d'un message de commit : sélectionnable, avec les occurrences des règles de tickets en liens cliquables
+/// (ouverts dans le navigateur). Sans règle applicable, c'est un simple texte.
+fn message_text(ui: &mut Ui, text: String, rules: &[TicketRule], style: impl Fn(String) -> RichText) {
+    let segments = crate::tickets::link_segments(&text, rules);
+    if !segments.iter().any(|s| matches!(s, Segment::Link { .. })) {
+        ui.add(egui::Label::new(style(text)).wrap().selectable(true));
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for segment in segments {
+            match segment {
+                Segment::Text(t) => {
+                    ui.add(egui::Label::new(style(t)).selectable(true));
+                }
+                Segment::Link { text, url } => {
+                    if ui.link(style(text)).on_hover_text(&url).clicked() {
+                        crate::util::open_url(ui.ctx(), &url);
+                    }
+                }
+            }
+        }
+    });
 }
 
 impl RepoTab {
@@ -174,10 +201,11 @@ impl RepoTab {
             ui.label(RichText::new(format!("{} {label}", icons::STACK)).color(p.weak));
         }
         let (subject, body) = super::split_message(&info.message);
-        ui.add(egui::Label::new(RichText::new(subject).strong().size(15.0)).wrap().selectable(true));
+        let rules = shared.settings.ticket_rules_of(&self.path).to_vec();
+        message_text(ui, subject, &rules, |t| RichText::new(t).strong().size(15.0));
         if !body.is_empty() {
             ui.add_space(4.0);
-            ui.add(egui::Label::new(RichText::new(body).size(13.0)).wrap().selectable(true));
+            message_text(ui, body, &rules, |t| RichText::new(t).size(13.0));
         }
         ui.add_space(8.0);
         egui::Grid::new(("details-grid", self.id)).num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {

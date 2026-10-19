@@ -271,6 +271,8 @@ impl RepoTab {
         self.changes.body.clear();
         self.changes.amend = false;
         self.changes.saved_message = None;
+        // Le modèle de message revient dans la zone vidée.
+        self.load_commit_template(shared);
         match after {
             AfterCommit::Nothing => {}
             AfterCommit::Push(target) => self.push_to(shared, target),

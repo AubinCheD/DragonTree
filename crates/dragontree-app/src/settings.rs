@@ -39,6 +39,14 @@ pub enum ThemeChoice {
     Dark,
 }
 
+/// Règle de lien vers un ticket : les occurrences de `pattern` (expression régulière) dans un message de commit
+/// deviennent des liens vers `url`, où `$1`, `${nom}`… sont remplacés par les groupes capturés.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TicketRule {
+    pub pattern: String,
+    pub url: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -94,6 +102,8 @@ pub struct Settings {
     /// Minutes entre deux fetch automatiques des onglets ouverts (0 = jamais).
     pub auto_fetch_minutes: u32,
     pub show_read_commands_in_log: bool,
+    /// Dépôt (chemin) -> règles de liens vers les tickets des messages de commit.
+    pub ticket_links: BTreeMap<String, Vec<TicketRule>>,
 }
 
 impl Default for Settings {
@@ -134,6 +144,7 @@ impl Default for Settings {
             push_after_commit: false,
             auto_fetch_minutes: 10,
             show_read_commands_in_log: false,
+            ticket_links: BTreeMap::new(),
         }
     }
 }
@@ -289,6 +300,26 @@ impl Settings {
     pub fn clear_hidden_refs(&mut self, repo: &Path) {
         self.hidden_refs.remove(&path_key(repo));
     }
+
+    /// Règles de liens vers les tickets d'un dépôt (voir [`Settings::ticket_links`]).
+    pub fn ticket_rules_of(&self, repo: &Path) -> &[TicketRule] {
+        self.ticket_links.get(&path_key(repo)).map_or(&[], Vec::as_slice)
+    }
+
+    /// Remplace les règles d'un dépôt ; les règles sans motif ni URL sont écartées, et un dépôt sans règle n'a
+    /// plus d'entrée.
+    pub fn set_ticket_rules(&mut self, repo: &Path, rules: Vec<TicketRule>) {
+        let rules: Vec<TicketRule> = rules
+            .into_iter()
+            .map(|r| TicketRule { pattern: r.pattern.trim().to_string(), url: r.url.trim().to_string() })
+            .filter(|r| !r.pattern.is_empty() && !r.url.is_empty())
+            .collect();
+        if rules.is_empty() {
+            self.ticket_links.remove(&path_key(repo));
+        } else {
+            self.ticket_links.insert(path_key(repo), rules);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -395,6 +426,27 @@ mod tests {
         s.clear_hidden_refs(Path::new(r"C:\DEV\A"));
         assert!(s.hidden_refs.is_empty(), "plus d'entrée pour un dépôt sans référence masquée");
     }
+    #[test]
+    fn ticket_rules_are_per_repo_trimmed_and_blank_ones_dropped() {
+        let rule = |p: &str, u: &str| TicketRule { pattern: p.into(), url: u.into() };
+        let mut s = Settings::default();
+        s.set_ticket_rules(
+            Path::new(r"C:\DEV\A"),
+            vec![rule(r" #(\d+) ", " https://x.test/$1 "), rule("", "https://vide.test"), rule("x", "")],
+        );
+        assert_eq!(s.ticket_rules_of(Path::new(r"c:\dev\a\")), [rule(r"#(\d+)", "https://x.test/$1")]);
+        assert!(s.ticket_rules_of(Path::new(r"C:\DEV\B")).is_empty());
+        s.set_ticket_rules(Path::new(r"C:\DEV\A"), Vec::new());
+        assert!(s.ticket_links.is_empty(), "plus d'entrée pour un dépôt sans règle");
+    }
+
+    #[test]
+    fn an_old_settings_file_without_ticket_links_still_loads() {
+        let s: Settings = serde_json::from_str(r#"{"theme":"Dark","ui_scale":1.2}"#).unwrap();
+        assert!(s.ticket_links.is_empty());
+        assert_eq!(s.theme, ThemeChoice::Dark);
+    }
+
     #[test]
     fn favorites_toggle() {
         let mut s = Settings::default();

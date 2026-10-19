@@ -56,7 +56,7 @@ pub enum ConfigScope {
 }
 
 impl ConfigScope {
-    fn flag(self) -> &'static str {
+    pub(crate) fn flag(self) -> &'static str {
         match self {
             ConfigScope::Global => "--global",
             ConfigScope::Local => "--local",

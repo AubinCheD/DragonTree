@@ -15,6 +15,7 @@ mod history;
 mod image_diff;
 mod patches;
 mod rebase_ui;
+mod repo_settings;
 mod scope;
 mod sidebar;
 mod toolbar;
@@ -219,6 +220,9 @@ pub struct ChangesState {
     saved_message: Option<(String, String)>,
     /// Message de fusion (MERGE_MSG) déjà repris dans la zone de commit.
     merge_msg_loaded: bool,
+    /// Modèle de message que la zone de commit a reçu (sujet, corps) : tant qu'elle le contient tel quel, elle
+    /// compte pour vide (message de fusion, nouveau modèle).
+    template_prefill: Option<(String, String)>,
     /// Commit lancé : le message n'est effacé (et le push éventuel lancé) qu'en cas de succès.
     pending_commit: Option<PendingCommit>,
 }
@@ -248,6 +252,8 @@ struct Gens {
     work_diff: u64,
     patch: u64,
     compare: u64,
+    repo_settings: u64,
+    template: u64,
 }
 
 /// Détails lus d'un commit : infos, fichiers, et pour un stash le commit de ses fichiers non suivis avec l'indice du
@@ -279,6 +285,10 @@ pub enum RepoEvent {
     PatchPreview(u64, Result<Box<patches::PatchPreview>, GitError>),
     /// Texte d'un patch lu pour le presse-papiers.
     PatchText(Result<String, GitError>),
+    /// Configuration du dépôt lue pour le dialogue « Réglages du dépôt ».
+    RepoSettings(u64, Box<repo_settings::RepoSettingsForm>),
+    /// Modèle de message de commit (`commit.template`) lu pour préremplir la zone de commit.
+    CommitTemplate(u64, Option<String>),
     OpProgress(u64, Progress),
     OpDone {
         id: u64,
@@ -673,6 +683,7 @@ impl RepoTab {
                 );
                 self.repo = Some(repo);
                 self.refresh(shared, Refresh::ALL);
+                self.load_commit_template(shared);
             }
             RepoEvent::Opened(Err(e)) => self.open_error = Some(e),
             RepoEvent::Refs(g, res) if g == self.gens.refs => match res {
@@ -782,6 +793,8 @@ impl RepoTab {
             }
             RepoEvent::PatchPreview(g, res) if g == self.gens.patch => self.on_patch_preview(shared, res),
             RepoEvent::PatchText(res) => self.on_patch_text(shared, res),
+            RepoEvent::RepoSettings(g, form) if g == self.gens.repo_settings => self.on_repo_settings(shared, form),
+            RepoEvent::CommitTemplate(g, template) if g == self.gens.template => self.on_commit_template(template),
             RepoEvent::WorkDiff(g, key, res) if g == self.gens.work_diff => {
                 self.changes.diff_loading = false;
                 match res {

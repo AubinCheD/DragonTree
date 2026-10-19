@@ -94,6 +94,8 @@ pub enum Command {
     OpenExplorer,
     OpenTerminal,
     OpenVsCode,
+    /// Réglages du dépôt : identité locale, liens vers les tickets, modèle de message de commit.
+    RepoSettings,
     Settings,
     /// Langue de l'interface ; `None` : celle de Windows.
     Language(Option<Lang>),
@@ -203,6 +205,8 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
             Cmd(Command::OpenVsCode),
+            Separator,
+            Cmd(Command::RepoSettings),
         ],
     ),
     (
@@ -291,6 +295,7 @@ impl Command {
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenVsCode,
+        Command::RepoSettings,
         Command::Settings,
         Command::Language(None),
         Command::Language(Some(Lang::Fr)),
@@ -352,6 +357,7 @@ impl Command {
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
             Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
+            Command::RepoSettings => tr!("Réglages du dépôt…"),
             Command::Settings => tr!("Réglages…"),
             Command::Language(None) => tr!("Système"),
             // Chaque langue est nommée dans sa propre langue.
@@ -411,6 +417,7 @@ impl Command {
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenVsCode => icons::CODE,
+            Command::RepoSettings => icons::GEAR_SIX,
             Command::Settings => icons::GEAR_SIX,
             Command::Language(_) => icons::TRANSLATE,
         }
@@ -468,7 +475,8 @@ impl Command {
             | Command::PastePatch
             | Command::OpenExplorer
             | Command::OpenTerminal
-            | Command::OpenVsCode => Scope::Repo,
+            | Command::OpenVsCode
+            | Command::RepoSettings => Scope::Repo,
         }
     }
 
