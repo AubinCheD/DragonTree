@@ -8,6 +8,7 @@ use egui::{Frame, Key, RichText, Ui};
 
 use super::details::file_row;
 use super::diff_view::{self, DiffMode};
+use super::patches::PatchSource;
 use super::{Dialog, RepoTab, Side};
 use crate::app::{AppAction, Shared};
 use crate::commands::Command;
@@ -481,6 +482,18 @@ impl RepoTab {
                     Some(Dialog::StashFiles { message: String::new(), paths: with_rename_origins(&paths, status) });
                 ui.close();
             }
+        }
+        if side != Side::Conflict {
+            let is_untracked =
+                |p: &String| status.entries.iter().any(|e| &e.path == p && e.worktree == FileState::Untracked);
+            let (untracked_list, tracked): (Vec<String>, Vec<String>) = paths.iter().cloned().partition(is_untracked);
+            // Renommage indexé : l'ancien nom aussi, pour que le patch supprime l'ancien fichier.
+            let tracked = with_rename_origins(&tracked, status);
+            self.patch_menu_entries(
+                ui,
+                shared,
+                PatchSource::Files { tracked, untracked: untracked_list, staged: side == Side::Staged },
+            );
         }
         ui.separator();
         self.file_menu(ui, shared, path, None);

@@ -7,6 +7,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
 use super::actions::StashOp;
+use super::patches::PatchSource;
 use super::scope::{Visibility, branch_pattern, folder_pattern, remote_branch_pattern, remote_pattern, visibility};
 use super::{Dialog, RepoTab, RepoView};
 use crate::app::{AppAction, Shared};
@@ -842,6 +843,8 @@ impl RepoTab {
             ui.close();
         }
         ui.separator();
+        self.patch_menu_entries(ui, shared, PatchSource::Stash(oid));
+        ui.separator();
         if ui.button(format!("{} {}", icons::TRASH, tr!("Supprimer…"))).clicked() {
             self.dialog = Some(Dialog::DropStash { oid, label: label.to_string() });
             ui.close();
@@ -913,6 +916,12 @@ impl RepoTab {
         {
             self.dialog =
                 Some(Dialog::Reset { rev: oid.to_hex(), label: format!("{short} {summary}"), mode: ResetMode::Mixed });
+            ui.close();
+        }
+        ui.separator();
+        self.patch_menu_entries(ui, shared, PatchSource::Commit(oid, summary.to_string()));
+        if ui.button(format!("{} {}", icons::FLOPPY_DISK, tr!("Enregistrer les patchs jusqu'à HEAD…"))).clicked() {
+            self.save_patch(shared, PatchSource::CommitsToHead(oid));
             ui.close();
         }
         ui.separator();

@@ -3,13 +3,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use dragontree_git::{ApplyTarget, GitError, PatchFile, Repo, is_mail_patch};
+use dragontree_git::{ApplyTarget, GitError, Oid, PatchFile, Repo, is_mail_patch};
 use dragontree_i18n::{tr, trn};
 use egui::{RichText, Ui};
 
 use super::dialogs::warning;
 use super::{Dialog, Refresh, RepoEvent, RepoTab};
 use crate::app::{AppEvent, Shared};
+use crate::icons;
 use crate::theme::Palette;
 use crate::toasts::Toast;
 
@@ -62,6 +63,17 @@ impl PatchPreview {
             PatchTarget::Am => &self.check_am,
         }
     }
+}
+
+/// Texte d'un patch pour le presse-papiers : refusé s'il n'est pas de l'UTF-8 valide (fichier binaire, autre
+/// encodage), car la copie en altérerait les octets et le patch ne s'appliquerait plus.
+fn patch_text(bytes: Vec<u8>) -> Result<String, GitError> {
+    String::from_utf8(bytes).map_err(|_| {
+        GitError::Refused(
+            tr!("Ce patch contient des octets qui ne sont pas du texte UTF-8 : utilisez « Enregistrer comme patch… ».")
+                .into(),
+        )
+    })
 }
 
 /// Un fichier déposé est un patch (extension `.patch` ou `.diff`).
@@ -182,5 +194,142 @@ impl RepoTab {
             }
             Ok(Some(tr!("Patch appliqué : {name}", name = preview.name)))
         });
+    }
+}
+
+/// Ce dont on tire un patch (Enregistrer comme patch, Copier comme patch).
+#[derive(Debug, Clone)]
+pub enum PatchSource {
+    /// Un commit (au format mail) ; le sujet nomme le fichier proposé.
+    Commit(Oid, String),
+    /// Les commits de celui-ci à HEAD, un fichier par commit dans un dossier.
+    CommitsToHead(Oid),
+    Stash(Oid),
+    /// Fichiers de la vue Changements : suivis (indexés si `staged`) et non suivis.
+    Files {
+        tracked: Vec<String>,
+        untracked: Vec<String>,
+        staged: bool,
+    },
+}
+
+impl PatchSource {
+    /// Nom de fichier proposé.
+    fn default_name(&self) -> String {
+        match self {
+            PatchSource::Commit(_, subject) => dragontree_git::export::patch_file_name(subject),
+            PatchSource::Stash(_) => "stash.patch".into(),
+            PatchSource::Files { .. } | PatchSource::CommitsToHead(_) => "modifications.patch".into(),
+        }
+    }
+
+    /// Contenu du patch (commandes git : hors du thread de l'interface).
+    fn read(&self, repo: &Repo) -> Result<Vec<u8>, GitError> {
+        match self {
+            PatchSource::Commit(id, _) => repo.commit_patch(*id),
+            PatchSource::Stash(id) => repo.stash_patch(*id),
+            PatchSource::Files { tracked, untracked, staged } => repo.files_patch(tracked, untracked, *staged),
+            PatchSource::CommitsToHead(_) => Err(GitError::Internal("une plage s'écrit en plusieurs fichiers".into())),
+        }
+    }
+}
+
+impl RepoTab {
+    /// Entrées « Enregistrer comme patch… » et « Copier comme patch » d'un menu contextuel.
+    pub(super) fn patch_menu_entries(&mut self, ui: &mut Ui, shared: &mut Shared, source: PatchSource) {
+        if ui.button(format!("{} {}", icons::FLOPPY_DISK, tr!("Enregistrer comme patch…"))).clicked() {
+            self.save_patch(shared, source.clone());
+            ui.close();
+        }
+        if ui.button(format!("{} {}", icons::COPY, tr!("Copier comme patch"))).clicked() {
+            self.copy_patch(shared, source);
+            ui.close();
+        }
+    }
+
+    /// Choisit où enregistrer (fichier, ou dossier pour une plage de commits) puis écrit le patch.
+    pub(super) fn save_patch(&mut self, shared: &Shared, source: PatchSource) {
+        let dialog = rfd::FileDialog::new();
+        let dest = match &source {
+            PatchSource::CommitsToHead(_) => dialog.set_title(tr!("Dossier des patchs")).pick_folder(),
+            _ => dialog
+                .set_title(tr!("Enregistrer comme patch"))
+                .set_file_name(source.default_name())
+                .add_filter(tr!("Patchs"), &["patch", "diff"])
+                .save_file(),
+        };
+        if let Some(dest) = dest {
+            self.op_write_patch(shared, source, dest);
+        }
+    }
+
+    /// Écrit le patch dans `dest` (un fichier, ou un dossier pour une plage) ; lecture et écriture en arrière-plan.
+    pub(crate) fn op_write_patch(&mut self, shared: &Shared, source: PatchSource, dest: PathBuf) {
+        self.run_simple(shared, tr!("Enregistrement du patch"), Refresh::NONE, move |r| {
+            if let PatchSource::CommitsToHead(id) = &source {
+                let commits = r.commits_to_head(*id)?;
+                let files = r.commit_patches_to_dir(&commits, &dest)?;
+                if files.is_empty() {
+                    return Err(GitError::Refused(tr!("Aucun patch : ces commits sont des fusions.").into()));
+                }
+                let (n, dir) = (files.len(), dest.display().to_string());
+                return Ok(Some(trn!(
+                    n,
+                    "{n} patch enregistré dans {dir} (les fusions ne sont pas exportées)",
+                    "{n} patchs enregistrés dans {dir} (les fusions ne sont pas exportées)",
+                    dir
+                )));
+            }
+            std::fs::write(&dest, source.read(r)?)?;
+            Ok(Some(tr!("Patch enregistré : {path}", path = dest.display())))
+        });
+    }
+
+    /// Copie le patch dans le presse-papiers une fois lu (en arrière-plan : il peut être gros).
+    pub(super) fn copy_patch(&mut self, shared: &Shared, source: PatchSource) {
+        let Some(repo) = self.repo.clone() else { return };
+        let id = self.id;
+        shared.jobs.spawn("patch-copy", move || {
+            let text = source.read(&repo).and_then(patch_text);
+            Some(AppEvent::Repo(id, RepoEvent::PatchText(text)))
+        });
+    }
+
+    pub(super) fn on_patch_text(&mut self, shared: &mut Shared, res: Result<String, GitError>) {
+        match res {
+            Ok(text) => {
+                shared.ctx.copy_text(text);
+                shared.toast(Toast::success(tr!("Patch copié dans le presse-papiers")));
+            }
+            Err(e) => shared.toast(Toast::error(tr!("Patch impossible"), e.to_string())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn dropped_files_are_patches_by_extension() {
+        assert!(is_patch_file(Path::new("a/ajout.patch")));
+        assert!(is_patch_file(Path::new("CORRECTIF.DIFF")));
+        assert!(!is_patch_file(Path::new("notes.txt")));
+        assert!(!is_patch_file(Path::new("patch")));
+    }
+
+    #[test]
+    fn a_patch_that_is_not_utf8_is_not_copied() {
+        assert_eq!(patch_text(b"+ok\n".to_vec()).unwrap(), "+ok\n");
+        assert!(patch_text(vec![b'+', 0x9f, 0x92, b'\n']).is_err());
+    }
+
+    #[test]
+    fn the_proposed_file_name_follows_the_source() {
+        let oid = Oid::from_hex(&"a".repeat(40)).unwrap();
+        assert_eq!(PatchSource::Commit(oid, "Corrige l'accueil".into()).default_name(), "corrige-l-accueil.patch");
+        assert_eq!(PatchSource::Stash(oid).default_name(), "stash.patch");
     }
 }

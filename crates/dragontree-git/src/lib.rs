@@ -10,6 +10,7 @@ pub mod conflict;
 pub mod diff;
 pub mod discovery;
 pub mod error;
+pub mod export;
 pub mod graph;
 pub mod log;
 pub mod net;

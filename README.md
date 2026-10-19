@@ -29,7 +29,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
 - **Conflits** : bandeau d'opération en cours (Continuer/Annuler/Passer), résolution « notre/leur version »,
   éditeur de conflits par région, outil de merge externe (`git mergetool`).
 - **Patchs** : appliquer un patch (fichier, glisser-déposer d'un `.patch`/`.diff`, texte collé) avec aperçu des fichiers
-  touchés et vérification, vers la copie de travail, l'index ou en commits (`git am`, patchs `format-patch`).
+  touchés et vérification, vers la copie de travail, l'index ou en commits (`git am`, patchs `format-patch`) ; **enregistrer
+  comme patch** (commit, commits jusqu'à HEAD en un fichier par commit, stash, fichiers sélectionnés) ou le copier.
 - **Historique et blame d'un fichier.**
 - **Comptes GitHub, GitLab et Azure DevOps**, plusieurs à la fois (GitHub Enterprise, GitLab auto-hébergé et
   Azure DevOps Server compris) ; **clonage** depuis la liste agrégée de vos dépôts ou depuis une URL.

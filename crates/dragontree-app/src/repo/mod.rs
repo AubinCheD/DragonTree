@@ -275,6 +275,8 @@ pub enum RepoEvent {
     WorkDiff(u64, (Side, String), Result<FileDiff, GitError>),
     /// Patch lu et vérifié, prêt pour le dialogue d'application.
     PatchPreview(u64, Result<Box<patches::PatchPreview>, GitError>),
+    /// Texte d'un patch lu pour le presse-papiers.
+    PatchText(Result<String, GitError>),
     OpProgress(u64, Progress),
     OpDone {
         id: u64,
@@ -770,6 +772,7 @@ impl RepoTab {
                 }
             }
             RepoEvent::PatchPreview(g, res) if g == self.gens.patch => self.on_patch_preview(shared, res),
+            RepoEvent::PatchText(res) => self.on_patch_text(shared, res),
             RepoEvent::WorkDiff(g, key, res) if g == self.gens.work_diff => {
                 self.changes.diff_loading = false;
                 match res {
