@@ -8,6 +8,7 @@ mod conflicts;
 mod details;
 mod dialogs;
 pub mod diff_view;
+mod folding;
 mod graph_paint;
 mod history;
 mod image_diff;
@@ -25,8 +26,8 @@ use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
-    CancelToken, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions, LogScope, Oid,
-    OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
+    CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions,
+    LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
@@ -96,10 +97,26 @@ pub struct RunningOp {
     pub silent: bool,
 }
 
-pub struct HistoryState {
+/// Liste de commits du graphe : les commits dans l'ordre d'affichage, leur graphe et l'index oid → ligne.
+#[derive(Clone, Default)]
+pub struct CommitList {
     pub commits: Arc<Vec<Commit>>,
     pub graph: Arc<GraphLayout>,
     pub index: Arc<HashMap<Oid, usize>>,
+}
+
+pub struct HistoryState {
+    /// Liste affichée : le journal chargé sans les commits des fusions repliées (voir `folding`). L'index donne la
+    /// ligne d'un commit dans cette liste, `filtered` en retient des lignes.
+    pub commits: Arc<Vec<Commit>>,
+    pub graph: Arc<GraphLayout>,
+    pub index: Arc<HashMap<Oid, usize>>,
+    /// Journal chargé complet : la source de la liste affichée.
+    pub loaded: CommitList,
+    /// Fusions repliées de l'onglet (session).
+    pub folding: folding::MergeFolding,
+    /// Fusions repliées affichées → nombre de commits qu'elles masquent.
+    pub folded: Arc<HashMap<Oid, usize>>,
     pub loading: bool,
     pub complete: bool,
     pub error: Option<GitError>,
@@ -142,6 +159,9 @@ impl Default for HistoryState {
             commits: Arc::new(Vec::new()),
             graph: Arc::new(GraphLayout::default()),
             index: Arc::new(HashMap::new()),
+            loaded: CommitList::default(),
+            folding: folding::MergeFolding::default(),
+            folded: Arc::new(HashMap::new()),
             loading: false,
             complete: false,
             error: None,
@@ -219,6 +239,7 @@ struct Gens {
     status: u64,
     log: u64,
     extras: u64,
+    folding: u64,
     details: u64,
     commit_diff: u64,
     work_diff: u64,
@@ -229,18 +250,41 @@ pub enum RepoEvent {
     Opened(Result<Arc<Repo>, GitError>),
     Refs(u64, Result<RefsSnapshot, GitError>),
     Status(u64, Result<(StatusSnapshot, OpState), GitError>),
-    Log { generation: u64, complete: bool, result: Result<LogData, GitError> },
+    Log {
+        generation: u64,
+        complete: bool,
+        result: Result<LogData, GitError>,
+    },
+    /// Liste affichée recalculée pour les fusions repliées (`follow_selection` : voir `show_list`).
+    Folded {
+        generation: u64,
+        view: Box<CollapsedLog>,
+        follow_selection: bool,
+    },
     Extras(u64, Vec<StashEntry>, Vec<Remote>, Vec<Submodule>),
     Details(u64, Oid, Result<(CommitInfo, Vec<FileChange>), GitError>),
     CommitDiff(u64, Result<FileDiff, GitError>),
     WorkDiff(u64, (Side, String), Result<FileDiff, GitError>),
     OpProgress(u64, Progress),
-    OpDone { id: u64, title: String, result: Result<Option<String>, GitError>, refresh: Refresh },
-    FsChanged { git_dir: bool, worktree: bool },
+    OpDone {
+        id: u64,
+        title: String,
+        result: Result<Option<String>, GitError>,
+        refresh: Refresh,
+    },
+    FsChanged {
+        git_dir: bool,
+        worktree: bool,
+    },
     LastMessage(String),
     Blame(blame::BlameEvent),
     RebaseList(Result<Vec<Commit>, GitError>),
-    Images { history: bool, key: String, old: Option<image_diff::DecodedImage>, new: Option<image_diff::DecodedImage> },
+    Images {
+        history: bool,
+        key: String,
+        old: Option<image_diff::DecodedImage>,
+        new: Option<image_diff::DecodedImage>,
+    },
 }
 
 pub struct LogData {
@@ -592,12 +636,18 @@ impl RepoTab {
                     if sig != self.history.tips_signature {
                         let first_load = self.history.tips_signature == 0;
                         self.history.tips_signature = sig;
-                        if !first_load || self.history.commits.is_empty() && !self.history.loading {
+                        if !first_load || self.history.loaded.commits.is_empty() && !self.history.loading {
                             self.load_log(shared);
                         }
                     }
+                    let first_refs = self.refs.is_none();
                     self.refs = Some(Arc::new(refs));
                     self.quick_dirty = true;
+                    // Le repli épargne HEAD (`fold_roots`) : un repli demandé avant la première lecture des
+                    // références l'a calculé sans lui ; le journal n'est pas relu ici, on le refait.
+                    if first_refs && !self.history.folding.is_none() {
+                        self.refold(shared, false);
+                    }
                 }
                 Err(e) => shared.toast(Toast::error(tr!("Lecture des branches impossible"), e.to_string())),
             },
@@ -614,19 +664,18 @@ impl RepoTab {
                 self.history.loading = !complete;
                 match result {
                     Ok(data) => {
-                        self.history.commits = data.commits;
-                        self.history.graph = data.graph;
-                        self.history.index = data.index;
+                        self.history.loaded =
+                            CommitList { commits: data.commits, graph: data.graph, index: data.index };
                         self.history.lost = data.lost;
                         if complete && let Some(e) = data.lost_error {
                             shared.toast(Toast::error(tr!("Lecture des commits perdus impossible"), e.to_string()));
                         }
                         self.history.error = None;
                         self.history.complete = complete;
-                        self.history.filter_applied.clear();
-                        self.history.filtered = None;
+                        // Les fusions repliées le restent : la liste affichée est recalculée sur le nouveau journal.
+                        self.refold(shared, false);
                         if let Some(n) = self.select_commit_on_load.take()
-                            && let Some(c) = self.history.commits.get(n)
+                            && let Some(c) = self.history.loaded.commits.get(n)
                         {
                             let oid = c.id;
                             self.select_commit(shared, oid, true);
@@ -634,6 +683,11 @@ impl RepoTab {
                     }
                     Err(e) => self.history.error = Some(e),
                 }
+            }
+            RepoEvent::Folded { generation, view, follow_selection } if generation == self.gens.folding => {
+                let CollapsedLog { commits, graph, index, folded, hidden_in } = *view;
+                let list = CommitList { commits: Arc::new(commits), graph: Arc::new(graph), index: Arc::new(index) };
+                self.show_list(shared, list, folded, &hidden_in, follow_selection);
             }
             RepoEvent::Extras(g, stashes, remotes, subs) if g == self.gens.extras => {
                 self.stashes = Arc::new(stashes);
@@ -814,14 +868,22 @@ impl RepoTab {
     pub(crate) fn select_commit(&mut self, shared: &Shared, oid: Oid, scroll: bool) {
         self.history.selected = Some(oid);
         self.history.external = None;
-        if scroll && let Some(&row) = self.history.index.get(&oid) {
+        if scroll {
+            self.scroll_to_commit(oid);
+        }
+        self.load_details(shared, oid);
+    }
+
+    /// Fait défiler l'historique jusqu'à la ligne affichée de `oid` (parmi les résultats de la recherche si elle
+    /// est active).
+    pub(crate) fn scroll_to_commit(&mut self, oid: Oid) {
+        if let Some(&row) = self.history.index.get(&oid) {
             let row = match &self.history.filtered {
                 Some(f) => f.iter().position(|&i| i == row).unwrap_or(0),
                 None => row,
             };
             self.history.scroll_to = Some(row);
         }
-        self.load_details(shared, oid);
     }
 
     pub(crate) fn select_external(&mut self, shared: &Shared, oid: Oid, label: String) {

@@ -99,6 +99,7 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Ctrl+Entrée | Commit (dans la zone de message) |
 | Espace / Entrée, Suppr | Indexer/désindexer, annuler (liste des fichiers) |
 | ↑ / ↓, Page préc./suiv., Début/Fin | Naviguer dans l'historique |
+| ← / → | Historique : replier / déplier la fusion sélectionnée |
 
 ## Langue
 

@@ -102,7 +102,7 @@ impl RepoTab {
             self.view = RepoView::Changes;
             self.ensure_change_selected(shared);
         }
-        let commits = self.history.commits.len();
+        let commits = self.history.loaded.commits.len();
         if nav_item(ui, icons::GIT_COMMIT, tr!("Tous les commits"), 0, self.view == RepoView::History, p)
             .on_hover_text(trn!(commits, "{n} commit chargé", "{n} commits chargés"))
             .clicked()

@@ -31,7 +31,8 @@ impl RepoTab {
         egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| self.commit_table(ui, shared, p));
     }
 
-    fn apply_filter(&mut self) {
+    /// Recherche dans la liste affichée (les commits des fusions repliées n'y sont pas).
+    pub(super) fn apply_filter(&mut self) {
         let f = self.history.filter.trim().to_string();
         if f == self.history.filter_applied {
             return;
@@ -192,6 +193,9 @@ impl RepoTab {
         hdr(ui, cols.date.left(), "Date");
         hdr(ui, cols.sha.left(), "Commit");
 
+        // Fusion à replier (`true`) ou déplier, demandé par ← / →, son triangle ou son menu contextuel : appliqué après
+        // le dessin, qui utilise la liste et le graphe de cette image.
+        let mut fold: Option<(dragontree_git::Oid, bool)> = None;
         // Navigation clavier (quand aucun champ n'a le focus).
         let selected_row = self.history.selected.and_then(|oid| {
             let i = *self.history.index.get(&oid)?;
@@ -201,7 +205,7 @@ impl RepoTab {
             }
         });
         if self.view == RepoView::History && ui.ctx().memory(|m| m.focused().is_none()) && self.dialog.is_none() {
-            let (down, up, pgdn, pgup, home, end) = ui.ctx().input(|i| {
+            let (down, up, pgdn, pgup, home, end, left, right) = ui.ctx().input(|i| {
                 (
                     i.key_pressed(Key::ArrowDown),
                     i.key_pressed(Key::ArrowUp),
@@ -209,8 +213,19 @@ impl RepoTab {
                     i.key_pressed(Key::PageUp),
                     i.key_pressed(Key::Home),
                     i.key_pressed(Key::End),
+                    i.key_pressed(Key::ArrowLeft),
+                    i.key_pressed(Key::ArrowRight),
                 )
             });
+            // ← replie, → déplie la fusion sélectionnée.
+            if let Some(r) = selected_row
+                && left != right
+            {
+                let c = &commits[filtered.as_ref().map_or(r, |f| f[r])];
+                if c.parents.len() > 1 {
+                    fold = Some((c.id, left));
+                }
+            }
             let page = (self.history.viewport_height / ROW_H).max(1.0) as usize;
             let target = match selected_row {
                 Some(r) if down => Some((r + 1).min(rows - 1)),
@@ -237,6 +252,7 @@ impl RepoTab {
         let labels = self.refs.as_ref().map(|r| r.labels.clone()).unwrap_or_default();
         let visibility = LabelVisibility::of(shared, &self.path);
         let lost = self.history.lost.clone();
+        let folded = self.history.folded.clone();
         let now = widgets::now_ts();
 
         let mut area = egui::ScrollArea::vertical().id_salt(("history-rows", self.id)).auto_shrink([false, false]);
@@ -276,6 +292,15 @@ impl RepoTab {
                     labels.get(&c.id).map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect()).unwrap_or_default();
                 let is_lost = lost.contains(&c.id);
                 let stash = self.stashes.iter().find(|s| s.oid == c.id);
+                let collapsed = (c.parents.len() > 1).then(|| self.history.folding.is_collapsed(c.id));
+                if let Some(collapsed) = collapsed {
+                    let toggle = FoldToggle { oid: c.id, summary: &c.summary, collapsed, selected };
+                    let (w, toggled) = paint_fold_toggle(ui, &painter, rect, x, &toggle, folded.get(&c.id), p);
+                    if toggled {
+                        fold = Some((c.id, !collapsed));
+                    }
+                    x += w;
+                }
                 if let Some(s) = stash {
                     let text = format!("{} stash@{{{}}}", icons::STACK, s.index);
                     let family = egui::FontFamily::Proportional;
@@ -359,7 +384,21 @@ impl RepoTab {
                 let stash_menu = stash.map(|s| super::scope::stash_label(s.index, &s.message));
                 resp.context_menu(|ui| match &stash_menu {
                     Some(label) => self.stash_menu(ui, shared, oid, label),
-                    None => self.commit_menu(ui, shared, oid, &summary),
+                    None => {
+                        if let Some(collapsed) = collapsed {
+                            let (icon, text) = if collapsed {
+                                (icons::ARROWS_OUT_LINE_VERTICAL, tr!("Déplier la fusion"))
+                            } else {
+                                (icons::ARROWS_IN_LINE_VERTICAL, tr!("Replier la fusion"))
+                            };
+                            if ui.button(format!("{icon} {text}")).clicked() {
+                                fold = Some((oid, !collapsed));
+                                ui.close();
+                            }
+                            ui.separator();
+                        }
+                        self.commit_menu(ui, shared, oid, &summary)
+                    }
                 });
             }
             if show_graph {
@@ -370,6 +409,9 @@ impl RepoTab {
             }
         });
         self.history.viewport_height = out.inner_rect.height();
+        if let Some((merge, collapse)) = fold {
+            self.set_merge_collapsed(shared, merge, collapse);
+        }
         if let Some(r) = clicked {
             let idx = filtered.as_ref().map_or(r, |f| f[r]);
             let oid = commits[idx].id;
@@ -412,6 +454,57 @@ impl Columns {
         let desc = Rect::from_x_y_ranges(graph.right()..=author.left().max(graph.right() + 40.0), r.y_range());
         Columns { graph, desc, author, date, sha }
     }
+}
+
+/// Ligne de fusion dont on dessine le triangle.
+struct FoldToggle<'a> {
+    oid: dragontree_git::Oid,
+    summary: &'a str,
+    collapsed: bool,
+    selected: bool,
+}
+
+/// Triangle qui replie ou déplie une fusion, suivi, si elle est repliée, du nombre de commits qu'elle masque ;
+/// renvoie la largeur occupée et si le triangle a été cliqué.
+fn paint_fold_toggle(
+    ui: &Ui,
+    painter: &egui::Painter,
+    row: Rect,
+    x: f32,
+    t: &FoldToggle,
+    hidden: Option<&usize>,
+    p: &Palette,
+) -> (f32, bool) {
+    let caret = Rect::from_min_size(egui::pos2(x - 4.0, row.top() + 2.0), egui::vec2(16.0, ROW_H - 4.0));
+    // Dessiné par-dessus la ligne : un clic sur le triangle ne sélectionne pas le commit.
+    let resp = ui.interact(caret, ui.scope_id().with(("fold-merge", t.oid)), Sense::click());
+    let summary = t.summary;
+    let label = if t.collapsed { tr!("Déplier : {summary}", summary) } else { tr!("Replier : {summary}", summary) };
+    widgets::a11y(&resp, &label, true);
+    let color = if resp.hovered() {
+        p.text
+    } else if t.selected {
+        p.selection_text
+    } else {
+        p.weak
+    };
+    let icon = if t.collapsed { icons::CARET_RIGHT } else { icons::CARET_DOWN };
+    painter.text(caret.center(), Align2::CENTER_CENTER, icon, FontId::proportional(11.0), color);
+    let tip = if t.collapsed { tr!("Déplier la fusion (→)") } else { tr!("Replier la fusion (←)") };
+    let clicked = resp.on_hover_text(tip).clicked();
+    let mut w = caret.width();
+    if let Some(&n) = hidden.filter(|&&n| t.collapsed && n > 0) {
+        let text = trn!(n, "{n} commit replié", "{n} commits repliés");
+        let pos = egui::pos2(x + w, row.top() + 3.5);
+        let badge =
+            paint_badge(ui, painter, pos, text.clone(), (p.hover, p.weak), egui::FontFamily::Proportional, false);
+        // Lisible par l'accessibilité, comme un libellé.
+        let id = ui.scope_id().with(("folded-count", t.oid));
+        let info = ui.interact(Rect::from_min_size(pos, egui::vec2(badge, 17.0)), id, Sense::hover());
+        info.widget_info(move || egui::WidgetInfo::labeled(egui::Role::Label, true, text.clone()));
+        w += badge + 4.0;
+    }
+    (w, clicked)
 }
 
 /// Étiquette « perdu » d'un commit que seul le reflog atteint ; renvoie sa largeur.

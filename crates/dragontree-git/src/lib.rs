@@ -4,6 +4,7 @@
 //! appelé avec des tableaux d'arguments — jamais via un shell — et des sorties `-z`.
 
 pub mod blame;
+pub mod collapse;
 pub mod conflict;
 pub mod diff;
 pub mod discovery;
@@ -23,6 +24,7 @@ pub mod ssh;
 pub mod stash;
 pub mod status;
 
+pub use collapse::{CollapsedLog, collapse_merges};
 pub use diff::{ChangeKind, DiffLine, DiffOptions, FileChange, FileDiff, Hunk, LineKind};
 pub use error::GitError;
 pub use graph::{Edge, GraphBuilder, GraphLayout, GraphRow};

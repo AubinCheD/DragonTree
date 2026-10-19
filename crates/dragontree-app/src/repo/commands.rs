@@ -26,6 +26,8 @@ impl RepoTab {
             Command::Pull | Command::Push => has_remote && on_branch,
             Command::Stash => self.status.as_ref().is_some_and(|s| !s.is_clean()),
             Command::NewBranch | Command::NewTag => self.refs.is_some(),
+            Command::CollapseAllMerges => !self.history.folding.is_all(),
+            Command::ExpandAllMerges => !self.history.folding.is_none(),
             Command::OpenVsCode => crate::util::vscode_available(),
             _ => true,
         }
@@ -66,6 +68,8 @@ impl RepoTab {
             }
             Command::ShowHiddenRefs => self.show_all_hidden(shared),
             Command::ShowLostCommits => self.set_show_lost(shared, !self.history.show_lost),
+            Command::CollapseAllMerges => self.collapse_all_merges(shared),
+            Command::ExpandAllMerges => self.expand_all_merges(shared),
             Command::Refresh => self.refresh(shared, Refresh::ALL),
             Command::Fetch => self.op_fetch(shared, None, true, false),
             Command::Pull => self.open_pull_dialog(shared),

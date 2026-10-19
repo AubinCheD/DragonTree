@@ -57,6 +57,10 @@ pub enum Command {
     ShowHiddenRefs,
     /// Ajoute au graphe les commits que seul le reflog atteint (propre à l'onglet).
     ShowLostCommits,
+    /// Replie toutes les fusions de l'historique (propre à l'onglet).
+    CollapseAllMerges,
+    /// Déplie toutes les fusions de l'historique.
+    ExpandAllMerges,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -129,6 +133,9 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::ShowStashes),
             Cmd(Command::ShowHiddenRefs),
             Cmd(Command::ShowLostCommits),
+            Separator,
+            Cmd(Command::CollapseAllMerges),
+            Cmd(Command::ExpandAllMerges),
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
@@ -224,6 +231,8 @@ impl Command {
         Command::ShowStashes,
         Command::ShowHiddenRefs,
         Command::ShowLostCommits,
+        Command::CollapseAllMerges,
+        Command::ExpandAllMerges,
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -273,6 +282,8 @@ impl Command {
             Command::ShowStashes => tr!("Afficher les stashs"),
             Command::ShowHiddenRefs => tr!("Réafficher toutes les branches masquées"),
             Command::ShowLostCommits => tr!("Commits perdus"),
+            Command::CollapseAllMerges => tr!("Replier toutes les fusions"),
+            Command::ExpandAllMerges => tr!("Déplier toutes les fusions"),
             Command::ZoomIn => tr!("Zoom avant"),
             Command::ZoomOut => tr!("Zoom arrière"),
             Command::ZoomReset => tr!("Taille par défaut"),
@@ -322,6 +333,8 @@ impl Command {
             Command::ShowStashes => icons::STACK,
             Command::ShowHiddenRefs => icons::EYE,
             Command::ShowLostCommits => icons::GHOST,
+            Command::CollapseAllMerges => icons::ARROWS_IN_LINE_VERTICAL,
+            Command::ExpandAllMerges => icons::ARROWS_OUT_LINE_VERTICAL,
             Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
             Command::ZoomOut => icons::MAGNIFYING_GLASS_MINUS,
             Command::ZoomReset => icons::MAGNIFYING_GLASS,
@@ -373,6 +386,8 @@ impl Command {
             | Command::RevealHead
             | Command::ShowHiddenRefs
             | Command::ShowLostCommits
+            | Command::CollapseAllMerges
+            | Command::ExpandAllMerges
             | Command::Refresh
             | Command::Fetch
             | Command::Pull
