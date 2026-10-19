@@ -36,6 +36,10 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   initialisé est reconnu), démarrer une feature, une release ou un hotfix, et terminer la branche courante : fusions
   `--no-ff`, tag annoté « Version x » pour une release ou un hotfix, suppression facultative (jamais forcée) ; sur
   conflit la suite s'arrête dans l'état de fusion de git et le message dit ce qui reste à faire.
+- **Git LFS** (Dépôt › Git LFS, entrées grisées si `git lfs` est absent) : initialiser dans le dépôt (`git lfs install --local`,
+  jamais global), suivre ou ne plus suivre un motif (liste lue dans `.gitattributes`), fetch, pull et prune avec progression et
+  annulation, fenêtre des verrous (verrouiller, déverrouiller, forcer après confirmation) ; les fichiers gérés par LFS portent
+  une icône dans la vue Changements.
 - **Patchs** : appliquer un patch (fichier, glisser-déposer d'un `.patch`/`.diff`, texte collé) avec aperçu des fichiers
   touchés et vérification, vers la copie de travail, l'index ou en commits (`git am`, patchs `format-patch`) ; **enregistrer
   comme patch** (commit, commits jusqu'à HEAD en un fichier par commit, stash, fichiers sélectionnés) ou le copier.
@@ -177,6 +181,6 @@ des fichiers `tests/live*.rs`.
 ## Limites connues et suite
 
 - **À venir** : vue centralisée des pull requests de tous les comptes (l'architecture des forges est prête).
-- Non gérés pour l'instant : Git LFS (au-delà de ce que fait git lui-même), commandes personnalisées,
+- Non gérés pour l'instant : commandes personnalisées,
   icône intégrée à l'exécutable.
 - Dépôts SHA-256 non pris en charge.

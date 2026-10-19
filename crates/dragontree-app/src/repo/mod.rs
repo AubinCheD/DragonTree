@@ -16,6 +16,7 @@ mod graph_paint;
 mod history;
 mod ignore;
 mod image_diff;
+mod lfs;
 mod patches;
 mod rebase_ui;
 mod repo_settings;
@@ -260,6 +261,7 @@ struct Gens {
     work_diff: u64,
     patch: u64,
     compare: u64,
+    lfs_locks: u64,
     repo_settings: u64,
     ignore: u64,
     template: u64,
@@ -269,17 +271,23 @@ struct Gens {
 /// premier d'entre eux dans la liste.
 type DetailsData = (CommitInfo, Vec<FileChange>, Option<(usize, Oid)>);
 
-/// Réglages de dépôt lus avec les stashs, remotes et sous-modules : Git Flow (clés `gitflow.*`).
+/// Réglages de dépôt lus avec les stashs, remotes et sous-modules : Git Flow (clés `gitflow.*`) et motifs suivis
+/// par Git LFS (`.gitattributes`).
 #[derive(Debug, Default)]
 pub struct Integrations {
     pub gitflow: Option<GitFlowConfig>,
+    pub lfs_patterns: Vec<String>,
 }
+
+/// État lu à chaque rafraîchissement du statut : les fichiers, l'opération en cours, la session de bisect et
+/// ceux des fichiers listés que Git LFS gère.
+pub type StatusData = (StatusSnapshot, OpState, Option<BisectState>, HashSet<String>);
 
 /// Événements des tâches d'arrière-plan de l'onglet.
 pub enum RepoEvent {
     Opened(Result<Arc<Repo>, GitError>),
     Refs(u64, Result<RefsSnapshot, GitError>),
-    Status(u64, Result<(StatusSnapshot, OpState, Option<BisectState>), GitError>),
+    Status(u64, Result<StatusData, GitError>),
     Log {
         generation: u64,
         complete: bool,
@@ -322,6 +330,8 @@ pub enum RepoEvent {
     LastMessage(String),
     Blame(blame::BlameEvent),
     Compare(compare::CompareEvent),
+    /// Verrous Git LFS lus sur le serveur pour la fenêtre des verrous.
+    LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
     RebaseList(Result<Vec<Commit>, GitError>),
     Images {
         history: bool,
@@ -358,6 +368,12 @@ pub struct RepoTab {
     pub worktrees: Arc<Vec<Worktree>>,
     /// Configuration de Git Flow, `None` tant que le dépôt n'est pas initialisé (lue avec les stashs, remotes…).
     pub gitflow: Option<GitFlowConfig>,
+    /// Motifs suivis par Git LFS (`.gitattributes` de la racine, lus avec les stashs, remotes…).
+    pub lfs_patterns: Vec<String>,
+    /// Fichiers de la vue Changements que Git LFS gère (marqués d'une icône).
+    pub lfs_files: HashSet<String>,
+    /// Fenêtre des verrous Git LFS ouverte.
+    pub lfs_locks: Option<lfs::LfsLocksWindow>,
     pub view: RepoView,
     pub history: HistoryState,
     pub changes: ChangesState,
@@ -403,6 +419,9 @@ impl RepoTab {
             submodules: Arc::new(Vec::new()),
             worktrees: Arc::new(Vec::new()),
             gitflow: None,
+            lfs_patterns: Vec::new(),
+            lfs_files: HashSet::new(),
+            lfs_locks: None,
             view: RepoView::History,
             history: HistoryState::default(),
             changes: ChangesState { push_after: shared.settings.push_after_commit, ..Default::default() },
@@ -507,7 +526,11 @@ impl RepoTab {
             // Le réglage est lu ici : le thread de travail ne touche pas aux réglages.
             let show_ignored = shared.settings.show_ignored_files;
             shared.jobs.spawn("status", move || {
-                let res = r.status_with_ignored(show_ignored).map(|s| (s, r.operation_state(), r.bisect_state()));
+                let res = r.status_with_ignored(show_ignored).map(|s| {
+                    let paths: Vec<String> = s.entries.iter().map(|e| e.path.clone()).collect();
+                    let lfs = r.lfs_files(&paths);
+                    (s, r.operation_state(), r.bisect_state(), lfs)
+                });
                 Some(AppEvent::Repo(id, RepoEvent::Status(g, res)))
             });
         }
@@ -519,7 +542,10 @@ impl RepoTab {
                 let remotes = r.remotes().unwrap_or_default();
                 let subs = r.submodules().unwrap_or_default();
                 let worktrees = r.worktrees().unwrap_or_default();
-                let integrations = Integrations { gitflow: r.gitflow_config().unwrap_or_default() };
+                let integrations = Integrations {
+                    gitflow: r.gitflow_config().unwrap_or_default(),
+                    lfs_patterns: r.lfs_patterns().unwrap_or_default(),
+                };
                 Some(AppEvent::Repo(
                     id,
                     RepoEvent::Extras(g, stashes, remotes, subs, worktrees, Box::new(integrations)),
@@ -742,8 +768,9 @@ impl RepoTab {
                 Err(e) => shared.toast(Toast::error(tr!("Lecture des branches impossible"), e.to_string())),
             },
             RepoEvent::Status(g, res) if g == self.gens.status => match res {
-                Ok((status, op, bisect)) => {
+                Ok((status, op, bisect, lfs)) => {
                     self.bisect = bisect;
+                    self.lfs_files = lfs;
                     self.op_state = op;
                     self.status = Some(Arc::new(status));
                     self.quick_dirty = true;
@@ -801,6 +828,7 @@ impl RepoTab {
                 self.submodules = Arc::new(subs);
                 self.worktrees = Arc::new(worktrees);
                 self.gitflow = integrations.gitflow;
+                self.lfs_patterns = integrations.lfs_patterns;
             }
             RepoEvent::Details(g, oid, res) if g == self.gens.details => {
                 self.history.details_loading = false;
@@ -889,6 +917,7 @@ impl RepoTab {
                     Err(e) => shared.toast(Toast::error(tr!("{title} a échoué", title), e.to_string())),
                 }
                 self.refresh(shared, refresh);
+                self.after_lfs_op(shared, id);
                 if self.open_after_op.as_ref().is_some_and(|(op, _)| *op == id)
                     && let Some((_, path)) = self.open_after_op.take()
                     && succeeded
@@ -922,6 +951,7 @@ impl RepoTab {
                 }
             }
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
+            RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
             RepoEvent::RebaseList(res) => match res {
                 Ok(list) => {
                     if let Some(editor) = &mut self.rebase {
@@ -1138,6 +1168,7 @@ impl RepoTab {
         {
             self.compare = None;
         }
+        self.lfs_locks_window(&ctx, shared, &p);
         self.rebase_window(&ctx, shared, &p);
         self.conflict_window(&ctx, shared, &p);
     }

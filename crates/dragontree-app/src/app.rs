@@ -35,6 +35,8 @@ pub enum AppEvent {
     Clone(CloneEvent),
     Trusted(PathBuf, Result<(), GitError>),
     Initialized(PathBuf, Result<(), GitError>),
+    /// Résultat de la détection de `git lfs`.
+    LfsDetected(bool),
 }
 
 /// Demandes des vues à l'application (traitées après l'affichage).
@@ -83,6 +85,8 @@ pub struct Shared {
     /// Dernier mode choisi dans le dialogue de pull pendant la session (`true` : rebase) : le dialogue suivant
     /// et le pull rapide le reprennent.
     pub pull_rebase: bool,
+    /// Git LFS est installé : `None` tant que la détection (une fois par exécution, en tâche de fond) n'a pas répondu.
+    pub lfs: Option<bool>,
 }
 
 impl Shared {
@@ -108,6 +112,7 @@ impl Shared {
             profile_dir,
             ctx,
             pull_rebase: false,
+            lfs: None,
         };
         (shared, rx)
     }
@@ -214,6 +219,13 @@ impl DragonTreeApp {
         let (mut shared, rx) = Shared::new(ctx.clone(), settings, settings_store, start.profile_dir.clone(), git);
         if let Some(msg) = settings_error {
             shared.toasts.push(Toast::error(tr!("Réglages réinitialisés"), msg));
+        }
+        // Détection de git lfs : une fois, hors du thread de l'interface.
+        match shared.git.clone() {
+            Some(git) => shared
+                .jobs
+                .spawn("lfs-detect", move || Some(AppEvent::LfsDetected(dragontree_git::lfs_available(&git)))),
+            None => shared.lfs = Some(false),
         }
         if shared.git.is_none() {
             shared.toasts.push(Toast::error(
@@ -459,6 +471,7 @@ impl DragonTreeApp {
                         self.shared.toast(Toast::error(tr!("safe.directory n'a pas pu être ajouté"), e.to_string()))
                     }
                 },
+                AppEvent::LfsDetected(available) => self.shared.lfs = Some(available),
                 AppEvent::Initialized(path, result) => match result {
                     Ok(()) => self.shared.actions.push(AppAction::OpenRepo(path)),
                     Err(e) => self.shared.toast(Toast::error(tr!("Création du dépôt impossible"), e.to_string())),
@@ -569,7 +582,12 @@ impl DragonTreeApp {
             Some(TabKind::Repo(r)) if r.repo.is_some() => Some(r.as_ref()),
             _ => None,
         };
-        CommandContext { settings: &self.shared.settings, repo, can_reopen_tab: !self.closed_tabs.is_empty() }
+        CommandContext {
+            settings: &self.shared.settings,
+            repo,
+            can_reopen_tab: !self.closed_tabs.is_empty(),
+            lfs_available: self.shared.lfs,
+        }
     }
 
     /// Commandes proposées par la palette Ctrl+P : celles du registre utilisables en ce moment.

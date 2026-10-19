@@ -106,6 +106,16 @@ pub enum Command {
     GitFlowStartHotfix,
     /// Termine la feature, la release ou le hotfix de la branche courante.
     GitFlowFinish,
+    /// Active Git LFS dans ce dépôt (`git lfs install --local`).
+    LfsInstall,
+    /// Suit un motif de fichiers avec LFS (`git lfs track`).
+    LfsTrack,
+    LfsUntrack,
+    LfsFetch,
+    LfsPull,
+    LfsPrune,
+    /// Fenêtre des verrous LFS du serveur.
+    LfsLocks,
     OpenExplorer,
     OpenTerminal,
     OpenVsCode,
@@ -232,6 +242,21 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
                     Cmd(Command::GitFlowFinish),
                 ],
             ),
+            Submenu(
+                tr_mark!("Git LFS"),
+                &[
+                    Cmd(Command::LfsInstall),
+                    Separator,
+                    Cmd(Command::LfsTrack),
+                    Cmd(Command::LfsUntrack),
+                    Separator,
+                    Cmd(Command::LfsFetch),
+                    Cmd(Command::LfsPull),
+                    Cmd(Command::LfsPrune),
+                    Separator,
+                    Cmd(Command::LfsLocks),
+                ],
+            ),
             Separator,
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
@@ -269,6 +294,8 @@ pub struct CommandContext<'a> {
     pub repo: Option<&'a RepoTab>,
     /// Au moins un onglet fermé peut être rouvert.
     pub can_reopen_tab: bool,
+    /// Git LFS est installé : `None` tant que la détection n'a pas répondu.
+    pub lfs_available: Option<bool>,
 }
 
 impl Command {
@@ -332,6 +359,13 @@ impl Command {
         Command::GitFlowStartRelease,
         Command::GitFlowStartHotfix,
         Command::GitFlowFinish,
+        Command::LfsInstall,
+        Command::LfsTrack,
+        Command::LfsUntrack,
+        Command::LfsFetch,
+        Command::LfsPull,
+        Command::LfsPrune,
+        Command::LfsLocks,
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenVsCode,
@@ -403,6 +437,13 @@ impl Command {
             Command::GitFlowStartRelease => tr!("Démarrer une release…"),
             Command::GitFlowStartHotfix => tr!("Démarrer un hotfix…"),
             Command::GitFlowFinish => tr!("Terminer la branche Git Flow…"),
+            Command::LfsInstall => tr!("Initialiser Git LFS"),
+            Command::LfsTrack => tr!("Suivre un motif…"),
+            Command::LfsUntrack => tr!("Ne plus suivre…"),
+            Command::LfsFetch => tr!("Fetch LFS"),
+            Command::LfsPull => tr!("Pull LFS"),
+            Command::LfsPrune => tr!("Prune LFS"),
+            Command::LfsLocks => tr!("Verrous LFS…"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
             Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
@@ -423,6 +464,13 @@ impl Command {
             Command::GitFlowStartRelease => tr!("Git Flow : démarrer une release…"),
             Command::GitFlowStartHotfix => tr!("Git Flow : démarrer un hotfix…"),
             Command::GitFlowFinish => tr!("Git Flow : terminer la branche…"),
+            Command::LfsInstall => tr!("Git LFS : initialiser"),
+            Command::LfsTrack => tr!("Git LFS : suivre un motif…"),
+            Command::LfsUntrack => tr!("Git LFS : ne plus suivre un motif…"),
+            Command::LfsFetch => tr!("Git LFS : fetch"),
+            Command::LfsPull => tr!("Git LFS : pull"),
+            Command::LfsPrune => tr!("Git LFS : prune"),
+            Command::LfsLocks => tr!("Git LFS : verrous…"),
             _ => self.label(),
         }
     }
@@ -484,6 +532,13 @@ impl Command {
             | Command::GitFlowStartRelease
             | Command::GitFlowStartHotfix
             | Command::GitFlowFinish => icons::FLOW_ARROW,
+            Command::LfsInstall => icons::HARD_DRIVES,
+            Command::LfsTrack => icons::PLUS,
+            Command::LfsUntrack => icons::MINUS,
+            Command::LfsFetch => icons::CLOUD_ARROW_DOWN,
+            Command::LfsPull => icons::ARROW_LINE_DOWN,
+            Command::LfsPrune => icons::BROOM,
+            Command::LfsLocks => icons::LOCK,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenVsCode => icons::CODE,
@@ -552,6 +607,13 @@ impl Command {
             | Command::GitFlowStartRelease
             | Command::GitFlowStartHotfix
             | Command::GitFlowFinish
+            | Command::LfsInstall
+            | Command::LfsTrack
+            | Command::LfsUntrack
+            | Command::LfsFetch
+            | Command::LfsPull
+            | Command::LfsPrune
+            | Command::LfsLocks
             | Command::OpenExplorer
             | Command::OpenTerminal
             | Command::OpenVsCode
@@ -617,9 +679,36 @@ impl Command {
         )
     }
 
+    /// Commande de Git LFS : grisée tant que `git lfs` n'est pas détecté.
+    fn is_lfs(self) -> bool {
+        matches!(
+            self,
+            Command::LfsInstall
+                | Command::LfsTrack
+                | Command::LfsUntrack
+                | Command::LfsFetch
+                | Command::LfsPull
+                | Command::LfsPrune
+                | Command::LfsLocks
+        )
+    }
+
+    /// Pourquoi la commande est indisponible quand ce n'est pas à cause de l'onglet (infobulle d'une entrée
+    /// grisée) : Git LFS absent ou pas encore détecté.
+    pub fn disabled_hint(self, cx: &CommandContext) -> Option<&'static str> {
+        match (self.is_lfs(), cx.lfs_available) {
+            (true, Some(false)) => Some(tr!("Git LFS n'est pas installé (la commande « git lfs » est introuvable).")),
+            (true, None) => Some(tr!("Détection de Git LFS en cours…")),
+            _ => None,
+        }
+    }
+
     /// La commande est utilisable (sinon son entrée est grisée et elle ne fait rien) : une commande de dépôt
     /// demande un dépôt ouvert dans l'onglet actif, puis ce que l'onglet exige (`RepoTab::can_run`).
     pub fn enabled(self, cx: &CommandContext) -> bool {
+        if self.is_lfs() && cx.lfs_available != Some(true) {
+            return false;
+        }
         match self.scope() {
             Scope::App => self != Command::ReopenClosedTab || cx.can_reopen_tab,
             // Rien à réafficher : l'entrée est grisée.
@@ -652,6 +741,14 @@ impl Command {
             _ => None,
         }
     }
+}
+
+/// Pourquoi un sous-menu est grisé : toutes ses commandes le sont et l'une d'elles en donne la raison (Git LFS
+/// absent). Un sous-menu dont les commandes sont grisées pour une autre raison reste ouvrable.
+pub fn submenu_disabled_hint(items: &[MenuItem], cx: &CommandContext) -> Option<&'static str> {
+    let mut commands = items.iter().filter_map(|item| if let Cmd(cmd) = item { Some(*cmd) } else { None });
+    let all_disabled = commands.clone().all(|cmd| !cmd.enabled(cx));
+    all_disabled.then(|| commands.find_map(|cmd| cmd.disabled_hint(cx))).flatten()
 }
 
 /// Raccourcis du registre dans l'ordre où les consommer. egui fait correspondre un raccourci à un appui qui
@@ -751,12 +848,48 @@ mod tests {
         }
     }
 
+    /// Sous-menu du menu Dépôt, par son titre.
+    fn repository_submenu(title: &str) -> &'static [MenuItem] {
+        let (_, items) = MENUS.iter().find(|(t, _)| *t == tr_mark!("Dépôt")).unwrap();
+        items
+            .iter()
+            .find_map(|item| match item {
+                Submenu(t, sub) if *t == title => Some(*sub),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("sous-menu {title} absent"))
+    }
+
+    #[test]
+    fn the_lfs_submenu_is_greyed_with_a_reason_while_git_lfs_is_missing_or_not_detected() {
+        let settings = Settings::default();
+        let cx =
+            |lfs_available| CommandContext { settings: &settings, repo: None, can_reopen_tab: false, lfs_available };
+        let lfs = repository_submenu(tr_mark!("Git LFS"));
+        let missing = submenu_disabled_hint(lfs, &cx(Some(false))).expect("grisé quand git lfs est absent");
+        assert!(missing.contains("Git LFS"), "{missing}");
+        assert!(submenu_disabled_hint(lfs, &cx(None)).is_some(), "grisé tant que la détection n'a pas répondu");
+        // git lfs présent : le sous-menu s'ouvre (ses entrées dépendent ensuite de l'onglet).
+        assert_eq!(submenu_disabled_hint(lfs, &cx(Some(true))), None);
+        // Chaque commande LFS est inutilisable sans git lfs, même avec un dépôt ouvert ailleurs dans le contexte.
+        for item in lfs {
+            if let Cmd(cmd) = item {
+                assert!(!cmd.enabled(&cx(Some(false))), "{cmd:?} doit être grisée sans git lfs");
+                assert!(cmd.disabled_hint(&cx(Some(false))).is_some());
+            }
+        }
+        // Les autres sous-menus ne sont jamais grisés pour cette raison.
+        assert_eq!(submenu_disabled_hint(repository_submenu(tr_mark!("Git Flow")), &cx(Some(false))), None);
+    }
+
     #[test]
     fn git_flow_and_lfs_commands_name_their_family_in_the_palette() {
         for cmd in Command::ALL {
             let label = format!("{cmd:?}");
             let family = if label.starts_with("GitFlow") {
                 "Git Flow"
+            } else if label.starts_with("Lfs") {
+                "Git LFS"
             } else {
                 continue;
             };

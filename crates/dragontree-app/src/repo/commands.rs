@@ -41,6 +41,11 @@ impl RepoTab {
                 self.gitflow.is_some() && self.refs.is_some() && self.op_state == OpState::None
             }
             Command::GitFlowFinish => self.current_flow_branch().is_some() && self.op_state == OpState::None,
+            // Git LFS : l'extension elle-même est vérifiée par le registre (`Command::enabled`).
+            Command::LfsInstall | Command::LfsTrack | Command::LfsPrune => self.refs.is_some(),
+            Command::LfsUntrack => !self.lfs_patterns.is_empty(),
+            Command::LfsFetch | Command::LfsLocks => has_remote,
+            Command::LfsPull => has_remote && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
             Command::OpenVsCode => crate::util::vscode_available(),
@@ -129,6 +134,13 @@ impl RepoTab {
             Command::GitFlowStartRelease => self.open_gitflow_start(FlowKind::Release),
             Command::GitFlowStartHotfix => self.open_gitflow_start(FlowKind::Hotfix),
             Command::GitFlowFinish => self.open_gitflow_finish(),
+            Command::LfsInstall => self.op_lfs_install(shared),
+            Command::LfsTrack => self.open_lfs_track(),
+            Command::LfsUntrack => self.open_lfs_untrack(),
+            Command::LfsFetch => self.op_lfs_fetch(shared),
+            Command::LfsPull => self.op_lfs_pull(shared),
+            Command::LfsPrune => self.op_lfs_prune(shared),
+            Command::LfsLocks => self.open_lfs_locks(shared),
             Command::RepoSettings => self.open_repo_settings(shared),
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),

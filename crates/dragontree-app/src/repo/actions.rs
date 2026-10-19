@@ -21,7 +21,24 @@ pub struct OpOptions {
     pub silent: bool,
 }
 
+/// Variables d'environnement qui authentifient git avec le jeton du compte (vide sans compte ni jeton). Lit le
+/// gestionnaire d'identifiants : à appeler depuis une tâche de fond.
+pub(crate) fn auth_env(account: Option<&dragontree_forges::Account>) -> Vec<(String, String)> {
+    if let Some(acc) = account
+        && let Ok(Some(token)) = dragontree_forges::secrets::load_token(&acc.id)
+    {
+        return dragontree_forges::git_auth_env(acc, &token);
+    }
+    Vec::new()
+}
+
 impl RepoTab {
+    /// Compte associé au dépôt, dont le jeton authentifie les opérations réseau.
+    pub(crate) fn net_account(&self, shared: &Shared) -> Option<dragontree_forges::Account> {
+        let settings = &shared.settings;
+        settings.account_for_repo(&self.workdir()).or_else(|| settings.account_for_repo(&self.path)).cloned()
+    }
+
     pub(crate) fn run_op(&mut self, shared: &Shared, title: &str, refresh: Refresh, opts: OpOptions, f: Box<OpFn>) {
         let Some(repo) = self.repo.clone() else { return };
         self.next_op_id += 1;
@@ -34,21 +51,10 @@ impl RepoTab {
             cancel: cancel.clone(),
             silent: opts.silent,
         });
-        let account = if opts.network {
-            let settings = &shared.settings;
-            settings.account_for_repo(&self.workdir()).or_else(|| settings.account_for_repo(&self.path)).cloned()
-        } else {
-            None
-        };
+        let account = if opts.network { self.net_account(shared) } else { None };
         let (sender, tab, title) = (shared.jobs.sender(), self.id, title.to_string());
         self.worker.submit(move || {
-            let mut env = Vec::new();
-            if let Some(acc) = &account
-                && let Ok(Some(token)) = dragontree_forges::secrets::load_token(&acc.id)
-            {
-                env = dragontree_forges::git_auth_env(acc, &token);
-            }
-            let net = NetOptions { env, cancel, non_interactive: opts.silent };
+            let net = NetOptions { env: auth_env(account.as_ref()), cancel, non_interactive: opts.silent };
             let progress_sender = sender.clone();
             let mut last = Instant::now() - Duration::from_secs(1);
             let mut on_progress = |p: Progress| {

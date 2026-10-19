@@ -138,7 +138,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | R11 | .gitignore : ajouter un motif avec un aperçu des fichiers concernés (« Ignorer » existe déjà) | ✅ |
 | R12 | Bisect (bon, mauvais, passer, bandeau d'état) | ✅ |
 | R13 | Git Flow (initialiser, start/finish feature, release, hotfix) | ✅ |
-| R14 | Git LFS (init, track, fetch/pull/prune, verrous) | 🆕 G |
+| R14 | Git LFS (init, track, fetch/pull/prune, verrous) | ✅ |
 | R15 | Commandes personnalisées (sur le dépôt, une branche, un commit ou un fichier ; script ou URL) | 🆕 G |
 | R16 | Fast-forward ou push de plusieurs branches à la fois ; sélection des branches périmées à supprimer | 🆕 P |
 | R17 | Remettre un fichier dans son état à un commit donné | 🆕 P |

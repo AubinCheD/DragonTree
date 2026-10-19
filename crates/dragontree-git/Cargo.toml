@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 dragontree-i18n.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 ignore.workspace = true
 smallvec.workspace = true
 

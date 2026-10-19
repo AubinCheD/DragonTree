@@ -297,8 +297,23 @@ impl RepoTab {
                     let selected = self.changes.multi.contains(&key);
                     let (letter, color, label) = status_letter(e, side, p);
                     let orig = if side == Side::Staged { e.orig_path.as_deref() } else { None };
-                    let resp =
-                        file_row(ui, (side, &e.path), letter, color, &e.path, orig, selected, p).on_hover_text(label);
+                    let resp = file_row(ui, (side, &e.path), letter, color, &e.path, orig, selected, p);
+                    // Fichier géré par Git LFS : icône à droite de la ligne.
+                    let resp = if self.lfs_files.contains(&e.path) {
+                        ui.painter().text(
+                            resp.rect.right_center() - egui::vec2(14.0, 0.0),
+                            egui::Align2::CENTER_CENTER,
+                            icons::HARD_DRIVES,
+                            egui::FontId::proportional(13.0),
+                            p.weak,
+                        );
+                        resp.on_hover_text(format!(
+                            "{label} — {}",
+                            tr!("fichier géré par Git LFS (pointeur dans le dépôt)")
+                        ))
+                    } else {
+                        resp.on_hover_text(label)
+                    };
                     if resp.double_clicked() {
                         clicked = Some((i, true));
                     } else if resp.clicked() || resp.secondary_clicked() && !selected {

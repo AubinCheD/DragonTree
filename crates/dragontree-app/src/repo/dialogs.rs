@@ -22,6 +22,8 @@ pub enum ConfirmAction {
     AbortOp(OpState),
     /// Ouvrir le worktree où la branche demandée est déjà sortie.
     OpenWorktree(PathBuf),
+    /// Lever le verrou LFS d'un fichier même s'il appartient à quelqu'un d'autre (`git lfs unlock --force`).
+    LfsForceUnlock(String),
 }
 
 /// Libellé de l'abandon d'une opération en cours (bandeau et confirmation).
@@ -46,7 +48,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// dans `path` (`old` pour le déplacement) ; `Ignore` : motif, fichier cible et aperçu des fichiers concernés ;
 /// `GitFlowInit` : réglages de Git Flow à écrire ; `GitFlowStart` : nature et nom court de la branche à créer ;
 /// `GitFlowFinish` : branche de travail à terminer (nature, nom court), `delete_branch` demande de la supprimer ensuite
-/// (jamais forcé).
+/// (jamais forcé) ; `LfsTrack` : motif à suivre avec Git LFS ; `LfsUntrack` : motif suivi à retirer (choisi dans la
+/// liste des motifs du `.gitattributes`).
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -84,6 +87,8 @@ pub enum Dialog {
     GitFlowInit(Box<GitFlowConfig>),
     GitFlowStart { kind: FlowKind, name: String },
     GitFlowFinish { kind: FlowKind, name: String, delete_branch: bool },
+    LfsTrack { pattern: String },
+    LfsUntrack { pattern: String },
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
     Confirm { title: String, text: String, action: ConfirmAction },
 }
@@ -161,12 +166,19 @@ impl Dialog {
             Dialog::GitFlowFinish { .. } => {
                 (tr!("Terminer la branche Git Flow").into(), tr!("Terminer la branche").into(), false)
             }
+            Dialog::LfsTrack { .. } => (tr!("Suivre un motif avec Git LFS").into(), tr!("Suivre").into(), false),
+            Dialog::LfsUntrack { .. } => {
+                (tr!("Ne plus suivre avec Git LFS").into(), tr!("Ne plus suivre").into(), false)
+            }
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
             Dialog::Confirm { title, action: ConfirmAction::CheckoutDetached(_), .. } => {
                 (title.clone(), tr!("Continuer").into(), false)
             }
             Dialog::Confirm { title, action: ConfirmAction::AbortOp(state), .. } => {
                 (title.clone(), abort_label(*state).into(), true)
+            }
+            Dialog::Confirm { title, action: ConfirmAction::LfsForceUnlock(_), .. } => {
+                (title.clone(), tr!("Forcer le déverrouillage").into(), true)
             }
             Dialog::Confirm { title, action: ConfirmAction::OpenWorktree(_), .. } => {
                 (title.clone(), tr!("Ouvrir le worktree").into(), false)
@@ -541,6 +553,8 @@ impl RepoTab {
             Dialog::GitFlowFinish { kind, name, delete_branch } => {
                 self.gitflow_finish_body(ui, *kind, name, delete_branch, p)
             }
+            Dialog::LfsTrack { pattern } => self.lfs_track_body(ui, pattern, p),
+            Dialog::LfsUntrack { pattern } => self.lfs_untrack_body(ui, pattern, p),
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
@@ -679,6 +693,8 @@ impl RepoTab {
             Dialog::GitFlowFinish { kind, name, delete_branch } => {
                 self.op_gitflow_finish(shared, kind, name, delete_branch)
             }
+            Dialog::LfsTrack { pattern } => self.op_lfs_track(shared, pattern),
+            Dialog::LfsUntrack { pattern } => self.op_lfs_untrack(shared, pattern),
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
             Dialog::Confirm { action, .. } => match action {
                 ConfirmAction::CheckoutDetached(oid) => self.op_checkout(shared, oid.to_hex()),
@@ -689,6 +705,7 @@ impl RepoTab {
                     });
                 }
                 ConfirmAction::OpenWorktree(path) => shared.actions.push(AppAction::OpenRepo(path)),
+                ConfirmAction::LfsForceUnlock(path) => self.op_lfs_force_unlock(shared, path),
             },
         }
     }

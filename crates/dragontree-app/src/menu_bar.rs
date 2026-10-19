@@ -6,7 +6,7 @@ use egui::class::HasClasses as _;
 use egui::menu::SubMenuButton;
 use egui::{Align2, Atom, Atoms, Button, FontId, Response, Ui, Vec2};
 
-use crate::commands::{Command, CommandContext, MENUS, MenuItem};
+use crate::commands::{Command, CommandContext, MENUS, MenuItem, submenu_disabled_hint};
 use crate::icons;
 
 /// Affiche la barre ; renvoie la commande choisie.
@@ -36,8 +36,14 @@ fn entries(ui: &mut Ui, items: &[MenuItem], cx: &CommandContext, chosen: &mut Op
                 ui.separator();
             }
             MenuItem::Submenu(title, sub) => {
-                SubMenuButton::new(with_check_column(tr_str(title), column.then_some(false)))
-                    .ui(ui, |ui| entries(ui, sub, cx, chosen));
+                let label = with_check_column(tr_str(title), column.then_some(false));
+                if let Some(hint) = submenu_disabled_hint(sub, cx) {
+                    // Grisé avec la raison en infobulle (Git LFS absent) : le sous-menu ne s'ouvre pas.
+                    let button = Button::new(label).right_text(SubMenuButton::arrow_atom(None));
+                    ui.add_enabled(false, button).on_disabled_hover_text(hint);
+                } else {
+                    SubMenuButton::new(label).ui(ui, |ui| entries(ui, sub, cx, chosen));
+                }
             }
         }
     }

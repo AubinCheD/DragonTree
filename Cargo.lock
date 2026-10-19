@@ -1040,6 +1040,7 @@ dependencies = [
  "dragontree-i18n",
  "ignore",
  "serde",
+ "serde_json",
  "smallvec",
  "tempfile",
  "windows-sys 0.61.2",
