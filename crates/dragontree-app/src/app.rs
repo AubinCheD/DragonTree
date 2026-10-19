@@ -554,6 +554,15 @@ impl DragonTreeApp {
         }
     }
 
+    /// Relit le journal de chaque dépôt ouvert : un réglage global change ce que le graphe parcourt.
+    fn reload_logs(&mut self) {
+        for tab in &mut self.tabs {
+            if let TabKind::Repo(r) = &mut tab.kind {
+                r.load_log(&self.shared);
+            }
+        }
+    }
+
     /// Commande de portée App ; une commande sans traitement ici est un oubli : assertion en debug.
     fn run_app_command(&mut self, cmd: Command) {
         match cmd {
@@ -577,13 +586,18 @@ impl DragonTreeApp {
                 if self.shared.settings.topological_order != topological {
                     self.shared.settings.topological_order = topological;
                     self.shared.settings_dirty = true;
-                    // Le tri est global : le journal de chaque dépôt ouvert est relu.
-                    for tab in &mut self.tabs {
-                        if let TabKind::Repo(r) = &mut tab.kind {
-                            r.load_log(&self.shared);
-                        }
-                    }
+                    self.reload_logs();
                 }
+            }
+            Command::ShowTags => {
+                self.shared.settings.show_tags = !self.shared.settings.show_tags;
+                self.shared.settings_dirty = true;
+                self.reload_logs();
+            }
+            Command::ShowRemoteBranches => {
+                self.shared.settings.show_remote_branches = !self.shared.settings.show_remote_branches;
+                self.shared.settings_dirty = true;
+                self.reload_logs();
             }
             Command::ToggleRepoList => {
                 self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;

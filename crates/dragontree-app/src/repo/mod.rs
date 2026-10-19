@@ -12,6 +12,7 @@ mod graph_paint;
 mod history;
 mod image_diff;
 mod rebase_ui;
+mod scope;
 mod sidebar;
 mod toolbar;
 mod watcher;
@@ -24,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
-    CancelToken, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions, LogOrder, Oid,
-    OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
+    CancelToken, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError, HeadState, LogOptions, Oid, OpState,
+    Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot, Submodule,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
@@ -396,18 +397,6 @@ impl RepoTab {
         if what.log {
             self.load_log(shared);
         }
-    }
-
-    /// Options du journal affichées par le graphe : l'unique point qui les construit. Les filtres de
-    /// l'historique s'y ajoutent ; `max_count` reste à `None` (le premier lot le fixe).
-    pub(crate) fn log_options(&self, shared: &Shared) -> LogOptions {
-        let scope = if self.history.current_branch_only {
-            dragontree_git::LogScope::Head
-        } else {
-            dragontree_git::LogScope::All
-        };
-        let order = if shared.settings.topological_order { LogOrder::Topo } else { LogOrder::Date };
-        LogOptions { scope, order, ..LogOptions::default() }
     }
 
     pub(crate) fn load_log(&mut self, shared: &Shared) {

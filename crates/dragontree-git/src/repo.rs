@@ -6,7 +6,7 @@ use dragontree_i18n::tr;
 
 use crate::diff::{DiffOptions, FileChange, FileDiff, MAX_DIFF_BYTES, parse_name_status_z, parse_unified_diff_bytes};
 use crate::error::GitError;
-use crate::log::{Commit, LogOptions, LogParser, LogScope, log_args};
+use crate::log::{Commit, LogOptions, LogParser, LogScope, RefSelection, log_args};
 use crate::oid::Oid;
 use crate::refs::{FOR_EACH_REF_FORMAT, RefsSnapshot, parse_refs, read_head};
 use crate::runner::{CancelToken, Git, GitCommand};
@@ -149,14 +149,14 @@ impl Repo {
                     && !self.head_exists() =>
             {
                 // HEAD sans commit : on garde les autres références éventuelles.
-                if opts.scope == LogScope::All {
-                    let without_head = LogOptions {
-                        scope: LogScope::Revs(vec!["--branches".into(), "--remotes".into(), "--tags".into()]),
-                        ..opts.clone()
-                    };
-                    self.run_log(&without_head, cancel)
-                } else {
-                    Ok(Vec::new())
+                let without_head = match &opts.scope {
+                    LogScope::All => Some(RefSelection { head: false, ..RefSelection::default() }),
+                    LogScope::Refs(sel) if sel.head => Some(RefSelection { head: false, ..sel.clone() }),
+                    _ => None,
+                };
+                match without_head {
+                    Some(sel) => self.run_log(&LogOptions { scope: LogScope::Refs(sel), ..opts.clone() }, cancel),
+                    None => Ok(Vec::new()),
                 }
             }
             other => other,

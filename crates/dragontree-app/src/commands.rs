@@ -47,6 +47,10 @@ pub enum Command {
     ToggleDetailsPanel,
     /// Tri des commits de l'historique : `true` topologique, `false` par date.
     SortCommits(bool),
+    /// Affiche (ou masque) les tags dans le graphe.
+    ShowTags,
+    /// Affiche (ou masque) les branches distantes dans le graphe.
+    ShowRemoteBranches,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -113,6 +117,9 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::ShowHistory),
             Cmd(Command::CurrentBranchOnly),
             Submenu(tr_mark!("Tri des commits"), &[Cmd(Command::SortCommits(false)), Cmd(Command::SortCommits(true))]),
+            Separator,
+            Cmd(Command::ShowTags),
+            Cmd(Command::ShowRemoteBranches),
             Separator,
             Cmd(Command::ToggleRepoList),
             Cmd(Command::ShowLog),
@@ -203,6 +210,8 @@ impl Command {
         Command::ToggleDetailsPanel,
         Command::SortCommits(false),
         Command::SortCommits(true),
+        Command::ShowTags,
+        Command::ShowRemoteBranches,
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomReset,
@@ -247,6 +256,8 @@ impl Command {
             Command::ToggleDetailsPanel => tr!("Panneau de détails"),
             Command::SortCommits(false) => tr!("Par date"),
             Command::SortCommits(true) => tr!("Topologique"),
+            Command::ShowTags => tr!("Afficher les tags"),
+            Command::ShowRemoteBranches => tr!("Afficher les branches distantes"),
             Command::ZoomIn => tr!("Zoom avant"),
             Command::ZoomOut => tr!("Zoom arrière"),
             Command::ZoomReset => tr!("Taille par défaut"),
@@ -291,6 +302,8 @@ impl Command {
             Command::RevealHead => icons::CROSSHAIR,
             Command::ToggleDetailsPanel => icons::SIDEBAR_SIMPLE,
             Command::SortCommits(_) => icons::SORT_ASCENDING,
+            Command::ShowTags => icons::TAG,
+            Command::ShowRemoteBranches => icons::CLOUD,
             Command::ZoomIn => icons::MAGNIFYING_GLASS_PLUS,
             Command::ZoomOut => icons::MAGNIFYING_GLASS_MINUS,
             Command::ZoomReset => icons::MAGNIFYING_GLASS,
@@ -327,6 +340,8 @@ impl Command {
             | Command::ShowLog
             | Command::ToggleDetailsPanel
             | Command::SortCommits(_)
+            | Command::ShowTags
+            | Command::ShowRemoteBranches
             | Command::ZoomIn
             | Command::ZoomOut
             | Command::ZoomReset
@@ -415,6 +430,8 @@ impl Command {
             Command::ToggleRepoList => Some(cx.settings.repo_list_visible),
             Command::ToggleDetailsPanel => Some(cx.settings.details_panel_visible),
             Command::SortCommits(topological) => Some(cx.settings.topological_order == topological),
+            Command::ShowTags => Some(cx.settings.show_tags),
+            Command::ShowRemoteBranches => Some(cx.settings.show_remote_branches),
             Command::Language(lang) => Some(cx.settings.language == lang),
             Command::Theme(choice) => Some(cx.settings.theme == choice),
             _ => None,

@@ -51,6 +51,10 @@ pub struct Settings {
     pub details_panel_visible: bool,
     /// Historique trié topologiquement (sinon par date).
     pub topological_order: bool,
+    /// Tags parcourus par le graphe et étiquetés dans l'historique.
+    pub show_tags: bool,
+    /// Branches distantes parcourues par le graphe et étiquetées dans l'historique.
+    pub show_remote_branches: bool,
     pub repo_list_width: f32,
     pub favorites: Vec<PathBuf>,
     pub hidden_repos: Vec<PathBuf>,
@@ -86,6 +90,8 @@ impl Default for Settings {
             repo_list_visible: true,
             details_panel_visible: true,
             topological_order: false,
+            show_tags: true,
+            show_remote_branches: true,
             repo_list_width: 280.0,
             favorites: Vec::new(),
             hidden_repos: Vec::new(),
@@ -313,6 +319,8 @@ mod tests {
         let s = Settings::load_from(&file);
         assert_eq!(s.theme, ThemeChoice::Light);
         assert_eq!(s.diff_context, 3);
+        // Un ancien fichier sans les réglages d'affichage garde tags et branches distantes visibles.
+        assert!(s.show_tags && s.show_remote_branches);
     }
 
     #[test]

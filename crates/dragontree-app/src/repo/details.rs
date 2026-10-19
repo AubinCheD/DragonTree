@@ -217,7 +217,14 @@ impl RepoTab {
                 });
                 ui.end_row();
             }
-            if let Some(labels) = self.refs.as_ref().and_then(|r| r.labels.get(&info.id)) {
+            let visibility = super::scope::LabelVisibility::of(shared);
+            let labels: Vec<_> = self
+                .refs
+                .as_ref()
+                .and_then(|r| r.labels.get(&info.id))
+                .map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect())
+                .unwrap_or_default();
+            if !labels.is_empty() {
                 ui.label(RichText::new(tr!("Références")).color(p.weak));
                 ui.horizontal_wrapped(|ui| {
                     for l in labels {

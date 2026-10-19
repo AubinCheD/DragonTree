@@ -22,12 +22,97 @@ pub struct Commit {
 /// Quelles références parcourir.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogScope {
-    /// Branches locales, distantes, tags et HEAD (exclut refs/stash).
+    /// Branches locales, distantes, tags et HEAD (exclut refs/stash) : `Refs(RefSelection::default())`.
     All,
     /// Seulement HEAD.
     Head,
     /// Révisions explicites.
     Revs(Vec<String>),
+    /// Références choisies : tout sauf certaines, ou seulement certaines (voir [`RefSelection`]).
+    Refs(RefSelection),
+}
+
+/// Sélecteur structuré des références parcourues par le graphe. Les options de l'interface (tags, branches
+/// distantes, éléments masqués, filtre sur des branches…) le remplissent ; [`selection_args`] le traduit en
+/// arguments de `git log`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefSelection {
+    /// Parcourir aussi HEAD (même si sa branche est exclue ; sans effet sur `extra`).
+    pub head: bool,
+    /// Parcourir les tags (hors mode `only`).
+    pub tags: bool,
+    /// Parcourir les branches distantes (hors mode `only`).
+    pub remotes: bool,
+    /// Références à ne pas parcourir : noms complets ou motifs (`refs/heads/x`, `refs/heads/feature/*`,
+    /// `refs/remotes/origin/*`, `refs/tags/v1`).
+    pub exclude: Vec<String>,
+    /// Si non vide : seulement ces références (nom complet, ou motif contenant `*`, `?` ou `[`), à la place de
+    /// toutes les branches, branches distantes et tags.
+    pub only: Vec<String>,
+    /// Révisions supplémentaires passées telles quelles (commits du reflog, stashs…).
+    pub extra: Vec<String>,
+}
+
+impl Default for RefSelection {
+    fn default() -> Self {
+        RefSelection { head: true, tags: true, remotes: true, exclude: Vec::new(), only: Vec::new(), extra: Vec::new() }
+    }
+}
+
+/// Familles de références que `--branches`, `--remotes` et `--tags` parcourent : (préfixe, option).
+const FAMILIES: [(&str, &str); 3] =
+    [("refs/heads/", "--branches"), ("refs/remotes/", "--remotes"), ("refs/tags/", "--tags")];
+
+/// `--exclude` ne vaut que pour l'option `--branches`/`--remotes`/`--tags`/`--glob` qui le suit, puis il est
+/// oublié : il est donc répété devant chacune. Avec `--branches`, `--remotes` et `--tags`, le motif est relatif
+/// à la famille (`feature/*`, pas `refs/heads/feature/*`) ; avec `--glob`, il est complet.
+fn push_excludes(args: &mut Vec<String>, exclude: &[String], family: Option<&str>) {
+    for pattern in exclude {
+        match family {
+            Some(prefix) => {
+                if let Some(relative) = pattern.strip_prefix(prefix) {
+                    args.push(format!("--exclude={relative}"));
+                }
+            }
+            None => args.push(format!("--exclude={pattern}")),
+        }
+    }
+}
+
+fn is_glob(pattern: &str) -> bool {
+    pattern.contains(['*', '?', '['])
+}
+
+/// Arguments de révisions (avant `--`) qui parcourent les références choisies.
+pub fn selection_args(sel: &RefSelection) -> Vec<String> {
+    let mut args = Vec::new();
+    if sel.only.is_empty() {
+        for (prefix, option) in FAMILIES {
+            let wanted = match option {
+                "--remotes" => sel.remotes,
+                "--tags" => sel.tags,
+                _ => true,
+            };
+            if wanted {
+                push_excludes(&mut args, &sel.exclude, Some(prefix));
+                args.push(option.into());
+            }
+        }
+    } else {
+        for pick in &sel.only {
+            if is_glob(pick) {
+                push_excludes(&mut args, &sel.exclude, None);
+                args.push(format!("--glob={pick}"));
+            } else if !sel.exclude.contains(pick) {
+                args.push(pick.clone());
+            }
+        }
+    }
+    if sel.head {
+        args.push("HEAD".into());
+    }
+    args.extend(sel.extra.iter().cloned());
+    args
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,9 +152,10 @@ pub fn log_args(opts: &LogOptions) -> Vec<String> {
         args.push("--follow".into());
     }
     match &opts.scope {
-        LogScope::All => args.extend(["--branches", "--remotes", "--tags", "HEAD"].map(String::from)),
+        LogScope::All => args.extend(selection_args(&RefSelection::default())),
         LogScope::Head => args.push("HEAD".into()),
         LogScope::Revs(revs) => args.extend(revs.iter().cloned()),
+        LogScope::Refs(selection) => args.extend(selection_args(selection)),
     }
     args.push("--".into());
     args.extend(opts.paths.iter().cloned());
@@ -253,6 +339,97 @@ mod tests {
         }
         assert!(args.iter().any(|a| a == &format!("--format={LOG_FORMAT}")));
         assert!(!args.iter().any(|a| a == "--all"), "--all inclurait refs/stash");
+    }
+
+    fn tail(selection: RefSelection) -> Vec<String> {
+        let args = log_args(&LogOptions { scope: LogScope::Refs(selection), ..LogOptions::default() });
+        let from = args.iter().position(|a| a.starts_with("--date-order")).unwrap() + 1;
+        args[from..args.iter().position(|a| a == "--").unwrap()].to_vec()
+    }
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn default_selection_is_the_all_scope() {
+        assert_eq!(
+            log_args(&LogOptions { scope: LogScope::Refs(RefSelection::default()), ..LogOptions::default() }),
+            log_args(&LogOptions::default())
+        );
+        assert_eq!(tail(RefSelection::default()), ["--branches", "--remotes", "--tags", "HEAD"]);
+    }
+
+    #[test]
+    fn hidden_tags_and_remotes_are_not_walked() {
+        let args = tail(RefSelection { tags: false, remotes: false, ..RefSelection::default() });
+        assert_eq!(args, ["--branches", "HEAD"]);
+        let args = tail(RefSelection { tags: false, ..RefSelection::default() });
+        assert_eq!(args, ["--branches", "--remotes", "HEAD"]);
+    }
+
+    #[test]
+    fn excludes_precede_the_family_they_apply_to_and_are_relative_to_it() {
+        let args = tail(RefSelection {
+            exclude: strings(&["refs/remotes/origin/*", "refs/heads/feature/*", "refs/heads/x", "refs/tags/v1"]),
+            ..RefSelection::default()
+        });
+        assert_eq!(
+            args,
+            [
+                "--exclude=feature/*",
+                "--exclude=x",
+                "--branches",
+                "--exclude=origin/*",
+                "--remotes",
+                "--exclude=v1",
+                "--tags",
+                "HEAD"
+            ]
+        );
+    }
+
+    #[test]
+    fn excludes_of_a_skipped_family_are_dropped() {
+        let args = tail(RefSelection {
+            tags: false,
+            exclude: strings(&["refs/tags/v1", "refs/heads/x"]),
+            ..RefSelection::default()
+        });
+        assert_eq!(args, ["--exclude=x", "--branches", "--remotes", "HEAD"]);
+    }
+
+    #[test]
+    fn only_lists_explicit_refs_and_globs_with_full_excludes() {
+        let args = tail(RefSelection {
+            head: false,
+            only: strings(&["refs/heads/main", "refs/heads/feature/*", "refs/remotes/origin/*"]),
+            exclude: strings(&["refs/heads/feature/b"]),
+            ..RefSelection::default()
+        });
+        assert_eq!(
+            args,
+            [
+                "refs/heads/main",
+                "--exclude=refs/heads/feature/b",
+                "--glob=refs/heads/feature/*",
+                "--exclude=refs/heads/feature/b",
+                "--glob=refs/remotes/origin/*"
+            ]
+        );
+        let args = tail(RefSelection {
+            head: false,
+            only: strings(&["refs/heads/a", "refs/heads/b"]),
+            exclude: strings(&["refs/heads/a"]),
+            ..RefSelection::default()
+        });
+        assert_eq!(args, ["refs/heads/b"]);
+    }
+
+    #[test]
+    fn extra_revisions_come_last() {
+        let args = tail(RefSelection { extra: strings(&["abc123"]), ..RefSelection::default() });
+        assert_eq!(args.last().unwrap(), "abc123");
     }
 
     #[test]

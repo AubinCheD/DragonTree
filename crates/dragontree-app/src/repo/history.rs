@@ -5,6 +5,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, Frame, Key, Rect, RichText, Sense, Ui};
 
 use super::graph_paint::{self, GraphGeom};
+use super::scope::LabelVisibility;
 use super::{RepoTab, RepoView};
 use crate::app::Shared;
 use crate::icons;
@@ -196,6 +197,7 @@ impl RepoTab {
         let head_oid = self.refs.as_ref().and_then(|r| r.head_oid);
         let head_row = head_oid.and_then(|o| self.history.index.get(&o).copied());
         let labels = self.refs.as_ref().map(|r| r.labels.clone()).unwrap_or_default();
+        let visibility = LabelVisibility::of(shared);
         let now = widgets::now_ts();
 
         let mut area = egui::ScrollArea::vertical().id_salt(("history-rows", self.id)).auto_shrink([false, false]);
@@ -231,22 +233,22 @@ impl RepoTab {
                 // Description : étiquettes puis sujet.
                 let painter = ui.painter_at(cols.desc.intersect(rect));
                 let mut x = cols.desc.left() + 6.0;
-                if let Some(ls) = labels.get(&c.id) {
-                    for (n, l) in ls.iter().enumerate() {
-                        if n >= 4 {
-                            let more = format!("+{}", ls.len() - 4);
-                            painter.text(
-                                egui::pos2(x, rect.center().y),
-                                Align2::LEFT_CENTER,
-                                more,
-                                FontId::proportional(11.0),
-                                p.weak,
-                            );
-                            x += 24.0;
-                            break;
-                        }
-                        x += paint_label(ui, &painter, egui::pos2(x, rect.top() + 3.5), l, p) + 4.0;
+                let ls: Vec<&RefLabel> =
+                    labels.get(&c.id).map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect()).unwrap_or_default();
+                for (n, l) in ls.iter().enumerate() {
+                    if n >= 4 {
+                        let more = format!("+{}", ls.len() - 4);
+                        painter.text(
+                            egui::pos2(x, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            more,
+                            FontId::proportional(11.0),
+                            p.weak,
+                        );
+                        x += 24.0;
+                        break;
                     }
+                    x += paint_label(ui, &painter, egui::pos2(x, rect.top() + 3.5), l, p) + 4.0;
                 }
                 let is_head = Some(idx) == head_row;
                 let mut job = egui::text::LayoutJob::single_section(

@@ -111,7 +111,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | V2 | Filtrer sur la branche active (Ctrl+Maj+A), en suivant les checkouts | ✅ |
 | V3 | Filtrer sur des branches choisies : entonnoir sur chaque branche, dossier ou remote, plusieurs à la fois, bandeau « Filtré par : … » | 🆕 M |
 | V4 | Masquer une branche, un dossier ou un remote du graphe (icône œil) | 🆕 M |
-| V5 | Masquer les tags, masquer les branches distantes | 🆕 P |
+| V5 | Masquer les tags, masquer les branches distantes | ✅ |
 | V6 | Afficher les commits perdus (reflog) dans le graphe (Ctrl+Maj+.) | 🆕 M |
 | V7 | Afficher les stashs dans le graphe, avec une option pour les masquer | 🆕 M |
 | V8 | Replier et déplier les merges (← / →, Tout replier) | 🆕 G |
