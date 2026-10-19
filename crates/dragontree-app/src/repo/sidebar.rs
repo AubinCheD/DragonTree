@@ -7,6 +7,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
 use super::actions::StashOp;
+use super::custom::Clicked;
 use super::patches::PatchSource;
 use super::scope::{Visibility, branch_pattern, folder_pattern, remote_branch_pattern, remote_pattern, visibility};
 use super::{Dialog, RepoTab, RepoView};
@@ -786,6 +787,7 @@ impl RepoTab {
             ui.ctx().copy_text(name.clone());
             ui.close();
         }
+        self.custom_commands_menu(ui, shared, Clicked::Branch { name, oid: b.oid, remote: None });
     }
 
     fn remote_branch_menu(&mut self, ui: &mut Ui, shared: &mut Shared, b: &RemoteBranch, current: Option<&str>) {
@@ -831,6 +833,8 @@ impl RepoTab {
             ui.ctx().copy_text(b.full.clone());
             ui.close();
         }
+        let clicked = Clicked::Branch { name: b.full.clone(), oid: b.oid, remote: Some(b.remote.clone()) };
+        self.custom_commands_menu(ui, shared, clicked);
     }
 
     fn tag_menu(&mut self, ui: &mut Ui, shared: &mut Shared, t: &TagRef) {
@@ -997,6 +1001,7 @@ impl RepoTab {
             ui.ctx().copy_text(summary.to_string());
             ui.close();
         }
+        self.custom_commands_menu(ui, shared, Clicked::Commit(oid));
     }
 }
 

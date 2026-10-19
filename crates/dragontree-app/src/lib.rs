@@ -8,6 +8,7 @@ pub mod app;
 pub mod clone;
 pub mod closed_tabs;
 pub mod commands;
+pub mod custom_commands;
 pub mod highlight;
 pub mod icons;
 pub mod jobs;

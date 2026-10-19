@@ -40,6 +40,16 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   jamais global), suivre ou ne plus suivre un motif (liste lue dans `.gitattributes`), fetch, pull et prune avec progression et
   annulation, fenêtre des verrous (verrouiller, déverrouiller, forcer après confirmation) ; les fichiers gérés par LFS portent
   une icône dans la vue Changements.
+- **Commandes personnalisées** (Réglages › Commandes) : une ligne de commande exécutée par `cmd.exe` dans le dossier du
+  dépôt, ou une URL ouverte dans le navigateur (http, https, mailto), sur le dépôt (Dépôt › Commandes personnalisées), une
+  branche, un commit ou un fichier (menus contextuels) ; variables `${repo}`, `${branch}`, `${sha}`, `${file}` et
+  `${remote_url}`, citées pour cmd — une valeur n'est jamais lue comme une commande et reste un seul argument pour un
+  programme qui lit sa ligne avec les règles de Windows ; une valeur avec un guillemet, un `%` ou un caractère que la
+  page de code changerait en guillemet est refusée, comme un `%` collé à une variable ou un guillemet échappé dans la
+  ligne — ou encodées dans l'URL (sans pouvoir sortir de leur place). Les valeurs acceptées sont aussi passées en
+  variables d'environnement `DT_*`, à lire dans un script `.cmd` (`"%DT_FILE%"`, sans expansion différée) ou `.ps1`
+  appelé par la ligne — jamais en `%DT_…%` dans la ligne elle-même (cmd y interpréterait la valeur : refusé).
+  Confirmation facultative, exécution en arrière-plan annulable, sortie dans une fenêtre, actualisation du dépôt après.
 - **Patchs** : appliquer un patch (fichier, glisser-déposer d'un `.patch`/`.diff`, texte collé) avec aperçu des fichiers
   touchés et vérification, vers la copie de travail, l'index ou en commits (`git am`, patchs `format-patch`) ; **enregistrer
   comme patch** (commit, commits jusqu'à HEAD en un fichier par commit, stash, fichiers sélectionnés) ou le copier.
@@ -181,6 +191,5 @@ des fichiers `tests/live*.rs`.
 ## Limites connues et suite
 
 - **À venir** : vue centralisée des pull requests de tous les comptes (l'architecture des forges est prête).
-- Non gérés pour l'instant : commandes personnalisées,
-  icône intégrée à l'exécutable.
+- Non gérés pour l'instant : icône intégrée à l'exécutable.
 - Dépôts SHA-256 non pris en charge.

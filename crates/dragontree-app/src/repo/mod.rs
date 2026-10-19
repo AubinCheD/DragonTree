@@ -7,6 +7,7 @@ mod changes;
 mod commands;
 mod compare;
 mod conflicts;
+mod custom;
 mod details;
 mod dialogs;
 pub mod diff_view;
@@ -332,6 +333,8 @@ pub enum RepoEvent {
     Compare(compare::CompareEvent),
     /// Verrous Git LFS lus sur le serveur pour la fenêtre des verrous.
     LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
+    /// Fin d'une commande personnalisée (script) : sa sortie ou l'erreur de lancement.
+    CustomDone(Box<custom::CustomOutcome>),
     RebaseList(Result<Vec<Commit>, GitError>),
     Images {
         history: bool,
@@ -374,6 +377,8 @@ pub struct RepoTab {
     pub lfs_files: HashSet<String>,
     /// Fenêtre des verrous Git LFS ouverte.
     pub lfs_locks: Option<lfs::LfsLocksWindow>,
+    /// Fenêtre de sortie de la dernière commande personnalisée qui l'a demandée.
+    pub custom_output: Option<custom::CustomOutputWindow>,
     pub view: RepoView,
     pub history: HistoryState,
     pub changes: ChangesState,
@@ -422,6 +427,7 @@ impl RepoTab {
             lfs_patterns: Vec::new(),
             lfs_files: HashSet::new(),
             lfs_locks: None,
+            custom_output: None,
             view: RepoView::History,
             history: HistoryState::default(),
             changes: ChangesState { push_after: shared.settings.push_after_commit, ..Default::default() },
@@ -518,7 +524,7 @@ impl RepoTab {
         if what.refs {
             self.gens.refs += 1;
             let (g, r) = (self.gens.refs, repo.clone());
-            shared.jobs.spawn("refs", move || Some(AppEvent::Repo(id, RepoEvent::Refs(g, r.refs()))));
+            shared.jobs.spawn("refs", move || refs_event(id, g, || r.refs()));
         }
         if what.status {
             self.gens.status += 1;
@@ -526,12 +532,13 @@ impl RepoTab {
             // Le réglage est lu ici : le thread de travail ne touche pas aux réglages.
             let show_ignored = shared.settings.show_ignored_files;
             shared.jobs.spawn("status", move || {
-                let res = r.status_with_ignored(show_ignored).map(|s| {
-                    let paths: Vec<String> = s.entries.iter().map(|e| e.path.clone()).collect();
-                    let lfs = r.lfs_files(&paths);
-                    (s, r.operation_state(), r.bisect_state(), lfs)
-                });
-                Some(AppEvent::Repo(id, RepoEvent::Status(g, res)))
+                status_event(id, g, || {
+                    r.status_with_ignored(show_ignored).map(|s| {
+                        let paths: Vec<String> = s.entries.iter().map(|e| e.path.clone()).collect();
+                        let lfs = r.lfs_files(&paths);
+                        (s, r.operation_state(), r.bisect_state(), lfs)
+                    })
+                })
             });
         }
         if what.extras {
@@ -952,6 +959,7 @@ impl RepoTab {
             }
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
+            RepoEvent::CustomDone(outcome) => self.on_custom_done(shared, *outcome),
             RepoEvent::RebaseList(res) => match res {
                 Ok(list) => {
                     if let Some(editor) = &mut self.rebase {
@@ -1169,6 +1177,7 @@ impl RepoTab {
             self.compare = None;
         }
         self.lfs_locks_window(&ctx, shared, &p);
+        self.custom_output_window(&ctx, &p);
         self.rebase_window(&ctx, shared, &p);
         self.conflict_window(&ctx, shared, &p);
     }
@@ -1253,6 +1262,17 @@ impl RepoTab {
     }
 }
 
+/// Événement d'une relecture des références : toujours envoyé, même si la lecture panique (erreur interne), car
+/// l'onglet attend la fin de chaque relecture (`RepoTab::state_refreshing`).
+fn refs_event(id: TabId, generation: u64, read: impl FnOnce() -> Result<RefsSnapshot, GitError>) -> Option<AppEvent> {
+    Some(AppEvent::Repo(id, RepoEvent::Refs(generation, crate::jobs::guarded(read))))
+}
+
+/// Événement d'une relecture de l'état, toujours envoyé (voir [`refs_event`]).
+fn status_event(id: TabId, generation: u64, read: impl FnOnce() -> Result<StatusData, GitError>) -> Option<AppEvent> {
+    Some(AppEvent::Repo(id, RepoEvent::Status(generation, crate::jobs::guarded(read))))
+}
+
 /// Erreur d'authentification (jeton expiré, accès refusé) : à signaler même en arrière-plan.
 pub fn is_auth_error(e: &GitError) -> bool {
     const SIGNS: [&str; 8] = [
@@ -1314,5 +1334,17 @@ mod tests {
     fn refresh_merge() {
         let r = Refresh::STATUS.merge(Refresh { refs: true, ..Refresh::NONE });
         assert!(r.refs && r.status && !r.log);
+    }
+
+    #[test]
+    fn a_panicking_refresh_still_delivers_its_event() {
+        // L'onglet attend la fin de chaque relecture (réponses du bisect grisées) : une panique devient une erreur.
+        let refs = refs_event(4, 7, || panic!("lecture des références"));
+        assert!(
+            matches!(&refs, Some(AppEvent::Repo(4, RepoEvent::Refs(7, Err(GitError::Internal(m))))) if m.contains("références")),
+            "événement attendu"
+        );
+        let status = status_event(4, 8, || panic!("lecture de l'état"));
+        assert!(matches!(&status, Some(AppEvent::Repo(4, RepoEvent::Status(8, Err(GitError::Internal(_)))))));
     }
 }

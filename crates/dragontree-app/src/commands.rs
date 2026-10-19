@@ -19,6 +19,7 @@
 use dragontree_i18n::{Lang, tr, tr_mark};
 use egui::{Key, KeyboardShortcut, ModifierNames, Modifiers};
 
+use crate::custom_commands::{self, CommandTarget};
 use crate::icons;
 use crate::repo::{RepoTab, RepoView};
 use crate::settings::{HistoryLayout, Settings, ThemeChoice};
@@ -116,6 +117,11 @@ pub enum Command {
     LfsPrune,
     /// Fenêtre des verrous LFS du serveur.
     LfsLocks,
+    /// Commande personnalisée de cible « dépôt » : sa position dans `Settings::custom_commands`. Hors de
+    /// [`Command::ALL`] : la liste vient des réglages (voir [`custom_entries`]).
+    CustomCommand(usize),
+    /// Ouvre les réglages sur l'onglet des commandes personnalisées.
+    ManageCustomCommands,
     OpenExplorer,
     OpenTerminal,
     OpenVsCode,
@@ -141,9 +147,11 @@ pub enum MenuItem {
     Separator,
     /// Sous-menu : titre (marqué par `tr_mark!`) et entrées.
     Submenu(&'static str, &'static [MenuItem]),
+    /// Les commandes personnalisées de cible « dépôt », lues dans les réglages à l'affichage ([`custom_entries`]).
+    CustomCommands,
 }
 
-use MenuItem::{Cmd, Separator, Submenu};
+use MenuItem::{Cmd, CustomCommands, Separator, Submenu};
 
 /// Contenu de la barre de menus : (titre du menu marqué par `tr_mark!`, entrées).
 pub const MENUS: &[(&str, &[MenuItem])] = &[
@@ -257,6 +265,10 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
                     Cmd(Command::LfsLocks),
                 ],
             ),
+            Submenu(
+                tr_mark!("Commandes personnalisées"),
+                &[CustomCommands, Separator, Cmd(Command::ManageCustomCommands)],
+            ),
             Separator,
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
@@ -366,6 +378,7 @@ impl Command {
         Command::LfsPull,
         Command::LfsPrune,
         Command::LfsLocks,
+        Command::ManageCustomCommands,
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenVsCode,
@@ -444,6 +457,9 @@ impl Command {
             Command::LfsPull => tr!("Pull LFS"),
             Command::LfsPrune => tr!("Prune LFS"),
             Command::LfsLocks => tr!("Verrous LFS…"),
+            // Le menu et la palette affichent le nom donné dans les réglages (`custom_entries`).
+            Command::CustomCommand(_) => tr!("Commande personnalisée"),
+            Command::ManageCustomCommands => tr!("Gérer les commandes…"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
             Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
@@ -471,6 +487,7 @@ impl Command {
             Command::LfsPull => tr!("Git LFS : pull"),
             Command::LfsPrune => tr!("Git LFS : prune"),
             Command::LfsLocks => tr!("Git LFS : verrous…"),
+            Command::ManageCustomCommands => tr!("Commandes personnalisées : gérer…"),
             _ => self.label(),
         }
     }
@@ -539,6 +556,7 @@ impl Command {
             Command::LfsPull => icons::ARROW_LINE_DOWN,
             Command::LfsPrune => icons::BROOM,
             Command::LfsLocks => icons::LOCK,
+            Command::CustomCommand(_) | Command::ManageCustomCommands => icons::TERMINAL_WINDOW,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenVsCode => icons::CODE,
@@ -576,6 +594,7 @@ impl Command {
             | Command::ZoomReset
             | Command::Theme(_)
             | Command::Settings
+            | Command::ManageCustomCommands
             | Command::Language(_) => Scope::App,
             Command::ShowChanges
             | Command::ShowHistory
@@ -614,6 +633,7 @@ impl Command {
             | Command::LfsPull
             | Command::LfsPrune
             | Command::LfsLocks
+            | Command::CustomCommand(_)
             | Command::OpenExplorer
             | Command::OpenTerminal
             | Command::OpenVsCode
@@ -711,6 +731,11 @@ impl Command {
         }
         match self.scope() {
             Scope::App => self != Command::ReopenClosedTab || cx.can_reopen_tab,
+            // Commande personnalisée : elle doit encore exister, avec la cible « dépôt ».
+            Scope::Repo if matches!(self, Command::CustomCommand(_)) => {
+                cx.repo.is_some_and(|tab| tab.can_run(self))
+                    && custom_entries(cx.settings).iter().any(|(cmd, _)| *cmd == self)
+            }
             // Rien à réafficher : l'entrée est grisée.
             Scope::Repo if self == Command::ShowHiddenRefs => {
                 cx.repo.is_some_and(|tab| tab.can_run(self) && !cx.settings.hidden_refs_of(&tab.path).is_empty())
@@ -741,6 +766,13 @@ impl Command {
             _ => None,
         }
     }
+}
+
+/// Commandes personnalisées de cible « dépôt » (menu Dépôt, palette) avec leur nom.
+pub fn custom_entries(settings: &Settings) -> Vec<(Command, &str)> {
+    custom_commands::for_target(&settings.custom_commands, CommandTarget::Repo)
+        .map(|(i, c)| (Command::CustomCommand(i), c.name.trim()))
+        .collect()
 }
 
 /// Pourquoi un sous-menu est grisé : toutes ses commandes le sont et l'une d'elles en donne la raison (Git LFS
@@ -777,7 +809,7 @@ mod tests {
         for item in items {
             match item {
                 Cmd(cmd) => out.push(*cmd),
-                Separator => {}
+                Separator | CustomCommands => {}
                 Submenu(title, sub) => {
                     assert!(!title.trim().is_empty(), "sous-menu sans titre");
                     menu_commands(sub, out);
@@ -895,6 +927,34 @@ mod tests {
             };
             assert!(cmd.palette_label().starts_with(family), "{cmd:?} : {}", cmd.palette_label());
         }
+    }
+
+    #[test]
+    fn the_repository_menu_offers_the_named_repository_commands_only() {
+        use crate::custom_commands::{CommandKind, CustomCommand};
+        let cmd = |name: &str, target| CustomCommand {
+            name: name.into(),
+            target,
+            kind: CommandKind::Script,
+            command: "echo".into(),
+            ..Default::default()
+        };
+        let settings = Settings {
+            custom_commands: vec![
+                cmd("Sur un commit", CommandTarget::Commit),
+                cmd(" Construire ", CommandTarget::Repo),
+                cmd("", CommandTarget::Repo),
+                cmd("Tester", CommandTarget::Repo),
+            ],
+            ..Settings::default()
+        };
+        let entries = custom_entries(&settings);
+        assert_eq!(entries, [(Command::CustomCommand(1), "Construire"), (Command::CustomCommand(3), "Tester")]);
+        // Sans dépôt ouvert, elles sont grisées comme toute commande de dépôt.
+        let cx = CommandContext { settings: &settings, repo: None, can_reopen_tab: false, lfs_available: None };
+        assert!(!Command::CustomCommand(1).enabled(&cx));
+        assert_eq!(Command::CustomCommand(1).scope(), Scope::Repo);
+        assert!(repository_submenu(tr_mark!("Commandes personnalisées")).iter().any(|i| matches!(i, CustomCommands)));
     }
 
     #[test]

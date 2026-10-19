@@ -8,6 +8,8 @@ use dragontree_forges::Account;
 use dragontree_i18n::{Lang, tr};
 use serde::{Deserialize, Serialize};
 
+use crate::custom_commands::CustomCommand;
+
 /// Bornes et pas de la taille de l'interface (curseur des réglages, zoom au clavier).
 pub const UI_SCALE_MIN: f32 = 0.8;
 pub const UI_SCALE_MAX: f32 = 1.6;
@@ -104,6 +106,8 @@ pub struct Settings {
     pub show_read_commands_in_log: bool,
     /// Dépôt (chemin) -> règles de liens vers les tickets des messages de commit.
     pub ticket_links: BTreeMap<String, Vec<TicketRule>>,
+    /// Commandes personnalisées (Réglages › Commandes), dans l'ordre des menus.
+    pub custom_commands: Vec<CustomCommand>,
 }
 
 impl Default for Settings {
@@ -145,6 +149,7 @@ impl Default for Settings {
             auto_fetch_minutes: 10,
             show_read_commands_in_log: false,
             ticket_links: BTreeMap::new(),
+            custom_commands: Vec::new(),
         }
     }
 }
@@ -445,6 +450,27 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"theme":"Dark","ui_scale":1.2}"#).unwrap();
         assert!(s.ticket_links.is_empty());
         assert_eq!(s.theme, ThemeChoice::Dark);
+    }
+
+    #[test]
+    fn custom_commands_round_trip_and_an_old_file_has_none() {
+        use crate::custom_commands::{CommandKind, CommandTarget, CustomCommand};
+        let old: Settings = serde_json::from_str(r#"{"theme":"Dark"}"#).unwrap();
+        assert!(old.custom_commands.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        let mut s = Settings::default();
+        s.custom_commands.push(CustomCommand {
+            name: "Ouvrir sur la forge".into(),
+            target: CommandTarget::Commit,
+            kind: CommandKind::Url,
+            command: "https://forge.contoso.test/commit/${sha}".into(),
+            confirm: true,
+            show_output: false,
+            refresh: true,
+        });
+        s.save_to(&file).unwrap();
+        assert_eq!(Settings::load_from(&file), s);
     }
 
     #[test]

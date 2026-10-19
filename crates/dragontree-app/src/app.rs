@@ -17,7 +17,7 @@ use crate::jobs::Jobs;
 use crate::repo::{RepoEvent, RepoTab};
 use crate::repo_list::{RepoListState, ScanEvent};
 use crate::settings::{Settings, SettingsFile, ThemeChoice, path_key};
-use crate::settings_ui::SettingsWindow;
+use crate::settings_ui::{SettingsTab, SettingsWindow};
 use crate::ssh_keys::{SshEvent, SshKeysWindow};
 use crate::tabbar::{self, TabBarAction, TabInfo};
 use crate::theme::{self, Palette};
@@ -50,6 +50,8 @@ pub enum AppAction {
     ShowAccounts,
     ShowSshKeys,
     ShowSettings,
+    /// Réglages ouverts sur un onglet donné (Dépôt › Commandes personnalisées › Gérer les commandes…).
+    ShowSettingsTab(SettingsTab),
     ShowLog,
     AddScanRoot,
     RemoveScanRoot(PathBuf),
@@ -534,6 +536,9 @@ impl DragonTreeApp {
                     self.settings_window = Some(SettingsWindow::new(&self.shared.settings));
                 }
             }
+            AppAction::ShowSettingsTab(tab) => {
+                self.settings_window.get_or_insert_with(|| SettingsWindow::new(&self.shared.settings)).show_tab(tab)
+            }
             AppAction::ShowLog => self.log_open = true,
             AppAction::AddScanRoot => {
                 if let Some(p) = Self::pick_folder(tr!("Dossier contenant vos dépôts (scan récursif)")) {
@@ -590,10 +595,15 @@ impl DragonTreeApp {
         }
     }
 
-    /// Commandes proposées par la palette Ctrl+P : celles du registre utilisables en ce moment.
-    fn palette_commands(&self) -> Vec<Command> {
+    /// Commandes proposées par la palette Ctrl+P, avec leur libellé : celles du registre utilisables en ce moment,
+    /// puis les commandes personnalisées du dépôt sous leur nom.
+    fn palette_commands(&self) -> Vec<(Command, String)> {
         let cx = self.command_context();
-        Command::ALL.iter().copied().filter(|c| c.in_palette() && c.enabled(&cx)).collect()
+        let registry = Command::ALL.iter().copied().filter(|c| c.in_palette() && c.enabled(&cx));
+        let mut list: Vec<(Command, String)> = registry.map(|c| (c, c.palette_label().to_string())).collect();
+        let custom = commands::custom_entries(cx.settings).into_iter().filter(|(c, _)| c.enabled(&cx));
+        list.extend(custom.map(|(c, name)| (c, tr!("Commande personnalisée : {name}", name))));
+        list
     }
 
     /// Exécute une commande du registre (barre de menus, raccourci, palette) si elle est utilisable ; une
@@ -635,6 +645,9 @@ impl DragonTreeApp {
             Command::Accounts => self.shared.actions.push(AppAction::ShowAccounts),
             Command::SshKeys => self.shared.actions.push(AppAction::ShowSshKeys),
             Command::Settings => self.shared.actions.push(AppAction::ShowSettings),
+            Command::ManageCustomCommands => {
+                self.shared.actions.push(AppAction::ShowSettingsTab(SettingsTab::Commands))
+            }
             Command::ShowLog => self.shared.actions.push(AppAction::ShowLog),
             Command::Quit => self.shared.actions.push(AppAction::Quit),
             Command::ToggleDetailsPanel => {

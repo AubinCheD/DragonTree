@@ -12,6 +12,7 @@ use super::actions::StashOp;
 use super::patches::{PatchPreview, PatchTarget};
 use super::{Refresh, RepoTab};
 use crate::app::{AppAction, Shared};
+use crate::custom_commands::{CommandKind, Prepared};
 use crate::icons;
 use crate::theme::Palette;
 
@@ -49,7 +50,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `GitFlowInit` : réglages de Git Flow à écrire ; `GitFlowStart` : nature et nom court de la branche à créer ;
 /// `GitFlowFinish` : branche de travail à terminer (nature, nom court), `delete_branch` demande de la supprimer ensuite
 /// (jamais forcé) ; `LfsTrack` : motif à suivre avec Git LFS ; `LfsUntrack` : motif suivi à retirer (choisi dans la
-/// liste des motifs du `.gitattributes`).
+/// liste des motifs du `.gitattributes`) ; `CustomCommand` : commande personnalisée qui demande confirmation, sa ligne
+/// (ou son URL) complète affichée.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -90,6 +92,7 @@ pub enum Dialog {
     LfsTrack { pattern: String },
     LfsUntrack { pattern: String },
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
+    CustomCommand(Box<Prepared>),
     Confirm { title: String, text: String, action: ConfirmAction },
 }
 
@@ -171,6 +174,11 @@ impl Dialog {
                 (tr!("Ne plus suivre avec Git LFS").into(), tr!("Ne plus suivre").into(), false)
             }
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
+            // Un script peut tout faire : sa confirmation exige un clic.
+            Dialog::CustomCommand(c) if c.kind == CommandKind::Script => {
+                (tr!("Exécuter « {name} » ?", name = c.name), tr!("Exécuter").into(), true)
+            }
+            Dialog::CustomCommand(c) => (tr!("Ouvrir « {name} » ?", name = c.name), tr!("Ouvrir").into(), false),
             Dialog::Confirm { title, action: ConfirmAction::CheckoutDetached(_), .. } => {
                 (title.clone(), tr!("Continuer").into(), false)
             }
@@ -556,6 +564,7 @@ impl RepoTab {
             Dialog::LfsTrack { pattern } => self.lfs_track_body(ui, pattern, p),
             Dialog::LfsUntrack { pattern } => self.lfs_untrack_body(ui, pattern, p),
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
+            Dialog::CustomCommand(prepared) => self.custom_command_body(ui, prepared, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
                 true
@@ -696,6 +705,7 @@ impl RepoTab {
             Dialog::LfsTrack { pattern } => self.op_lfs_track(shared, pattern),
             Dialog::LfsUntrack { pattern } => self.op_lfs_untrack(shared, pattern),
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
+            Dialog::CustomCommand(prepared) => self.launch_custom(shared, *prepared),
             Dialog::Confirm { action, .. } => match action {
                 ConfirmAction::CheckoutDetached(oid) => self.op_checkout(shared, oid.to_hex()),
                 ConfirmAction::AbortOp(state) => {

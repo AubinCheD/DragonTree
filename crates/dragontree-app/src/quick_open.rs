@@ -28,15 +28,15 @@ enum Item {
 }
 
 impl QuickOpen {
-    /// Renvoie faux quand la palette se ferme. `commands` : commandes du registre proposées (utilisables),
-    /// choisies par l'application ; celle choisie lui revient par `AppAction::RunCommand`.
+    /// Renvoie faux quand la palette se ferme. `commands` : commandes du registre proposées (utilisables) avec leur
+    /// libellé, choisies par l'application ; celle choisie lui revient par `AppAction::RunCommand`.
     pub fn ui(
         &mut self,
         ctx: &egui::Context,
         shared: &mut Shared,
         list: &RepoListState,
         tab: Option<&mut RepoTab>,
-        commands: &[Command],
+        commands: &[(Command, String)],
         p: &Palette,
     ) -> bool {
         let mut items: Vec<(i32, Item, String, &'static str)> = Vec::new();
@@ -60,10 +60,9 @@ impl QuickOpen {
             }
         }
         // Recherche dans le libellé affiché, donc traduit.
-        for &cmd in commands {
-            let label = cmd.palette_label();
+        for (cmd, label) in commands {
             if let Some(s) = widgets::fuzzy_score(&self.query, label) {
-                items.push((s + 2, Item::Command(cmd), label.to_string(), cmd.icon()));
+                items.push((s + 2, Item::Command(*cmd), label.clone(), cmd.icon()));
             }
         }
         if !self.query.trim().is_empty() {

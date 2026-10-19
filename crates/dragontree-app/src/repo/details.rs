@@ -5,6 +5,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Sense, Ui};
 
 use super::RepoTab;
+use super::custom::Clicked;
 use super::diff_view::{self, DiffMode};
 use crate::app::Shared;
 use crate::icons;
@@ -385,5 +386,6 @@ impl RepoTab {
             ui.ctx().copy_text(full.display().to_string());
             ui.close();
         }
+        self.custom_commands_menu(ui, shared, Clicked::File { path: path.to_string(), commit });
     }
 }

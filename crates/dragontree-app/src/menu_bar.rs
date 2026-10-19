@@ -1,12 +1,12 @@
 //! Barre de menus Fichier / Affichage / Dépôt / Configuration, construite depuis le registre de commandes
 //! (`commands::MENUS`) : libellés, raccourcis, coches et entrées grisées viennent du registre.
 
-use dragontree_i18n::tr_str;
+use dragontree_i18n::{tr, tr_str};
 use egui::class::HasClasses as _;
 use egui::menu::SubMenuButton;
 use egui::{Align2, Atom, Atoms, Button, FontId, Response, Ui, Vec2};
 
-use crate::commands::{Command, CommandContext, MENUS, MenuItem, submenu_disabled_hint};
+use crate::commands::{self, Command, CommandContext, MENUS, MenuItem, submenu_disabled_hint};
 use crate::icons;
 
 /// Affiche la barre ; renvoie la commande choisie.
@@ -45,6 +45,23 @@ fn entries(ui: &mut Ui, items: &[MenuItem], cx: &CommandContext, chosen: &mut Op
                     SubMenuButton::new(label).ui(ui, |ui| entries(ui, sub, cx, chosen));
                 }
             }
+            MenuItem::CustomCommands => custom_command_entries(ui, cx, column, chosen),
+        }
+    }
+}
+
+/// Commandes personnalisées de cible « dépôt », sous le nom donné dans les réglages ; une entrée grisée le dit
+/// quand il n'y en a aucune.
+fn custom_command_entries(ui: &mut Ui, cx: &CommandContext, column: bool, chosen: &mut Option<Command>) {
+    let list = commands::custom_entries(cx.settings);
+    if list.is_empty() {
+        ui.add_enabled(false, Button::new(with_check_column(tr!("Aucune commande"), column.then_some(false))));
+    }
+    for (cmd, name) in list {
+        let button = Button::new(with_check_column(name, column.then_some(false)));
+        if ui.add_enabled(cmd.enabled(cx), button).clicked() {
+            *chosen = Some(cmd);
+            ui.close();
         }
     }
 }

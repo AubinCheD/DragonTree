@@ -2,6 +2,7 @@
 //!
 //! Toutes les opérations passent par l'exécutable `git` de l'utilisateur,
 //! appelé avec des tableaux d'arguments — jamais via un shell — et des sorties `-z`.
+//! Seule exception : [`shell`], qui exécute les lignes de commande écrites par l'utilisateur.
 
 pub mod apply;
 pub mod bisect;
@@ -27,6 +28,7 @@ pub mod rebase;
 pub mod refs;
 pub mod repo;
 pub mod runner;
+pub mod shell;
 pub mod ssh;
 pub mod stash;
 pub mod status;

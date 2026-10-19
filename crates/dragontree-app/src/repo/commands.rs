@@ -145,6 +145,7 @@ impl RepoTab {
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),
             Command::OpenVsCode => crate::util::open_in_vscode(&self.path),
+            Command::CustomCommand(index) => self.run_custom_command(shared, index, super::custom::Clicked::Repo),
             _ => debug_assert!(false, "{cmd:?} : commande de dépôt sans traitement dans RepoTab::run_command"),
         }
     }
