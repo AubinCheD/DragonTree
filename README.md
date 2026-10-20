@@ -6,26 +6,41 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
 
 ## Fonctionnalités
 
+- **Barre de menus** : Fichier / Affichage / Dépôt / Configuration, avec les raccourcis dans les libellés ; une entrée
+  grisée n'agit pas (pas de dépôt ouvert, git-lfs absent…). Les mêmes commandes sont dans la palette Ctrl+P.
+  Configuration › Raccourcis clavier liste tous les raccourcis, Configuration › À propos donne la version.
 - **Onglets** : un onglet par dépôt, créés à la demande (Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+1…9, glisser pour
-  réordonner, clic molette pour fermer). Les onglets ouverts sont restaurés au démarrage.
+  réordonner, clic molette pour fermer, Ctrl+Maj+T pour rouvrir le dernier fermé). Les onglets ouverts sont restaurés au
+  démarrage. **Couleurs d'onglet** et **espaces de travail** (groupes d'onglets nommés : Fichier › Espaces de travail).
 - **Liste des dépôts à droite** : choisissez un ou plusieurs dossiers racines (ex. `DEV`). DragonTree y trouve
   tout seul tous les dépôts (scan parallèle, `node_modules`/`bin`/`obj`… ignorés) et les liste avec leur
   branche, le nombre de fichiers modifiés et l'avance/retard sur le remote. Recherche floue, dépôts épinglés,
   dépôts masqués, signalement des dépôts refusés par `safe.directory` (avec « Faire confiance à ce dépôt »).
 - **Historique** : graphe des branches, étiquettes (branches locales/distantes, tags, HEAD), recherche par
-  message/auteur/SHA, toutes les branches ou la branche courante seule, détails du commit, fichiers modifiés,
-  diff unifié ou côte à côte avec coloration syntaxique et surlignage des caractères modifiés, aperçu
-  avant/après des images.
+  message/auteur/SHA, dans le contenu des diffs ou par chemin, détails du commit, fichiers modifiés,
+  diff unifié ou côte à côte avec coloration syntaxique et surlignage des caractères modifiés, images en côte à côte,
+  par balayage ou par superposition.
+  - **Filtres** : toutes les branches, la branche courante seule (Ctrl+Maj+A, suit les checkouts) ou des branches,
+    dossiers et remotes choisis (entonnoir, bandeau « Filtré par »), masquer une branche, un dossier ou un remote
+    (icône œil), masquer les tags ou les branches distantes.
+  - **Graphe** : stashs affichés comme des commits (masquables), commits perdus du reflog (Ctrl+Maj+.), fusions
+    repliables (← / →, Tout replier), révéler HEAD, tri topologique ou par date, disposition horizontale ou verticale.
+  - **Glisser une branche** sur une autre pour la fusionner ou la rebaser.
+  - **Comparer** deux commits, deux branches, ou un commit avec les modifications locales.
 - **Changements locaux** : fichiers non indexés / indexés / en conflit, indexation par fichier, par **hunk** ou
   par **ligne** (y compris fichiers non suivis et CRLF), annulation de modifications, « Ignorer » dans le
   `.gitignore`, dialogue « Ignorer… » (motif libre ou proposé, `.gitignore` racine ou de dossier ou `.git/info/exclude`,
-  aperçu des fichiers concernés), zone de commit (Amend, pousser après le commit, Ctrl+Entrée).
+  aperçu des fichiers concernés), zone de commit (Amend, pousser après le commit, Ctrl+Entrée) avec indicateur de
+  longueur 50/72, colonne guide, messages récents et Co-authored-by. Affichage des fichiers ignorés ou masquage des non
+  suivis ; remise d'un fichier dans son état à un commit donné.
 - **Opérations** : fetch, pull (merge ou rebase), push (upstream, force-with-lease, tags), branches (créer,
   renommer, supprimer localement et sur le remote, checkout, fast-forward), tags (annotés, push, suppression),
   merge (ff, no-ff, ff-only, squash), rebase, **rebase interactif** (réordonner, pick/reword/edit/squash/
   fixup/drop), cherry-pick, revert, reset (soft/mixed/hard), stash (avec message, non suivis, garder l'index,
-  choix du stash au pop, renommage, fichiers sélectionnés seulement, snapshot),
-  remotes, sous-modules (ajouter, déplacer, changer l'URL, supprimer),
+  choix du stash au pop, renommage, fichiers sélectionnés seulement, snapshot ; les stashs sont aussi dans le graphe),
+  mise à jour, push ou suppression de **plusieurs branches à la fois** (branches périmées sélectionnables),
+  Fetch / Pull / Push rapides sans dialogue (Ctrl+clic), remotes (modifier l'URL, tester la connexion),
+  sous-modules (ajouter, déplacer, changer l'URL, supprimer), **pull requests** (créer sur GitHub, GitLab, Azure DevOps),
   **worktrees** (section de la barre latérale : ouvrir dans un onglet, créer depuis une
   branche, une branche distante ou un commit, supprimer, nettoyer ; les branches sorties ailleurs sont signalées).
 - **Conflits** : bandeau d'opération en cours (Continuer/Annuler/Passer), résolution « notre/leur version »,
@@ -54,6 +69,17 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   touchés et vérification, vers la copie de travail, l'index ou en commits (`git am`, patchs `format-patch`) ; **enregistrer
   comme patch** (commit, commits jusqu'à HEAD en un fichier par commit, stash, fichiers sélectionnés) ou le copier.
 - **Historique et blame d'un fichier.**
+- **Réglages du dépôt** (Dépôt › Réglages du dépôt) : nom et e-mail propres au dépôt, liens vers les tickets
+  (`#1234` → URL), modèle de message de commit. **Statistiques** du dépôt (commits, contributeurs, commits par mois, taille).
+- **Ouvrir dans** : Explorateur, terminal au choix (Windows Terminal, PowerShell, Git Bash) et éditeurs détectés
+  (VS Code, Visual Studio `.sln`, Rider, Cursor…).
+- **Outils externes** (Réglages) : diff et merge configurables, avec préréglages VS Code, WinMerge, Beyond Compare,
+  KDiff3 et P4Merge. **Identité git globale** (nom, e-mail) dans Configuration. **Clés SSH** (Fichier) : générer,
+  choisir, gérer plusieurs clés.
+- **Affichage du diff** : police, taille, largeur de tabulation, espaces visibles ou ignorés.
+- **IA Claude Code** (facultatif, désactivée par défaut) : message de commit et revue de la branche courante.
+  DragonTree lance la CLI `claude` en mode non interactif, sans aucun outil (`--tools ""`) : la consigne passe par stdin
+  et la réponse revient sur stdout ; l'IA n'exécute ni ne modifie rien.
 - **Comptes GitHub, GitLab et Azure DevOps**, plusieurs à la fois (GitHub Enterprise, GitLab auto-hébergé et
   Azure DevOps Server compris) ; **clonage** depuis la liste agrégée de vos dépôts ou depuis une URL.
 - Surveillance du dossier (rafraîchissement automatique), fetch automatique silencieux, palette **Ctrl+P**
@@ -121,7 +147,7 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 | Ctrl+B | Afficher/masquer la liste des dépôts |
 | Ctrl+0 | Historique : révéler HEAD (le sélectionner) |
 | Ctrl+Maj+D | Afficher/masquer le panneau de détails du commit |
-| Ctrl+= / Ctrl+- | Zoom avant / arrière (taille de l'interface, enregistrée) |
+| Ctrl+= (ou Ctrl++) / Ctrl+- | Zoom avant / arrière (taille de l'interface, enregistrée) |
 | F5 | Actualiser |
 | Ctrl+Maj+L | Journal des commandes git |
 | Ctrl+Entrée | Commit (dans la zone de message) |
@@ -181,10 +207,11 @@ dépôt (pas de collision sur `index.lock`), résultats périmés ignorés.
 cargo test --workspace
 ```
 
-Environ 240 tests : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
+870 tests : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
 temporaires (y compris remotes locaux), API des forges sur des réponses JSON représentatives, et parcours
 d'interface de bout en bout (egui_kittest : indexer puis commiter, indexer un hunk, ouvrir un dépôt depuis la
-liste, créer une branche, résoudre un conflit, rebase interactif, stash/pop, annulation).
+liste, créer une branche, résoudre un conflit, rebase interactif, stash/pop, annulation, menus, worktrees, bisect,
+Git Flow, LFS, commandes personnalisées).
 Tests réels facultatifs (ignorés par défaut) : `cargo test -- --ignored` avec les variables décrites en tête
 des fichiers `tests/live*.rs`.
 

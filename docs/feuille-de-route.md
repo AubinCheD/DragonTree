@@ -1,15 +1,15 @@
 # DragonTree — feuille de route
 
-Rédigé le 2026-10-18 et mis à jour le 2026-10-19. Ce document reprend les demandes du 2026-10-18 :
+Rédigé le 2026-10-18, mis à jour le 2026-10-19 puis le 2026-10-20 (branche `options-fork`, voir plus bas). Ce document reprend les demandes du 2026-10-18 :
 
 - renommer le projet (fait) ;
 - choisir la langue (fait) ;
-- voir et changer de worktree (à faire : T1) ;
+- voir et changer de worktree (fait : T1, via R3) ;
 - voir les stashs (la fonction existe : T3) ;
 - filtrer l'historique sur la branche active (la fonction existe : T4) ;
-- recenser les options de menu de Git Fork pour choisir celles à implémenter (recensement fait, choix en attente : T2).
+- recenser les options de menu de Git Fork pour choisir celles à implémenter (recensement fait, toutes les options retenues et livrées : T2, N2).
 
-La mise à jour du 2026-10-19 ajoute l'état vérifié dans le code et la liste de tout ce qui reste à faire :
+La mise à jour du 2026-10-19 ajoute l'état vérifié dans le code et la liste de tout ce qui reste à faire (T1, T2, N2 et B1 sont depuis terminés : voir la section **Branche `options-fork` (2026-10-20)**) :
 
 - la section **Reste à faire** donne la synthèse ;
 - la section **Détail des points restants** donne le détail ;
@@ -25,7 +25,7 @@ Les références `crates/…:ligne` renvoient au code du 2026-10-19.
   - Les points V2, V3, V7 et R4 ci-dessous les rendent visibles comme dans Fork.
   - L'utilisateur n'a pas encore confirmé que c'était bien le problème (voir T3 et T4).
 - **Fork n'existe qu'en anglais.** Son développeur a refusé la traduction ([TrackerWin #392](https://github.com/fork-dev/TrackerWin/issues/392)). Le choix de la langue est donc un plus de DragonTree.
-- **Deux décisions de l'utilisateur sont en attente depuis le 2026-10-17 :** la validation de la proposition Worktrees et le choix des numéros d'options de menu.
+- **Les deux décisions en attente depuis le 2026-10-17 sont levées :** la proposition Worktrees est réalisée (R3) et toutes les options de menu sont implémentées (branche `options-fork`).
 
 ## Décisions
 
@@ -59,16 +59,16 @@ Les références `crates/…:ligne` renvoient au code du 2026-10-19.
   - « Journal git » était traduit par « Git log » ; il est maintenant traduit par « Git command log ».
 - Les autres points de la relecture restent à traiter : voir RV5.
 
-### Worktrees — à faire, proposition
+### Worktrees — fait (R3)
 
-Le fonctionnement s'inspire de Fork :
+Le fonctionnement s'inspire de Fork et a été réalisé ainsi :
 
 - **Section « Worktrees »** en haut de la barre latérale. Chaque ligne affiche la branche et le chemin.
 - **Ouverture :** un clic ouvre le worktree dans un onglet, ou bascule sur cet onglet s'il est déjà ouvert.
 - **Création :** depuis une branche locale, une branche distante ou un commit.
 - **Gestion :** supprimer (avec confirmation), copier le chemin.
 - **Branches déjà sorties ailleurs :** une icône signale les branches sorties dans un autre worktree. Un checkout d'une de ces branches propose d'ouvrir son worktree.
-- **État au 2026-10-19 :** la proposition attend la validation de l'utilisateur. Seul le scan des dossiers racines reconnaît les worktrees. L'état détaillé et les étapes sont en T1.
+- **État au 2026-10-20 :** réalisé par R3 (section de la barre latérale, dialogue de création, branches sorties ailleurs signalées). L'état détaillé est en T1.
 
 ### Raccourcis
 
@@ -77,11 +77,11 @@ Quand un raccourci actuel entre en conflit avec ceux de Fork, l'actuel est gard�
 - Ctrl+1…9 change d'onglet (Fork l'utilise pour changer de vue) ;
 - Ctrl+B affiche la liste des dépôts (Fork l'utilise pour un checkout rapide).
 
-**Points à trancher**, relevés en vérifiant le code le 2026-10-19 :
+**Points tranchés** (relevés en vérifiant le code le 2026-10-19, résolus sur la branche `options-fork`). Tous les raccourcis sont déclarés dans le registre `crates/dragontree-app/src/commands.rs` (`Command::shortcut`), sauf Ctrl+Tab et Ctrl+1…9 :
 
-- **Ctrl+Maj+L** ouvre le journal git (`crates/dragontree-app/src/repo/mod.rs:891-894`, rappelé dans l'infobulle `crates/dragontree-app/src/repo/toolbar.rs:104-105`). Tranché : il est gardé, et Pull prend **Ctrl+Maj+U** (Fetch Ctrl+Maj+F, Push Ctrl+Maj+P, Nouvelle branche Ctrl+Maj+B, Stash Ctrl+Maj+H).
-- **Ctrl+Maj+C** ouvre Cloner (`crates/dragontree-app/src/app.rs:476`). Dans Fork, Cloner est sur Ctrl+N et Ctrl+Maj+C copie les informations du commit.
-- **Ctrl+1 pour « Modifications locales »** ne fonctionne jamais : le changement d'onglet le consomme avant (voir B1). Une autre façon d'atteindre cette vue reste à prévoir, par exemple une entrée du menu View.
+- **Ctrl+Maj+L** reste le journal git. Pull prend **Ctrl+Maj+U** (Fetch Ctrl+Maj+F, Push Ctrl+Maj+P, Nouvelle branche Ctrl+Maj+B, Stash Ctrl+Maj+H).
+- **Ctrl+Maj+C** reste Cloner (dans Fork, Cloner est sur Ctrl+N et Ctrl+Maj+C copie les informations du commit).
+- **« Modifications locales »** s'atteint par Affichage › Modifications locales ; le code mort de Ctrl+1 a été supprimé (voir B1).
 
 ## Options de Fork pour les menus File / View / Repo / Config
 
@@ -90,9 +90,9 @@ Quand un raccourci actuel entre en conflit avec ceux de Fork, l'actuel est gard�
 - 🆕 : à développer.
 - Taille : P petit, M moyen, G gros.
 
-L'utilisateur choisira les numéros à implémenter. Au 2026-10-19, ce choix n'est pas fait.
+Toutes les options ci-dessous ont été implémentées sur la branche `options-fork` (voir « Branche options-fork » plus bas).
 
-La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessous ont été vérifiés dans le code le 2026-10-19, et V11, R10 et C5 ont été précisés.
+La barre de menus existe (T2). Les états ci-dessous ont été vérifiés dans le code le 2026-10-20 ; les options ont été précisées le 2026-10-19 (V11, R10, C5).
 
 ### File
 
@@ -174,13 +174,13 @@ Activation et licence, mises à jour automatiques, modèle « Lean Branching » 
 
 ## Reste à faire
 
-Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées.
+Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B6 (branche `options-fork`).
 
 ### Bugs à corriger
 
 | # | Point | Origine | Priorité |
 |---|---|---|---|
-| B1 | Ctrl+1 (« Modifications locales ») jamais atteint | revue finale, mineur n°19 | basse |
+| B1 | Ctrl+1 (« Modifications locales ») jamais atteint (corrigé : Affichage › Modifications locales) | revue finale, mineur n°19 | basse |
 | B2 | Dossier `.git/dragontree-rebase` laissé après un rebase arrêté puis terminé | revue finale, mineur n°20 | basse |
 | B3 | Décocher « Amend » trop vite écrase le message restauré | revue finale, mineur n°13 | basse |
 | B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié | revue finale, mineur n°10 | basse |
@@ -192,10 +192,10 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 
 | # | Point | Origine | Priorité |
 |---|---|---|---|
-| T1 | Worktrees : lister, ouvrir, créer, supprimer | demande du 2026-10-17 | haute |
-| T2 | Barre de menus File / View / Repo / Config et raccourcis manquants | demande du 2026-10-17, choix en attente | haute |
+| T1 | Worktrees : lister, ouvrir, créer, supprimer (fait, via R3) | demande du 2026-10-17 | haute |
+| T2 | Barre de menus Fichier / Affichage / Dépôt / Configuration et raccourcis (fait) | demande du 2026-10-17 | haute |
 | T3 | Stashs plus visibles (à vérifier avec l'utilisateur) | demande du 2026-10-17 | moyenne |
-| T4 | Filtre sur la branche active : raccourci, mémorisation (à vérifier avec l'utilisateur) | demande du 2026-10-17 | moyenne |
+| T4 | Filtre sur la branche active : mémorisation par dépôt (à vérifier avec l'utilisateur ; raccourci fait, V2) | demande du 2026-10-17 | moyenne |
 | T5 | Éléments du plan non livrés : glisser-déposer entre listes, colonne du graphe, colonne « mise à jour », aperçu des conflits | revue finale, mineur n°21 | basse |
 | T6 | Associer un compte à un dépôt existant | arbitrage de la tâche 18, « plus tard » | moyenne |
 
@@ -204,7 +204,7 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 | # | Point | Origine | Priorité |
 |---|---|---|---|
 | N1 | Vue centralisée des pull requests de tous les comptes | demande initiale, « pour plus tard » | moyenne |
-| N2 | Options de Fork 🆕 retenues : F2–F4, V3–V12, R2–R20, C2–C8, H1–H4 (tableaux ci-dessus) | demande du 2026-10-17 | selon le choix de l'utilisateur |
+| N2 | Options de Fork : F2–F4, V3–V12, R2–R20, C2–C8, H1–H4 (fait, tout est ✅ dans les tableaux ci-dessus) | demande du 2026-10-17 | terminé |
 | N3 | Icône intégrée à l'exécutable | limite connue | basse |
 
 ### Constats de revue
@@ -236,9 +236,9 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 
 ### Fonctionnalités à terminer
 
-#### T1 — Worktrees : lister, ouvrir, créer, supprimer
+#### T1 — Worktrees : lister, ouvrir, créer, supprimer (fait)
 
-- **Contexte :** l'utilisateur a demandé, le 2026-10-17, de « voir les différents worktrees facilement et basculer entre eux ». La proposition de la section Worktrees attend sa validation, en même temps que le choix des options de menu (R3).
+- **Contexte :** l'utilisateur a demandé, le 2026-10-17, de « voir les différents worktrees facilement et basculer entre eux ». La proposition de la section Worktrees a été réalisée avec l'option R3 (branche `options-fork`).
 - **État :**
   - fait (R3) : moteur `crates/dragontree-git/src/worktree.rs` (liste sans `-z`, création, suppression, prune), section « Worktrees » de la barre latérale et dialogue « Créer un worktree… » (`crates/dragontree-app/src/repo/worktrees.rs`), branches sorties ailleurs signalées, surveillance de `<common>/worktrees` ; les points ci-dessous décrivent l'état d'avant ;
   - le scan reconnaît un worktree (`crates/dragontree-git/src/discovery.rs:16-17`, `:159-160`) ;
@@ -246,9 +246,9 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
   - un worktree hors des dossiers scannés n'apparaît nulle part ;
   - le moteur n'appelle jamais `git worktree`, et la barre latérale n'a pas de section Worktrees (`crates/dragontree-app/src/repo/sidebar.rs:69-261`) ;
   - la surveillance du disque ignore `.git/worktrees` (`crates/dragontree-app/src/repo/watcher.rs:30`) : un ajout ou une suppression de worktree ne déclencherait aucun rafraîchissement.
-- **À faire :**
+- **Plan d'origine (réalisé, étapes 1 à 6 faites) :**
   1. Moteur :
-     - `Repo::worktrees()`, à partir de `git worktree list --porcelain -z` (chemin, HEAD, branche, détaché, verrouillé, à nettoyer) ;
+     - `Repo::worktrees()`, à partir de `git worktree list --porcelain`, sans `-z` (chemin, HEAD, branche, détaché, verrouillé, à nettoyer) ;
      - `add_worktree`, depuis une branche locale, une branche distante (avec création d'une branche de suivi) ou un commit (HEAD détachée) ;
      - `remove_worktree`, avec `--force` seulement sur confirmation explicite ;
      - `prune`.
@@ -261,34 +261,35 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
   4. Dialogue « Créer un worktree… » (R3) et commande dans la palette Ctrl+P.
   5. Rafraîchir la section quand `.git/worktrees` change.
   6. Ajouter les traductions dans `crates/dragontree-i18n/locales/en.json`.
-- **Critère de fin :**
+- **Critère de fin (atteint) :**
   - tests d'intégration du moteur sur un dépôt temporaire : création depuis une branche, une branche distante et un commit, liste, suppression, refus d'une branche déjà sortie ;
   - test d'interface : un clic sur une ligne ouvre l'onglet, un second clic le réactive ;
   - test d'interface : le checkout d'une branche sortie ailleurs propose le worktree ;
   - `cargo test -p dragontree-i18n` vert.
-- **Priorité :** haute (demande explicite).
+- **Priorité :** terminé (demande explicite).
 
-#### T2 — Barre de menus File / View / Repo / Config et raccourcis manquants
+#### T2 — Barre de menus Fichier / Affichage / Dépôt / Configuration (fait)
 
-- **Contexte :** l'utilisateur a demandé, le 2026-10-17, un menu File/View/Repo/Config « avec une majorité d'options qui existent sur Fork ». Il doit choisir les numéros dans les tableaux ci-dessus ; ce choix n'est pas fait.
+- **Contexte :** l'utilisateur a demandé, le 2026-10-17, un menu File/View/Repo/Config « avec une majorité d'options qui existent sur Fork ». Toutes les options des tableaux ci-dessus ont été retenues et implémentées (branche `options-fork`).
 - **État :**
-  - barre de menus faite (registre `commands.rs`) ;
-  - il n'y a aucune barre de menus : le seul panneau du haut est la barre d'onglets (`crates/dragontree-app/src/app.rs:611-617`) ;
-  - les options ✅ passent par la barre d'outils (`crates/dragontree-app/src/repo/toolbar.rs`), les menus contextuels, la palette Ctrl+P (`crates/dragontree-app/src/quick_open.rs:46-59`) et la fenêtre Réglages ;
+  - fait : barre de menus Fichier / Affichage / Dépôt / Configuration au-dessus des onglets (`crates/dragontree-app/src/menu_bar.rs`), alimentée par le registre `crates/dragontree-app/src/commands.rs` (entrées, raccourcis, palette Ctrl+P) ; les raccourcis sont affichés dans les libellés et les entrées propres à un dépôt sont grisées sans dépôt ouvert ;
+  - les points ci-dessous décrivent l'état d'avant :
+  - il n'y avait aucune barre de menus : le seul panneau du haut était la barre d'onglets (`crates/dragontree-app/src/app.rs:611-617`) ;
+  - les options ✅ passaient par la barre d'outils (`crates/dragontree-app/src/repo/toolbar.rs`), les menus contextuels, la palette Ctrl+P (`crates/dragontree-app/src/quick_open.rs:46-59`) et la fenêtre Réglages ;
   - raccourcis présents : `crates/dragontree-app/src/app.rs:451-486` et `crates/dragontree-app/src/repo/mod.rs:886-900`. Il manque Ctrl+, (F1), Ctrl+Maj+A (V2), Ctrl+= et Ctrl+- (V13), ainsi que Ctrl+Maj+F/L/P, Ctrl+Maj+B et Ctrl+Maj+H (R1).
-- **À faire :**
-  1. Obtenir le choix de l'utilisateur.
+- **Plan d'origine (réalisé) :**
+  1. Choix de l'utilisateur : toutes les options (fait).
   2. Ajouter la barre au-dessus des onglets.
   3. Brancher les entrées ✅ sur l'existant : `AppAction` (`crates/dragontree-app/src/app.rs:373-435`) et `RepoTab::quick_command` (`crates/dragontree-app/src/repo/toolbar.rs:133-154`).
   4. Griser les entrées propres à un dépôt quand l'onglet actif n'est pas un dépôt.
   5. Afficher les raccourcis dans les libellés.
   6. Ajouter les raccourcis manquants une fois les conflits tranchés (section Raccourcis).
-  7. Implémenter ensuite les options 🆕 retenues (N2).
-- **Critère de fin :**
+  7. Implémenter ensuite les options retenues (N2, fait).
+- **Critère de fin (atteint) :**
   - test d'interface qui ouvre chaque menu et déclenche une entrée de chacun ;
   - test d'interface pour chaque nouveau raccourci ;
   - test de traduction vert.
-- **Priorité :** haute (demande explicite), une fois le choix fait.
+- **Priorité :** terminé.
 
 #### T3 — Stashs plus visibles
 
@@ -308,18 +309,19 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 
 - **Contexte :** l'utilisateur a demandé à filtrer l'historique sur la branche active. La fonction existe ; même réserve que pour T3.
 - **État :**
-  - le bouton « Toutes les branches / Branche courante » est dans `crates/dragontree-app/src/repo/history.rs:79-93` ;
-  - le journal est alors limité à HEAD (`crates/dragontree-app/src/repo/mod.rs:410-414`) et il est rechargé après chaque checkout ;
-  - le choix est propre à l'onglet et repart sur « Toutes les branches » à chaque ouverture (`crates/dragontree-app/src/repo/mod.rs:152`) ;
-  - il n'y a aucun raccourci.
+  - le bouton « Toutes les branches / Branche courante » est dans `crates/dragontree-app/src/repo/history.rs:157-176` ;
+  - le journal est alors limité à HEAD (`crates/dragontree-app/src/repo/scope.rs:102`) et il est rechargé après chaque checkout ;
+  - fait (V2) : raccourci Ctrl+Maj+A et entrée Affichage › Branche courante seulement (cochée quand le filtre est actif) ;
+  - fait (V3) : filtre sur plusieurs branches, dossiers ou remotes, exclusif avec « Branche courante seulement » ;
+  - reste : le choix est propre à l'onglet et repart sur « Toutes les branches » à chaque ouverture (`crates/dragontree-app/src/repo/mod.rs:215`).
 - **À faire :**
-  1. Raccourci Ctrl+Maj+A et entrée du menu View (V2).
-  2. Mémoriser le choix par dépôt dans les réglages (Fork le garde par worktree).
-  3. Filtre sur plusieurs branches (V3), s'il est retenu.
+  1. Raccourci Ctrl+Maj+A et entrée du menu Affichage (V2, fait).
+  2. Mémoriser le choix par dépôt dans les réglages (Fork le garde par worktree), à confirmer avec l'utilisateur.
+  3. Filtre sur plusieurs branches (V3, fait).
 - **Critère de fin :**
-  - test d'interface : Ctrl+Maj+A bascule le filtre et son libellé ;
-  - test : à la réouverture du dépôt, le choix est conservé.
-- **Priorité :** moyenne.
+  - test d'interface : Ctrl+Maj+A bascule le filtre et son libellé (atteint : `current_branch_shortcut_hides_and_restores_the_other_branch_commits`, `crates/dragontree-app/tests/ui_history_filters.rs`) ;
+  - test : à la réouverture du dépôt, le choix est conservé (reste à faire).
+- **Priorité :** moyenne (pour la mémorisation).
 
 #### T5 — Éléments du plan non livrés
 
@@ -383,15 +385,15 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
   - test d'interface de la liste.
 - **Priorité :** moyenne (reportée par l'utilisateur lui-même).
 
-#### N2 — Options de Fork à développer
+#### N2 — Options de Fork à développer (fait)
 
-- **Contexte et état :** les options 🆕 sont dans les tableaux ci-dessus, avec leur taille, et leur état a été vérifié le 2026-10-19 : V11 et R10 sont en partie présents, C5 en partie amorcé. R3 relève de T1. Les fonctions que le README liste comme non gérées s'y trouvent : Git LFS (R14), git-flow (R13), reflog (V6), commandes personnalisées (R15).
-- **À faire :** implémenter les numéros que l'utilisateur retiendra. Pour chacun :
+- **Contexte et état :** les options sont dans les tableaux ci-dessus, avec leur taille ; toutes sont ✅ depuis la branche `options-fork`. R3 relève de T1. Les fonctions que le README listait comme non gérées sont faites : Git LFS (R14), git-flow (R13), reflog (V6), commandes personnalisées (R15).
+- **Réalisé :** toutes les options ont été implémentées. Pour chacune :
   - un test d'intégration du moteur si une commande git est ajoutée ;
   - un test d'interface ;
   - les traductions.
 - **Critère de fin :** les tests de l'option passent, et l'option passe à ✅ dans les tableaux.
-- **Priorité :** selon le choix de l'utilisateur.
+- **Priorité :** terminé.
 
 #### N3 — Icône intégrée à l'exécutable
 
@@ -408,12 +410,12 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 
 ### Bugs à corriger
 
-#### B1 — Ctrl+1 (« Modifications locales ») jamais atteint
+#### B1 — Ctrl+1 (« Modifications locales ») jamais atteint (fait)
 
 - **Contexte :** mineur n°19 de la revue finale.
-- **État :** le raccourci d'onglet (`crates/dragontree-app/src/app.rs:479-485`) consomme Ctrl+1 avant celui de l'onglet de dépôt (`crates/dragontree-app/src/repo/mod.rs:895-899`). Ce second code ne s'exécute donc jamais.
-- **À faire :** Ctrl+1…9 reste au changement d'onglet (section Raccourcis). Il faut donc supprimer ce code mort et donner un autre accès à la vue, par une entrée du menu View ou un autre raccourci.
-- **Critère de fin :** test d'interface du nouvel accès ; le code mort a disparu.
+- **État :** corrigé en T2 : le code mort a été supprimé et la vue s'atteint par Affichage › Modifications locales. Avant : le raccourci d'onglet (`crates/dragontree-app/src/app.rs:479-485`) consommait Ctrl+1 avant celui de l'onglet de dépôt (`crates/dragontree-app/src/repo/mod.rs:895-899`). Ce second code ne s'exécute donc jamais.
+- **Réalisé :** Ctrl+1…9 reste au changement d'onglet (section Raccourcis) ; le code mort de Ctrl+1 a été supprimé en T2 et la vue s'atteint par Affichage › Modifications locales.
+- **Critère de fin :** atteint (accès par le menu testé, code mort supprimé).
 - **Priorité :** basse.
 
 #### B2 — Dossier `.git/dragontree-rebase` laissé après un rebase arrêté
@@ -462,13 +464,13 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin :** test : la fenêtre est ouverte ; on change « Espaces » dans la vue diff, puis on enregistre un autre réglage ; « Espaces » est conservé.
 - **Priorité :** basse.
 
-#### B6 — `wt.exe -d` coupe un chemin contenant « ; »
+#### B6 — `wt.exe -d` coupe un chemin contenant « ; » (fait)
 
 - **Contexte :** annexe du point important n°8 de la revue finale.
-- **État :** corrigé avec C3. `wt_directory_arg` (`crates/dragontree-app/src/terminal.rs`) écrit « ; » en `\;` pour `wt.exe -d`, et les autres terminaux reçoivent le dossier par `current_dir`. Test unitaire : `windows_terminal_escapes_semicolons_and_keeps_other_characters`. Windows Terminal lisait « ; » comme un séparateur de commandes.
-- **À faire :** échapper « ; » (`\;`), ou passer par PowerShell quand le chemin en contient un.
-- **Critère de fin :** test unitaire sur la commande construite pour un chemin contenant « ; ».
-- **Priorité :** basse.
+- **État :** corrigé avec C3. Avant : Windows Terminal lisait « ; » comme un séparateur de commandes, et `wt.exe -d` coupait le chemin du dépôt à cet endroit.
+- **Réalisé :** `wt_directory_arg` (`crates/dragontree-app/src/terminal.rs`) écrit « ; » en `\;` pour `wt.exe -d` ; les autres terminaux reçoivent le dossier par `current_dir`.
+- **Critère de fin :** atteint (test unitaire `windows_terminal_escapes_semicolons_and_keeps_other_characters`, sur la commande construite pour un chemin contenant « ; »).
+- **Priorité :** terminé.
 
 #### B7 — Menu contextuel d'onglet lié à la position de l'onglet
 
@@ -575,11 +577,11 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 - **État :**
   - le manifeste déclare la licence MIT (`Cargo.toml:9`), mais le dépôt n'a pas de fichier `LICENSE` ;
   - la licence de la police Phosphor est présente (`assets/fonts/LICENSE-Phosphor.txt`) ;
-  - le README annonce « environ 240 tests », alors que 277 passaient le 2026-10-17.
+  - le README annonce 870 tests (nombre réel au 2026-10-20 ; 277 le 2026-10-17).
 - **À faire :**
   1. Ajouter `LICENSE`.
   2. Vérifier le nom (domaines, marques, winget, Scoop).
-  3. Mettre à jour le nombre de tests du README.
+  3. (fait le 2026-10-20) Nombre de tests du README à jour.
   4. Ajouter l'icône (N3).
 - **Critère de fin :** fichier `LICENSE` présent ; résultat des vérifications du nom consigné.
 - **Priorité :** moyenne.
@@ -631,6 +633,10 @@ Chacun de ces arbitrages a un coût annoncé. Ce sont des pistes d'amélioration
 - **L4. Échec d'authentification du fetch automatique :** il n'est signalé qu'une fois par série d'échecs (`crates/dragontree-app/src/repo/mod.rs:638-655`). Piste : un indicateur persistant dans l'onglet.
 - **L5. Amend d'un commit déjà poussé avec « Pousser après » :** rien n'est poussé, une notification s'affiche (`crates/dragontree-app/src/repo/actions.rs:224-243`). Piste : proposer explicitement un push forcé dans un dialogue de confirmation.
 - **L6. Option « Espaces » active :** le diff des changements passe en lecture seule (`crates/dragontree-app/src/repo/changes.rs:510-524`). Piste : recalculer le diff sans `-w` pour construire le patch, comme la revue le suggérait.
+
+## Branche `options-fork` (2026-10-20)
+
+La branche `options-fork` livre toutes les options des tableaux ci-dessus (F2–F4, V2–V13, R1–R20, C2–C8, H1–H4) ainsi que la barre de menus Fichier / Affichage / Dépôt / Configuration (T2), un commit par option (id en tête du sujet), corrections de relecture en `fixup!`. Elle résout T1 (worktrees, via R3), T2, N2, B1 et B6 (via C3), et tranche les raccourcis (Ctrl+Maj+L reste le journal, Pull = Ctrl+Maj+U, Ctrl+Maj+C reste Cloner). Tout passe par un registre de commandes unique (`crates/dragontree-app/src/commands.rs`) : menus, raccourcis, palette Ctrl+P et fenêtre des raccourcis en dérivent. Les commandes personnalisées (R15) refusent les valeurs dangereuses pour `cmd.exe` et passent aussi les valeurs acceptées en variables `DT_*` ; l'IA (C7) lance Claude Code sans aucun outil, consigne sur stdin, et reste désactivée par défaut. La suite compte 860 tests, clippy et rustfmt sont verts. Restent ouverts : B2 à B5 et B7, T3 à T6, N1, N3, RV1 à RV5, P1 à P4, L1 à L6.
 
 ## État du plan d'implémentation
 
