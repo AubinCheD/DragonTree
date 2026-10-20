@@ -109,7 +109,7 @@ impl RepoTab {
         self.history.graph = list.graph;
         self.history.index = list.index;
         self.history.folded = Arc::new(folded);
-        self.history.filter_applied.clear();
+        self.history.filter_applied = None;
         self.history.filtered = None;
         self.apply_filter();
         let Some(oid) = selected else { return };

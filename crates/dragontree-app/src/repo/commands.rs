@@ -73,7 +73,7 @@ impl RepoTab {
         if self.history.filtered.is_some() {
             // Même état qu'un champ de recherche vidé (voir `apply_filter`).
             self.history.filter.clear();
-            self.history.filter_applied.clear();
+            self.history.filter_applied = None;
             self.history.filtered = None;
         }
         self.select_commit(shared, oid, true);

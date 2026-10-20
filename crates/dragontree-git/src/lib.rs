@@ -51,7 +51,7 @@ pub use gitflow::{FinishOutcome, FlowKind, FlowStep, GitFlowConfig};
 pub use graph::{Edge, GraphBuilder, GraphLayout, GraphRow};
 pub use ignore::{IgnorePreview, IgnoreTarget};
 pub use lfs::{LfsLock, lfs_available, parse_lfs_patterns, parse_locks};
-pub use log::{Commit, LogOptions, LogOrder, LogParser, LogScope, LostCommits, RefSelection};
+pub use log::{Commit, CommitSearch, LogOptions, LogOrder, LogParser, LogScope, LostCommits, RefSelection};
 pub use net::{NetOptions, clone_repo, init_repo, trust_directory};
 pub use oid::Oid;
 pub use ops::{MergeMode, ResetMode};

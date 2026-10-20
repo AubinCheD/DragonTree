@@ -5,6 +5,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, Frame, Key, Rect, RichText, Sense, Ui};
 
 use super::graph_paint::{self, GraphGeom};
+use super::history_search::SearchMode;
 use super::scope::{LabelVisibility, display_name};
 use super::{RepoTab, RepoView};
 use crate::app::Shared;
@@ -50,12 +51,23 @@ impl RepoTab {
     /// Recherche dans la liste affichée (les commits des fusions repliées n'y sont pas).
     pub(super) fn apply_filter(&mut self) {
         let f = self.history.filter.trim().to_string();
-        if f == self.history.filter_applied {
+        let mode = self.history.search.mode;
+        let key = (mode, f.clone(), self.history.search.revision);
+        if self.history.filter_applied.as_ref() == Some(&key) {
             return;
         }
-        self.history.filter_applied = f.clone();
+        self.history.filter_applied = Some(key);
         if f.is_empty() {
             self.history.filtered = None;
+            return;
+        }
+        if mode != SearchMode::Text {
+            // Recherche par git : les lignes dont l'oid est trouvé ; aucune tant que le résultat n'est pas arrivé.
+            let found = self.history.search.results_for(mode, &f).cloned();
+            let rows = |set: &std::collections::HashSet<dragontree_git::Oid>| {
+                self.history.commits.iter().enumerate().filter(|(_, c)| set.contains(&c.id)).map(|(i, _)| i).collect()
+            };
+            self.history.filtered = Some(found.map_or_else(Vec::new, |set| rows(&set)));
             return;
         }
         let needle = widgets::fold(&f);
@@ -73,6 +85,18 @@ impl RepoTab {
             .map(|(i, _)| i)
             .collect();
         self.history.filtered = Some(filtered);
+    }
+
+    /// Sélecteur de ce que cherche le champ de recherche (message, contenu des modifications, chemin).
+    fn search_mode_selector(&mut self, ui: &mut Ui) {
+        let mode = &mut self.history.search.mode;
+        egui::ComboBox::from_id_salt(("history-search-mode", self.id))
+            .selected_text(RichText::new(mode.label()).size(12.5))
+            .show_ui(ui, |ui| {
+                for m in SearchMode::ALL {
+                    ui.selectable_value(mode, m, m.label());
+                }
+            });
     }
 
     /// Bandeau « Filtré par : … » au-dessus de l'historique quand il est filtré sur des branches choisies :
@@ -114,6 +138,7 @@ impl RepoTab {
             ui.add_space(6.0);
             ui.set_height(30.0);
             let total = self.history.commits.len();
+            let searching = self.history.search.is_searching(self.history.search.mode, self.history.filter.trim());
             let shown = self.history.filtered.as_ref().map_or(total, Vec::len);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(6.0);
@@ -125,7 +150,7 @@ impl RepoTab {
                     trn!(total, "{n} commit", "{n} commits")
                 };
                 ui.label(RichText::new(text).color(p.weak).size(12.0));
-                if self.history.loading {
+                if self.history.loading || searching {
                     ui.add(egui::Spinner::new().size(12.0));
                 }
                 ui.add_space(6.0);
@@ -153,13 +178,16 @@ impl RepoTab {
                     widgets::search_field(
                         ui,
                         &mut self.history.filter,
-                        tr!("Rechercher : message, auteur, SHA"),
+                        self.history.search.mode.hint(),
                         "history-filter",
                     );
                 });
+                ui.add_space(4.0);
+                self.search_mode_selector(ui);
             });
         });
         self.filter_banner(ui, shared, p);
+        self.drive_search(ui.ctx(), shared);
         self.apply_filter();
 
         if let Some(err) = &self.history.error {
@@ -173,14 +201,21 @@ impl RepoTab {
         if rows == 0 {
             ui.add_space(20.0);
             ui.vertical_centered(|ui| {
-                let msg = if self.history.loading {
-                    tr!("Chargement de l'historique…")
+                let mode = self.history.search.mode;
+                let query = self.history.filter.trim().to_string();
+                let failed = self.history.search.error_for(mode, &query);
+                let (msg, color) = if self.history.loading {
+                    (tr!("Chargement de l'historique…").to_string(), p.weak)
+                } else if let Some(e) = failed {
+                    (format!("{} {e}", icons::WARNING), p.removed_fg)
+                } else if self.history.search.is_searching(mode, &query) {
+                    (tr!("Recherche en cours…").to_string(), p.weak)
                 } else if filtered.is_some() {
-                    tr!("Aucun commit ne correspond à la recherche.")
+                    (tr!("Aucun commit ne correspond à la recherche.").to_string(), p.weak)
                 } else {
-                    tr!("Aucun commit pour l'instant.")
+                    (tr!("Aucun commit pour l'instant.").to_string(), p.weak)
                 };
-                ui.label(RichText::new(msg).color(p.weak));
+                ui.label(RichText::new(msg).color(color));
             });
             return;
         }

@@ -147,6 +147,43 @@ impl Default for LogOptions {
 
 pub const LOG_FORMAT: &str = "%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ct%x1f%s";
 
+/// Arguments de révisions (avant `--`) d'une portée.
+fn scope_args(scope: &LogScope) -> Vec<String> {
+    match scope {
+        LogScope::All => selection_args(&RefSelection::default()),
+        LogScope::Head => vec!["HEAD".into()],
+        LogScope::Revs(revs) => revs.clone(),
+        LogScope::Refs(selection) => selection_args(selection),
+    }
+}
+
+/// Recherche de commits par ce que leurs modifications contiennent ou touchent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitSearch {
+    /// Commits dont le diff ajoute ou retire une ligne qui correspond à l'expression régulière (`git log -G`).
+    Content(String),
+    /// Commits qui touchent un de ces chemins ou motifs (`git log -- <motif>…`) ; les jokers de git valent.
+    Paths(Vec<String>),
+}
+
+/// Arguments de `git log` qui listent (un oid par ligne) les commits de la portée de `opts` que `search` trouve.
+/// Le texte cherché est collé à `-G` (jamais pris pour une option) et les chemins viennent après `--`.
+pub fn search_args(opts: &LogOptions, search: &CommitSearch) -> Vec<String> {
+    let mut args: Vec<String> = ["log", "--no-show-signature", "--format=%H"].map(String::from).to_vec();
+    if let CommitSearch::Content(text) = search {
+        args.push(format!("-G{text}"));
+    }
+    args.extend(scope_args(&opts.scope));
+    if log_stdin(opts).is_some() {
+        args.push("--stdin".into());
+    }
+    args.push("--".into());
+    if let CommitSearch::Paths(paths) = search {
+        args.extend(paths.iter().cloned());
+    }
+    args
+}
+
 /// Arguments de `git log` correspondant aux options (sortie lisible par [`LogParser`]).
 pub fn log_args(opts: &LogOptions) -> Vec<String> {
     let mut args: Vec<String> = vec!["log".into(), "-z".into(), format!("--format={LOG_FORMAT}")];
@@ -160,12 +197,7 @@ pub fn log_args(opts: &LogOptions) -> Vec<String> {
     if opts.follow {
         args.push("--follow".into());
     }
-    match &opts.scope {
-        LogScope::All => args.extend(selection_args(&RefSelection::default())),
-        LogScope::Head => args.push("HEAD".into()),
-        LogScope::Revs(revs) => args.extend(revs.iter().cloned()),
-        LogScope::Refs(selection) => args.extend(selection_args(selection)),
-    }
+    args.extend(scope_args(&opts.scope));
     if log_stdin(opts).is_some() {
         args.push("--stdin".into());
     }
@@ -315,6 +347,18 @@ fn truncate(s: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_args_keep_text_and_paths_out_of_option_position() {
+        let opts = LogOptions { scope: LogScope::Head, ..LogOptions::default() };
+        let content = search_args(&opts, &CommitSearch::Content("--output=x".into()));
+        assert!(content.contains(&"-G--output=x".to_string()));
+        assert_eq!(content.last().map(String::as_str), Some("--"));
+        let paths = search_args(&opts, &CommitSearch::Paths(vec!["--all".into(), "src/*.rs".into()]));
+        let dashes = paths.iter().position(|a| a == "--").unwrap();
+        assert_eq!(&paths[dashes..], ["--", "--all", "src/*.rs"]);
+        assert!(!paths[..dashes].contains(&"--all".to_string()));
+    }
 
     const A: &str = "1111111111111111111111111111111111111111";
     const B: &str = "2222222222222222222222222222222222222222";

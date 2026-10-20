@@ -20,6 +20,7 @@ mod folding;
 mod gitflow;
 mod graph_paint;
 mod history;
+mod history_search;
 mod ignore;
 mod image_diff;
 mod lfs;
@@ -145,7 +146,10 @@ pub struct HistoryState {
     /// Commit affiché hors de la liste (stash) avec son libellé.
     pub external: Option<(Oid, String)>,
     pub filter: String,
-    pub filter_applied: String,
+    /// Mode, texte et révision des résultats dont `filtered` est le calcul (`None` : à recalculer).
+    pub filter_applied: Option<(history_search::SearchMode, String, u64)>,
+    /// Recherche par contenu ou par chemin (voir `history_search`).
+    pub search: history_search::HistorySearch,
     pub filtered: Option<Vec<usize>>,
     pub scroll_to: Option<usize>,
     pub details: Option<(CommitInfo, Vec<FileChange>)>,
@@ -192,7 +196,8 @@ impl Default for HistoryState {
             selected: None,
             external: None,
             filter: String::new(),
-            filter_applied: String::new(),
+            filter_applied: None,
+            search: history_search::HistorySearch::default(),
             filtered: None,
             scroll_to: None,
             details: None,
@@ -273,6 +278,7 @@ struct Gens {
     log: u64,
     extras: u64,
     folding: u64,
+    search: u64,
     details: u64,
     commit_diff: u64,
     work_diff: u64,
@@ -310,6 +316,11 @@ pub enum RepoEvent {
         generation: u64,
         complete: bool,
         result: Result<LogData, GitError>,
+    },
+    /// Oids trouvés par une recherche git dans l'historique (contenu, chemin).
+    Searched {
+        generation: u64,
+        result: Result<HashSet<Oid>, GitError>,
     },
     /// Liste affichée recalculée pour les fusions repliées (`follow_selection` : voir `show_list`).
     Folded {
@@ -629,6 +640,8 @@ impl RepoTab {
         self.history.log_cancel = Some(cancel.clone());
         self.gens.log += 1;
         self.history.loading = true;
+        // Portée possiblement changée : la recherche par contenu ou chemin porte sur le nouveau journal.
+        self.search_scope_changed();
         let (generation, id, sender) = (self.gens.log, self.id, shared.jobs.sender());
         let mut options = self.log_options(shared);
         let with_lost = self.shows_lost();
@@ -865,6 +878,7 @@ impl RepoTab {
                     Err(e) => self.history.error = Some(e),
                 }
             }
+            RepoEvent::Searched { generation, result } => self.search_done(generation, result),
             RepoEvent::Folded { generation, view, follow_selection } if generation == self.gens.folding => {
                 let CollapsedLog { commits, graph, index, folded, hidden_in } = *view;
                 let list = CommitList { commits: Arc::new(commits), graph: Arc::new(graph), index: Arc::new(index) };

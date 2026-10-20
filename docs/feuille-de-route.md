@@ -165,7 +165,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 |---|---|---|
 | H1 | Glisser une branche sur une autre pour un merge ou un rebase | ✅ |
 | H2 | Couleurs d'onglets et espaces de travail (groupes d'onglets) | ✅ |
-| H3 | Recherche de commits dans le contenu des diffs et par chemin (aujourd'hui : SHA, sujet, auteur et e-mail seulement, `crates/dragontree-app/src/repo/history.rs:31-56`) | 🆕 |
+| H3 | Recherche de commits dans le contenu des diffs et par chemin (aujourd'hui : SHA, sujet, auteur et e-mail seulement, `crates/dragontree-app/src/repo/history.rs:31-56`) | ✅ |
 | H4 | Diff d'images par balayage ou superposition (aujourd'hui : côte à côte seulement) | 🆕 |
 
 ### Écartés par défaut

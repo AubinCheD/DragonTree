@@ -1,5 +1,6 @@
 //! Dépôt ouvert : chemins et opérations de lecture.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use dragontree_i18n::tr;
@@ -7,14 +8,31 @@ use dragontree_i18n::tr;
 use crate::diff::{DiffOptions, FileChange, FileDiff, MAX_DIFF_BYTES, parse_name_status_z, parse_unified_diff_bytes};
 use crate::error::GitError;
 use crate::log::{
-    Commit, LOG_FORMAT, LogOptions, LogParser, LogScope, LostCommits, RefSelection, log_args, log_stdin, lost_args,
-    lost_stdin, parse_lost,
+    Commit, CommitSearch, LOG_FORMAT, LogOptions, LogParser, LogScope, LostCommits, RefSelection, log_args, log_stdin,
+    lost_args, lost_stdin, parse_lost, search_args,
 };
 use crate::oid::Oid;
 use crate::refs::{FOR_EACH_REF_FORMAT, RefsSnapshot, parse_refs, read_head};
 use crate::runner::{CancelToken, Git, GitCommand};
 use crate::stash::{STASH_FORMAT, StashEntry, parse_stash_list};
 use crate::status::{STATUS_ARGS, STATUS_IGNORED_ARG, StatusSnapshot, parse_status_v2};
+
+/// git se plaint d'un HEAD sans commit.
+fn unborn_head_error(stderr: &str) -> bool {
+    stderr.contains("unknown revision")
+        || stderr.contains("bad revision")
+        || stderr.contains("does not have any commits")
+}
+
+/// Les mêmes options sans HEAD (dépôt sans commit), quand la portée en contient d'autres.
+fn without_head(opts: &LogOptions) -> Option<LogOptions> {
+    let selection = match &opts.scope {
+        LogScope::All => RefSelection { head: false, ..RefSelection::default() },
+        LogScope::Refs(sel) if sel.head => RefSelection { head: false, ..sel.clone() },
+        _ => return None,
+    };
+    Some(LogOptions { scope: LogScope::Refs(selection), ..opts.clone() })
+}
 
 /// Arbre vide de git (SHA-1), utilisé comme parent d'un commit racine.
 pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -155,25 +173,42 @@ impl Repo {
     /// Historique ; vide pour un dépôt sans commit.
     pub fn log(&self, opts: &LogOptions, cancel: &CancelToken) -> Result<Vec<Commit>, GitError> {
         match self.run_log(opts, cancel) {
-            Err(GitError::Failed { stderr, .. })
-                if (stderr.contains("unknown revision")
-                    || stderr.contains("bad revision")
-                    || stderr.contains("does not have any commits"))
-                    && !self.head_exists() =>
-            {
+            Err(GitError::Failed { stderr, .. }) if unborn_head_error(&stderr) && !self.head_exists() => {
                 // HEAD sans commit : on garde les autres références éventuelles.
-                let without_head = match &opts.scope {
-                    LogScope::All => Some(RefSelection { head: false, ..RefSelection::default() }),
-                    LogScope::Refs(sel) if sel.head => Some(RefSelection { head: false, ..sel.clone() }),
-                    _ => None,
-                };
-                match without_head {
-                    Some(sel) => self.run_log(&LogOptions { scope: LogScope::Refs(sel), ..opts.clone() }, cancel),
+                match without_head(opts) {
+                    Some(opts) => self.run_log(&opts, cancel),
                     None => Ok(Vec::new()),
                 }
             }
             other => other,
         }
+    }
+
+    /// Oids des commits de la portée de `opts` que `search` trouve (`git log -G` ou par chemin), sans les lire un à
+    /// un. Une expression régulière invalide revient en `GitError::Failed` avec le message de git.
+    pub fn search_commits(
+        &self,
+        opts: &LogOptions,
+        search: &CommitSearch,
+        cancel: &CancelToken,
+    ) -> Result<HashSet<Oid>, GitError> {
+        let run = |opts: &LogOptions| {
+            let cmd = match log_stdin(opts) {
+                Some(revisions) => self.read().stdin(revisions),
+                None => self.read(),
+            };
+            cmd.args(search_args(opts, search)).cancel(cancel.clone()).run()
+        };
+        let out = match run(opts) {
+            Err(GitError::Failed { stderr, .. }) if unborn_head_error(&stderr) && !self.head_exists() => {
+                match without_head(opts) {
+                    Some(opts) => run(&opts)?,
+                    None => return Ok(HashSet::new()),
+                }
+            }
+            other => other?,
+        };
+        Ok(out.stdout_str().lines().filter_map(|l| Oid::from_hex(l.trim())).collect())
     }
 
     fn run_log(&self, opts: &LogOptions, cancel: &CancelToken) -> Result<Vec<Commit>, GitError> {
