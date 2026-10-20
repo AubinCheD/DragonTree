@@ -106,6 +106,12 @@ pub struct Settings {
     pub open_tabs: Vec<PathBuf>,
     pub active_tab: usize,
     pub recent_repos: Vec<PathBuf>,
+    /// Dépôt (chemin) -> couleur du liseré de son onglet.
+    pub tab_colors: BTreeMap<String, crate::workspaces::TabColor>,
+    /// Espaces de travail rangés (hors l'espace actif, dont les onglets sont `open_tabs`) : nom -> onglets.
+    pub workspaces: BTreeMap<String, crate::workspaces::Workspace>,
+    /// Espace de travail actif ; vide : « Par défaut ».
+    pub current_workspace: String,
     pub accounts: Vec<Account>,
     /// Dépôt (chemin) → identifiant du compte utilisé pour fetch/pull/push.
     pub repo_accounts: BTreeMap<String, String>,
@@ -181,6 +187,9 @@ impl Default for Settings {
             open_tabs: Vec::new(),
             active_tab: 0,
             recent_repos: Vec::new(),
+            tab_colors: BTreeMap::new(),
+            workspaces: BTreeMap::new(),
+            current_workspace: String::new(),
             accounts: Vec::new(),
             repo_accounts: BTreeMap::new(),
             diff_context: 3,

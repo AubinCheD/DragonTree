@@ -24,6 +24,7 @@ use crate::editors::Editor;
 use crate::icons;
 use crate::repo::{RepoTab, RepoView};
 use crate::settings::{HistoryLayout, Settings, ThemeChoice};
+use crate::workspaces::DEFAULT_WORKSPACE;
 
 /// Commande de l'interface : entrée de menu, raccourci éventuel, palette Ctrl+P.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,6 +40,14 @@ pub enum Command {
     SshKeys,
     /// Identité git globale (nom et e-mail des commits).
     GitIdentity,
+    /// Passe à l'espace de travail à cette position de `Settings::workspace_names`. Hors de [`Command::ALL`] : la
+    /// liste vient des réglages (voir `MenuItem::Workspaces`).
+    Workspace(usize),
+    NewWorkspace,
+    /// Renomme l'espace de travail actif.
+    RenameWorkspace,
+    /// Supprime l'espace de travail actif (après confirmation) et revient à « Par défaut ».
+    DeleteWorkspace,
     /// Ferme l'application (pas de raccourci propre : Alt+F4 reste celui du système).
     Quit,
     ShowChanges,
@@ -172,11 +181,13 @@ pub enum MenuItem {
     Submenu(&'static str, &'static [MenuItem]),
     /// Les commandes personnalisées de cible « dépôt », lues dans les réglages à l'affichage ([`custom_entries`]).
     CustomCommands,
+    /// Les espaces de travail (`Settings::workspace_names`), un par entrée : Fichier › Espaces de travail.
+    Workspaces,
     /// Les éditeurs détectés (`CommandContext::editors`), un par entrée : Dépôt › Ouvrir dans.
     OpenInEditors,
 }
 
-use MenuItem::{Cmd, CustomCommands, OpenInEditors, Separator, Submenu};
+use MenuItem::{Cmd, CustomCommands, OpenInEditors, Separator, Submenu, Workspaces};
 
 /// Contenu de la barre de menus : (titre du menu marqué par `tr_mark!`, entrées).
 pub const MENUS: &[(&str, &[MenuItem])] = &[
@@ -190,6 +201,16 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::CloseTab),
             Cmd(Command::ReopenClosedTab),
+            Submenu(
+                tr_mark!("Espaces de travail"),
+                &[
+                    Workspaces,
+                    Separator,
+                    Cmd(Command::NewWorkspace),
+                    Cmd(Command::RenameWorkspace),
+                    Cmd(Command::DeleteWorkspace),
+                ],
+            ),
             Separator,
             Cmd(Command::QuickOpen),
             Cmd(Command::Accounts),
@@ -362,6 +383,9 @@ impl Command {
         Command::Accounts,
         Command::SshKeys,
         Command::GitIdentity,
+        Command::NewWorkspace,
+        Command::RenameWorkspace,
+        Command::DeleteWorkspace,
         Command::Quit,
         Command::ShowChanges,
         Command::ShowHistory,
@@ -450,6 +474,11 @@ impl Command {
             Command::Accounts => tr!("Comptes…"),
             Command::SshKeys => tr!("Clés SSH…"),
             Command::GitIdentity => tr!("Identité git…"),
+            // Le menu affiche le nom de chaque espace (`Settings::workspace_names`).
+            Command::Workspace(_) => tr!("Espace de travail"),
+            Command::NewWorkspace => tr!("Nouvel espace de travail…"),
+            Command::RenameWorkspace => tr!("Renommer l'espace de travail…"),
+            Command::DeleteWorkspace => tr!("Supprimer l'espace de travail…"),
             Command::Quit => tr!("Quitter"),
             Command::ShowChanges => tr!("Modifications locales"),
             Command::ShowHistory => tr!("Tous les commits"),
@@ -564,6 +593,9 @@ impl Command {
             Command::Accounts => icons::USER_CIRCLE,
             Command::SshKeys => icons::KEY,
             Command::GitIdentity => icons::USER,
+            Command::Workspace(_) | Command::NewWorkspace | Command::RenameWorkspace | Command::DeleteWorkspace => {
+                icons::SQUARES_FOUR
+            }
             Command::Quit => icons::SIGN_OUT,
             Command::ShowChanges => icons::GIT_DIFF,
             Command::ShowHistory => icons::GIT_COMMIT,
@@ -647,6 +679,10 @@ impl Command {
             | Command::Accounts
             | Command::SshKeys
             | Command::GitIdentity
+            | Command::Workspace(_)
+            | Command::NewWorkspace
+            | Command::RenameWorkspace
+            | Command::DeleteWorkspace
             | Command::Quit
             | Command::ToggleRepoList
             | Command::ShowLog
@@ -777,6 +813,8 @@ impl Command {
                 // Le clic principal de la barre d'outils ; la palette propose chaque éditeur par son nom.
                 | Command::OpenInEditor
                 | Command::OpenIn(_)
+                // Un espace par entrée de menu (les trois autres commandes d'espaces restent dans la palette).
+                | Command::Workspace(_)
         )
     }
 
@@ -811,7 +849,15 @@ impl Command {
             return false;
         }
         match self.scope() {
-            Scope::App => self != Command::ReopenClosedTab || cx.can_reopen_tab,
+            Scope::App => match self {
+                Command::ReopenClosedTab => cx.can_reopen_tab,
+                Command::Workspace(i) => i < cx.settings.workspace_names().len(),
+                // « Par défaut » ne se renomme ni ne se supprime.
+                Command::RenameWorkspace | Command::DeleteWorkspace => {
+                    cx.settings.current_workspace_name() != DEFAULT_WORKSPACE
+                }
+                _ => true,
+            },
             // Commande personnalisée : elle doit encore exister, avec la cible « dépôt ».
             Scope::Repo if matches!(self, Command::CustomCommand(_)) => {
                 cx.repo.is_some_and(|tab| tab.can_run(self))
@@ -849,6 +895,9 @@ impl Command {
             Command::ShowIgnoredFiles => Some(cx.settings.show_ignored_files),
             Command::HideUntrackedFiles => Some(cx.settings.hide_untracked_files),
             Command::Language(lang) => Some(cx.settings.language == lang),
+            Command::Workspace(i) => {
+                Some(cx.settings.workspace_names().get(i).is_some_and(|n| n == cx.settings.current_workspace_name()))
+            }
             Command::Theme(choice) => Some(cx.settings.theme == choice),
             _ => None,
         }
@@ -896,7 +945,7 @@ mod tests {
         for item in items {
             match item {
                 Cmd(cmd) => out.push(*cmd),
-                Separator | CustomCommands | OpenInEditors => {}
+                Separator | CustomCommands | OpenInEditors | Workspaces => {}
                 Submenu(title, sub) => {
                     assert!(!title.trim().is_empty(), "sous-menu sans titre");
                     menu_commands(sub, out);

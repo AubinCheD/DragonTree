@@ -31,7 +31,7 @@ fn menu_commands(items: &[MenuItem], out: &mut Vec<Command>) {
         match item {
             MenuItem::Cmd(cmd) => out.push(*cmd),
             MenuItem::Submenu(_, sub) => menu_commands(sub, out),
-            MenuItem::Separator | MenuItem::CustomCommands | MenuItem::OpenInEditors => {}
+            MenuItem::Separator | MenuItem::CustomCommands | MenuItem::OpenInEditors | MenuItem::Workspaces => {}
         }
     }
 }

@@ -33,5 +33,7 @@ pub mod toasts;
 pub mod util;
 pub mod welcome;
 pub mod widgets;
+pub mod workspace_dialog;
+pub mod workspaces;
 
 pub use app::{DragonTreeApp, StartOptions};

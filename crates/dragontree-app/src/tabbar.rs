@@ -5,6 +5,7 @@ use egui::{Align2, CornerRadius, FontId, Id, Rect, Sense, Stroke, Ui};
 
 use crate::icons;
 use crate::theme::Palette;
+use crate::workspaces::TabColor;
 
 pub struct TabInfo {
     pub id: u64,
@@ -12,6 +13,8 @@ pub struct TabInfo {
     pub tooltip: String,
     pub busy: bool,
     pub is_repo: bool,
+    /// Couleur du liseré choisie pour ce dépôt.
+    pub color: Option<TabColor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +28,8 @@ pub enum TabBarAction {
     ToggleRepoList,
     OpenExplorer(usize),
     CopyPath(usize),
+    /// Couleur d'un onglet, désigné par son identifiant (la position change quand on réordonne ou ferme).
+    SetColor(u64, Option<TabColor>),
 }
 
 const TAB_H: f32 = 32.0;
@@ -107,6 +112,14 @@ fn tab_widget(
         ui.painter().hline(shape_rect.x_range().shrink(6.0), shape_rect.top() + 0.5, Stroke::new(2.0, p.accent));
     }
 
+    // Liseré de la couleur choisie pour le dépôt : au pied de l'onglet, actif ou non.
+    if let Some(color) = tab.color {
+        let stripe = Rect::from_min_max(
+            egui::pos2(shape_rect.left() + 3.0, shape_rect.bottom() - 3.0),
+            egui::pos2(shape_rect.right() - 3.0, shape_rect.bottom()),
+        );
+        ui.painter().rect_filled(stripe, CornerRadius::same(1), color.color(p));
+    }
     let icon = if tab.is_repo { icons::GIT_BRANCH } else { icons::HOUSE };
     let icon_pos = egui::pos2(rect.left() + 14.0, rect.center().y + 2.0);
     if tab.busy {
@@ -180,6 +193,24 @@ fn tab_widget(
         }
         if tab.is_repo {
             ui.separator();
+            ui.menu_button(format!("{} {}", icons::PALETTE, tr!("Couleur")), |ui| {
+                if ui.add(egui::Button::new(tr!("Aucune")).selected(tab.color.is_none())).clicked() {
+                    actions.push(TabBarAction::SetColor(tab.id, None));
+                    ui.close();
+                }
+                for color in TabColor::ALL {
+                    // Pastille de la couleur devant son nom ; la couleur actuelle est sélectionnée.
+                    let swatch = color.color(p);
+                    let mut atoms = egui::Atoms::new(color.label());
+                    atoms.push_left(egui::Atom::paint(egui::Vec2::splat(12.0), move |ui, args| {
+                        ui.painter().circle_filled(args.rect.center(), 5.0, swatch);
+                    }));
+                    if ui.add(egui::Button::new(atoms).selected(tab.color == Some(color))).clicked() {
+                        actions.push(TabBarAction::SetColor(tab.id, Some(color)));
+                        ui.close();
+                    }
+                }
+            });
             if ui.button(format!("{} {}", icons::FOLDER_OPEN, tr!("Ouvrir dans l'Explorateur"))).clicked() {
                 actions.push(TabBarAction::OpenExplorer(index));
                 ui.close();

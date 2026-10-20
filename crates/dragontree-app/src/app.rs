@@ -23,6 +23,7 @@ use crate::tabbar::{self, TabBarAction, TabInfo};
 use crate::theme::{self, Palette};
 use crate::toasts::{CommandLog, Toast, Toasts};
 use crate::welcome::{self, WelcomeAction};
+use crate::workspace_dialog::WorkspaceAction;
 
 pub type TabId = u64;
 
@@ -237,6 +238,7 @@ pub struct DragonTreeApp {
     window_title: String,
     /// Onglets de dépôt fermés pendant la session (Ctrl+Maj+T).
     closed_tabs: ClosedTabs,
+    workspace_dialog: crate::workspace_dialog::WorkspaceDialog,
 }
 
 impl DragonTreeApp {
@@ -324,6 +326,7 @@ impl DragonTreeApp {
             system_lang,
             window_title: String::new(),
             closed_tabs: ClosedTabs::default(),
+            workspace_dialog: Default::default(),
         };
 
         // Onglets : ceux de la ligne de commande, sinon ceux de la dernière session.
@@ -484,6 +487,65 @@ impl DragonTreeApp {
             self.tabs[..self.active.min(self.tabs.len())].iter().filter(|t| matches!(t.kind, TabKind::Repo(_))).count();
         self.shared.settings.active_tab = repos_before;
         self.shared.settings_dirty = true;
+    }
+
+    /// Passe à l'espace de travail `name` : les onglets de l'espace quitté sont rangés dans les réglages, ceux de
+    /// l'espace choisi sont rouverts.
+    fn switch_workspace(&mut self, name: &str) {
+        // L'onglet actif change sans passer par les réglages (clic, Ctrl+Tab, Ctrl+1…9) : on le relit avant de ranger.
+        self.remember_tabs();
+        if self.shared.settings.switch_workspace(name) {
+            self.load_workspace_tabs();
+        }
+    }
+
+    /// Remplace les onglets par ceux de `Settings::open_tabs` : un dépôt déjà ouvert garde son onglet (et son état),
+    /// les autres se ferment ; la barre n'est jamais vide.
+    fn load_workspace_tabs(&mut self) {
+        let wanted = self.shared.settings.open_tabs.clone();
+        let active = self.shared.settings.active_tab;
+        let mut old = std::mem::take(&mut self.tabs);
+        for path in wanted.into_iter().filter(|p| p.is_dir()) {
+            let key = path_key(&path);
+            if let Some(i) = old.iter().position(|t| matches!(&t.kind, TabKind::Repo(r) if path_key(&r.path) == key)) {
+                self.tabs.push(old.remove(i));
+            } else {
+                let id = self.alloc_tab_id();
+                let tab = RepoTab::new(id, path, &mut self.shared);
+                self.tabs.push(Tab { id, kind: TabKind::Repo(Box::new(tab)) });
+            }
+        }
+        if self.tabs.is_empty() {
+            self.new_welcome_tab();
+        }
+        self.active = active.min(self.tabs.len() - 1);
+        self.remember_tabs();
+    }
+
+    fn apply_workspace_action(&mut self, action: WorkspaceAction) {
+        let settings = &mut self.shared.settings;
+        match action {
+            WorkspaceAction::Create(name) => {
+                if let Ok(name) = settings.create_workspace(&name) {
+                    self.switch_workspace(&name);
+                    self.shared.settings_dirty = true;
+                }
+            }
+            WorkspaceAction::Rename { old, new } => {
+                if settings.rename_workspace(&old, &new).is_ok() {
+                    self.shared.settings_dirty = true;
+                }
+            }
+            WorkspaceAction::Delete(name) => {
+                let was_active = settings.current_workspace_name() == name;
+                if settings.delete_workspace(&name) {
+                    if was_active {
+                        self.load_workspace_tabs();
+                    }
+                    self.shared.settings_dirty = true;
+                }
+            }
+        }
     }
 
     fn pick_folder(title: &str) -> Option<PathBuf> {
@@ -677,7 +739,7 @@ impl DragonTreeApp {
     }
 
     /// Commandes proposées par la palette Ctrl+P, avec leur libellé : celles du registre utilisables en ce moment,
-    /// puis les commandes personnalisées du dépôt sous leur nom.
+    /// puis les commandes personnalisées du dépôt sous leur nom, les éditeurs et les espaces de travail.
     fn palette_commands(&self) -> Vec<(Command, String)> {
         let cx = self.command_context();
         let registry = Command::ALL.iter().copied().filter(|c| c.in_palette() && c.enabled(&cx));
@@ -686,6 +748,12 @@ impl DragonTreeApp {
         list.extend(custom.map(|(c, name)| (c, tr!("Commande personnalisée : {name}", name))));
         let editors = cx.editors.iter().enumerate().map(|(i, e)| (Command::OpenIn(i), e.kind.label()));
         list.extend(editors.filter(|(c, _)| c.enabled(&cx)).map(|(c, name)| (c, tr!("Ouvrir dans {name}", name))));
+        // Un espace de travail par entrée (hors l'actif), sous son nom.
+        let current = cx.settings.current_workspace_name();
+        let others = cx.settings.workspace_names().into_iter().enumerate().filter(|(_, name)| name != current);
+        list.extend(others.map(|(i, name)| {
+            (Command::Workspace(i), tr!("Espace de travail : {name}", name = Settings::workspace_label(&name)))
+        }));
         list
     }
 
@@ -721,6 +789,18 @@ impl DragonTreeApp {
             Command::NewTab => self.new_welcome_tab(),
             Command::CloseTab => self.close_tab(self.active),
             Command::ReopenClosedTab => self.reopen_closed_tab(),
+            Command::Workspace(i) => {
+                if let Some(name) = self.shared.settings.workspace_names().get(i).cloned() {
+                    self.switch_workspace(&name);
+                }
+            }
+            Command::NewWorkspace => self.workspace_dialog.show_new(),
+            Command::RenameWorkspace => {
+                self.workspace_dialog.show_rename(self.shared.settings.current_workspace_name())
+            }
+            Command::DeleteWorkspace => {
+                self.workspace_dialog.show_delete(self.shared.settings.current_workspace_name())
+            }
             Command::OpenRepo => self.shared.actions.push(AppAction::PickAndOpenRepo),
             Command::Clone => self.shared.actions.push(AppAction::ShowClone),
             Command::InitRepo => self.shared.actions.push(AppAction::InitRepo),
@@ -861,6 +941,7 @@ impl DragonTreeApp {
                     tooltip: tr!("Ouvrir, cloner ou créer un dépôt").into(),
                     busy: false,
                     is_repo: false,
+                    color: None,
                 },
                 TabKind::Repo(r) => TabInfo {
                     id: t.id,
@@ -868,6 +949,7 @@ impl DragonTreeApp {
                     tooltip: r.path.display().to_string(),
                     busy: r.is_busy(),
                     is_repo: true,
+                    color: self.shared.settings.tab_color_of(&r.path),
                 },
             })
             .collect()
@@ -892,6 +974,12 @@ impl DragonTreeApp {
                     self.remember_tabs();
                 }
                 TabBarAction::New => self.new_welcome_tab(),
+                TabBarAction::SetColor(id, color) => {
+                    if let Some(TabKind::Repo(r)) = self.tabs.iter().find(|t| t.id == id).map(|t| &t.kind) {
+                        self.shared.settings.set_tab_color(&r.path.clone(), color);
+                        self.shared.settings_dirty = true;
+                    }
+                }
                 TabBarAction::Move(from, to) => {
                     if from < self.tabs.len() && to < self.tabs.len() {
                         self.tabs.swap(from, to);
@@ -1047,6 +1135,9 @@ impl eframe::App for DragonTreeApp {
         };
         self.ssh_keys.ui(&ctx, &mut self.shared, active_repo.as_deref(), &p);
         self.git_identity.ui(&ctx, &mut self.shared, &p);
+        if let Some(action) = self.workspace_dialog.ui(&ctx, &self.shared.settings, &p) {
+            self.apply_workspace_action(action);
+        }
         self.shortcuts_window.ui(&ctx, &p);
         self.about_window.ui(&ctx, &p);
         if let Some(c) = &mut self.clone

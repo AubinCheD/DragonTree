@@ -102,6 +102,7 @@ impl SettingsWindow {
             d.open_tabs = shared.settings.open_tabs.clone();
             d.active_tab = shared.settings.active_tab;
             d.recent_repos = shared.settings.recent_repos.clone();
+            crate::workspaces::keep_workspace_state(&mut d, &shared.settings);
             d.accounts = shared.settings.accounts.clone();
             d.repo_accounts = shared.settings.repo_accounts.clone();
             d.favorites = shared.settings.favorites.clone();

@@ -24,7 +24,8 @@ pub fn show(ui: &mut Ui, cx: &CommandContext) -> Option<Command> {
 fn entries(ui: &mut Ui, items: &[MenuItem], cx: &CommandContext, chosen: &mut Option<Command>) {
     // Colonne des coches, réservée quand une entrée de ce menu peut être cochée (libellés alignés).
     let column = items.iter().any(|item| {
-        matches!(item, MenuItem::OpenInEditors) || matches!(item, MenuItem::Cmd(cmd) if cmd.checked(cx).is_some())
+        matches!(item, MenuItem::OpenInEditors | MenuItem::Workspaces)
+            || matches!(item, MenuItem::Cmd(cmd) if cmd.checked(cx).is_some())
     });
     for item in items {
         match item {
@@ -49,6 +50,7 @@ fn entries(ui: &mut Ui, items: &[MenuItem], cx: &CommandContext, chosen: &mut Op
             }
             MenuItem::CustomCommands => custom_command_entries(ui, cx, column, chosen),
             MenuItem::OpenInEditors => open_in_entries(ui, cx, column, chosen),
+            MenuItem::Workspaces => workspace_entries(ui, cx, column, chosen),
         }
     }
 }
@@ -115,4 +117,20 @@ fn with_check_column(label: &str, checked: Option<bool>) -> Atoms<'_> {
         }));
     }
     atoms
+}
+
+/// Espaces de travail, un par entrée ; l'espace actif est coché.
+fn workspace_entries(ui: &mut Ui, cx: &CommandContext, column: bool, chosen: &mut Option<Command>) {
+    for (i, name) in cx.settings.workspace_names().iter().enumerate() {
+        let cmd = Command::Workspace(i);
+        let label = crate::settings::Settings::workspace_label(name);
+        let on = cmd.checked(cx) == Some(true);
+        // État exposé à l'accessibilité (tests) ; la coche remplace le fond de sélection, comme pour `entry`.
+        let mut button = Button::new(with_check_column(&label, column.then_some(on))).selected(on);
+        button.remove_class(Button::CLASS_SELECTED);
+        if ui.add(button).clicked() {
+            *chosen = Some(cmd);
+            ui.close();
+        }
+    }
 }
