@@ -4,6 +4,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod accounts;
+pub mod ai;
 pub mod app;
 pub mod clone;
 pub mod closed_tabs;

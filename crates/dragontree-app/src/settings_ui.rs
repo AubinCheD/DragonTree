@@ -6,7 +6,7 @@ use dragontree_git::Git;
 use dragontree_i18n::{Lang, tr, trn};
 use egui::RichText;
 
-use crate::app::{AppAction, Shared};
+use crate::app::{AiCheck, AppAction, AppEvent, Shared};
 use crate::custom_commands::{self, CommandKind, CommandTarget, CustomCommand};
 use crate::external_tools::{self, DetectedTool, ToolChoice, ToolKind, ToolPreset};
 use crate::icons;
@@ -316,6 +316,50 @@ impl SettingsWindow {
                     }
                 });
             response.response.labelled_by(label.id);
+        });
+
+        section(ui, tr!("IA (Claude Code)"));
+        ui.label(
+            RichText::new(tr!(
+                "Rédige les messages de commit et relit les branches avec la CLI Claude Code (claude -p). Le diff n'est envoyé qu'au clic sur « Générer avec Claude » ou « Revue par Claude »."
+            ))
+            .color(p.weak)
+            .size(12.0),
+        );
+        ui.checkbox(&mut d.ai_enabled, tr!("Activer les fonctions IA"));
+        ui.horizontal(|ui| {
+            let label = ui.label(tr!("CLI Claude Code"));
+            ui.add(
+                egui::TextEdit::singleline(&mut d.ai_cli_path)
+                    .hint_text(tr!("claude (cherché dans le PATH)"))
+                    .desired_width(320.0),
+            )
+            .labelled_by(label.id);
+            let running = shared.ai_check == AiCheck::Running;
+            if ui.add_enabled(!running, egui::Button::new(tr!("Tester"))).clicked() {
+                shared.ai_check = AiCheck::Running;
+                let cli = crate::ai::AiCli::from_settings(d);
+                shared.jobs.spawn("ai-check", move || {
+                    Some(AppEvent::AiChecked(crate::ai::check(&cli).map_err(|e| e.message())))
+                });
+            }
+        });
+        match &shared.ai_check {
+            AiCheck::Idle => {}
+            AiCheck::Running => {
+                ui.label(RichText::new(tr!("Test en cours…")).color(p.weak));
+            }
+            AiCheck::Done(Ok(version)) => {
+                ui.label(RichText::new(format!("{} {version}", icons::CHECK_CIRCLE)).color(p.added_fg));
+            }
+            AiCheck::Done(Err(error)) => {
+                ui.label(RichText::new(format!("{} {error}", icons::WARNING)).color(p.removed_fg));
+            }
+        }
+        ui.horizontal(|ui| {
+            let label = ui.label(tr!("Modèle (facultatif)"));
+            ui.add(egui::TextEdit::singleline(&mut d.ai_model).hint_text("sonnet").desired_width(200.0))
+                .labelled_by(label.id);
         });
 
         section(ui, tr!("Réseau"));

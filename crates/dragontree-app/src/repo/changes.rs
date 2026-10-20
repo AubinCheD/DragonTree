@@ -775,6 +775,8 @@ impl RepoTab {
             ui.menu_button(format!("{} {}", tr!("Co-auteur"), icons::CARET_DOWN), |ui| {
                 coauthor = self.coauthors_menu(ui, p);
             });
+            // Le diff indexé est ce que Claude lit : rien à résumer sans fichier indexé, ni en modifiant un commit.
+            self.ai_commit_controls(ui, shared, p, staged > 0 && !self.changes.amend && !committing);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let level = commit_message::length_level(len, soft, hard);
                 let color = match level {
@@ -791,6 +793,7 @@ impl RepoTab {
                 ));
             });
         });
+        self.ai_commit_notices(ui, p);
         if let Some((message, with_body)) = picked {
             self.changes.subject = message.subject;
             if with_body {
@@ -888,6 +891,7 @@ impl RepoTab {
                 msg.push_str(self.changes.body.trim_end());
             }
             let (amend, push) = (self.changes.amend, self.changes.push_after);
+            self.forget_ai_commit();
             self.op_commit(shared, msg, amend, push);
         }
     }

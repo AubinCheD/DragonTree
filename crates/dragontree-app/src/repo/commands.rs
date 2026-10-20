@@ -52,6 +52,7 @@ impl RepoTab {
             }
             Command::DeleteStaleBranches => self.refs.is_some(),
             Command::CreatePullRequest => has_remote && on_branch,
+            Command::AiReviewBranch => on_branch,
             Command::LfsPull => has_remote && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
@@ -153,6 +154,11 @@ impl RepoTab {
             Command::LfsLocks => self.open_lfs_locks(shared),
             Command::RepoSettings => self.open_repo_settings(shared),
             Command::RepoStats => self.open_stats(shared),
+            Command::AiReviewBranch => {
+                if let Some(HeadState::Branch(name)) = self.refs.as_ref().map(|r| r.head.clone()) {
+                    self.open_ai_review(shared, name);
+                }
+            }
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => shared.open_terminal(&self.path),
             Command::OpenInEditor => self.open_in_editor(

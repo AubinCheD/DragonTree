@@ -787,6 +787,15 @@ impl RepoTab {
             ui.close();
         }
         self.compare_branch_entry(ui, shared, &name, current);
+        if shared.settings.ai_enabled
+            && ui
+                .button(format!("{} {}", icons::SPARKLE, tr!("Revue par Claude…")))
+                .on_hover_text(tr!("Envoie le diff de la branche (depuis la branche par défaut) à la CLI Claude Code"))
+                .clicked()
+        {
+            self.open_ai_review(shared, name.clone());
+            ui.close();
+        }
         self.hide_menu_entry(ui, shared, &branch_pattern(&name));
         self.filter_menu_entry(ui, shared, &branch_pattern(&name));
         if ui.button(format!("{} {}", icons::COPY, tr!("Copier le nom"))).clicked() {

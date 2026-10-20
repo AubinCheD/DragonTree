@@ -144,6 +144,8 @@ pub enum Command {
     RepoStats,
     /// Réglages du dépôt : identité locale, liens vers les tickets, modèle de message de commit.
     RepoSettings,
+    /// Revue de la branche courante par Claude Code (IA activée dans les réglages) : fenêtre avec le texte.
+    AiReviewBranch,
     Settings,
     /// Langue de l'interface ; `None` : celle de Windows.
     Language(Option<Lang>),
@@ -257,6 +259,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::PushBranches),
             Cmd(Command::DeleteStaleBranches),
             Cmd(Command::CreatePullRequest),
+            Cmd(Command::AiReviewBranch),
             Separator,
             Cmd(Command::ApplyPatch),
             Cmd(Command::PastePatch),
@@ -418,6 +421,7 @@ impl Command {
         Command::OpenInEditor,
         Command::RepoStats,
         Command::RepoSettings,
+        Command::AiReviewBranch,
         Command::Settings,
         Command::Language(None),
         Command::Language(Some(Lang::Fr)),
@@ -507,6 +511,7 @@ impl Command {
             Command::OpenIn(_) => tr!("Ouvrir dans"),
             Command::RepoStats => tr!("Statistiques…"),
             Command::RepoSettings => tr!("Réglages du dépôt…"),
+            Command::AiReviewBranch => tr!("Revue de la branche par Claude…"),
             Command::Settings => tr!("Réglages…"),
             Command::Language(None) => tr!("Système"),
             // Chaque langue est nommée dans sa propre langue.
@@ -610,6 +615,7 @@ impl Command {
             Command::OpenInEditor | Command::OpenIn(_) => icons::CODE,
             Command::RepoStats => icons::CHART_BAR,
             Command::RepoSettings => icons::GEAR_SIX,
+            Command::AiReviewBranch => icons::SPARKLE,
             Command::Settings => icons::GEAR_SIX,
             Command::Language(_) => icons::TRANSLATE,
         }
@@ -693,7 +699,8 @@ impl Command {
             | Command::OpenInEditor
             | Command::OpenIn(_)
             | Command::RepoStats
-            | Command::RepoSettings => Scope::Repo,
+            | Command::RepoSettings
+            | Command::AiReviewBranch => Scope::Repo,
         }
     }
 
@@ -797,6 +804,10 @@ impl Command {
             }
             // Éditeur détecté à cette position (la liste est remplacée une fois la détection terminée).
             Scope::Repo if matches!(self, Command::OpenIn(i) if i >= cx.editors.len()) => false,
+            // L'IA est activée dans les réglages (rien ne part sans elle) et la branche courante existe.
+            Scope::Repo if self == Command::AiReviewBranch => {
+                cx.settings.ai_enabled && cx.repo.is_some_and(|tab| tab.can_run(self))
+            }
             // Rien à réafficher : l'entrée est grisée.
             Scope::Repo if self == Command::ShowHiddenRefs => {
                 cx.repo.is_some_and(|tab| tab.can_run(self) && !cx.settings.hidden_refs_of(&tab.path).is_empty())

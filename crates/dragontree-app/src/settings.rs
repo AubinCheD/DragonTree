@@ -118,6 +118,11 @@ pub struct Settings {
     pub diff_font_size: f32,
     pub diff_tab_width: u8,
     pub diff_show_whitespace: bool,
+    /// IA (Réglages › IA) : active les boutons « Générer avec Claude » et « Revue par Claude », chemin de la CLI Claude
+    /// Code (vide : `claude` dans le PATH) et modèle facultatif. Rien n'est envoyé sans un clic.
+    pub ai_enabled: bool,
+    pub ai_cli_path: String,
+    pub ai_model: String,
     pub push_after_commit: bool,
     /// Minutes entre deux fetch automatiques des onglets ouverts (0 = jamais).
     pub auto_fetch_minutes: u32,
@@ -186,6 +191,9 @@ impl Default for Settings {
             diff_font_size: 12.5,
             diff_tab_width: 4,
             diff_show_whitespace: false,
+            ai_enabled: false,
+            ai_cli_path: String::new(),
+            ai_model: String::new(),
             push_after_commit: false,
             auto_fetch_minutes: 10,
             show_read_commands_in_log: false,

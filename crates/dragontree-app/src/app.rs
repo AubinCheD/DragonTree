@@ -42,6 +42,17 @@ pub enum AppEvent {
     EditorsDetected(Vec<crate::editors::Editor>),
     /// Préréglages d'outils de diff et de merge installés (même détection, même moment).
     ToolsDetected(Vec<crate::external_tools::DetectedTool>),
+    /// Test de la CLI Claude Code (Réglages › IA) : sa version, ou le message d'erreur.
+    AiChecked(Result<String, String>),
+}
+
+/// Test de la CLI Claude Code lancé depuis les réglages.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AiCheck {
+    #[default]
+    Idle,
+    Running,
+    Done(Result<String, String>),
 }
 
 /// Demandes des vues à l'application (traitées après l'affichage).
@@ -99,6 +110,8 @@ pub struct Shared {
     pub editors: Vec<crate::editors::Editor>,
     /// Préréglages d'outils externes trouvés sur la machine (vide tant que la détection n'a pas répondu).
     pub tools: Vec<crate::external_tools::DetectedTool>,
+    /// Dernier test de la CLI Claude Code (Réglages › IA).
+    pub ai_check: AiCheck,
 }
 
 impl Shared {
@@ -127,6 +140,7 @@ impl Shared {
             lfs: None,
             editors: vec![crate::editors::Editor::system_default()],
             tools: Vec::new(),
+            ai_check: AiCheck::Idle,
         };
         (shared, rx)
     }
@@ -517,6 +531,7 @@ impl DragonTreeApp {
                 AppEvent::LfsDetected(available) => self.shared.lfs = Some(available),
                 AppEvent::EditorsDetected(editors) => self.shared.editors = editors,
                 AppEvent::ToolsDetected(tools) => self.shared.tools = tools,
+                AppEvent::AiChecked(result) => self.shared.ai_check = AiCheck::Done(result),
                 AppEvent::Initialized(path, result) => match result {
                     Ok(()) => self.shared.actions.push(AppAction::OpenRepo(path)),
                     Err(e) => self.shared.toast(Toast::error(tr!("Création du dépôt impossible"), e.to_string())),

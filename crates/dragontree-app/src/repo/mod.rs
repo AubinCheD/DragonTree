@@ -1,6 +1,7 @@
 //! Onglet d'un dépôt : barre d'outils, navigation (branches…), historique et changements locaux.
 
 mod actions;
+mod ai;
 mod bisect;
 mod blame;
 mod branch_batch;
@@ -350,6 +351,10 @@ pub enum RepoEvent {
     LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
     /// Statistiques calculées pour la fenêtre des statistiques.
     Stats(u64, Result<Box<dragontree_git::RepoStats>, GitError>),
+    /// Message de commit rédigé par Claude (résumé, description) ou message d'erreur.
+    AiCommit(u64, Result<(String, String, Option<usize>), String>),
+    /// Revue de branche rédigée par Claude, ou message d'erreur.
+    AiReview(u64, Result<Box<ai::ReviewOutcome>, String>),
     /// Échec du lancement d'un outil externe (titre, détail) : une notification.
     ToolError(String, String),
     /// Branches périmées lues pour le dialogue qui les attend.
@@ -411,6 +416,8 @@ pub struct RepoTab {
     pub lfs_locks: Option<lfs::LfsLocksWindow>,
     /// Fenêtre des statistiques du dépôt ouverte.
     pub stats: Option<stats::StatsWindow>,
+    /// IA : génération du message de commit et fenêtre de revue de branche.
+    pub ai: ai::AiState,
     /// Fenêtre de sortie de la dernière commande personnalisée qui l'a demandée.
     pub custom_output: Option<custom::CustomOutputWindow>,
     pub view: RepoView,
@@ -466,6 +473,7 @@ impl RepoTab {
             lfs_files: HashSet::new(),
             lfs_locks: None,
             stats: None,
+            ai: ai::AiState::default(),
             custom_output: None,
             view: RepoView::History,
             history: HistoryState::default(),
@@ -1017,6 +1025,8 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
             RepoEvent::Stats(g, result) => self.on_stats(g, result),
+            RepoEvent::AiCommit(g, result) => self.on_ai_commit(g, result),
+            RepoEvent::AiReview(g, result) => self.on_ai_review(g, result),
             RepoEvent::ToolError(title, detail) => shared.toast(crate::toasts::Toast::error(title, detail)),
             RepoEvent::StaleBranches(found) => self.on_stale_branches(shared, found),
             RepoEvent::PullRequestDefault(generation, default) => self.on_pull_request_default(generation, default),
@@ -1247,6 +1257,7 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
         }
         self.lfs_locks_window(&ctx, shared, &p);
         self.stats_window(&ctx, shared, &p);
+        self.ai_review_window(&ctx, &p);
         self.custom_output_window(&ctx, &p);
         self.rebase_window(&ctx, shared, &p);
         self.conflict_window(&ctx, shared, &p);
