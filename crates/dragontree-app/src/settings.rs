@@ -36,6 +36,18 @@ pub enum HistoryLayout {
     Horizontal,
 }
 
+/// Présentation de l'aperçu d'une image modifiée (avant / après).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum ImageDiffMode {
+    /// Les deux versions l'une à côté de l'autre.
+    #[default]
+    SideBySide,
+    /// Les deux versions superposées, un curseur vertical montre l'ancienne à gauche et la nouvelle à droite.
+    Swipe,
+    /// La nouvelle version par-dessus l'ancienne, d'opacité réglable.
+    Overlay,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ThemeChoice {
     #[default]
@@ -84,6 +96,8 @@ pub struct Settings {
     pub details_panel_visible: bool,
     /// Place du panneau de détails : sous la liste des commits ou à sa droite.
     pub history_layout: HistoryLayout,
+    /// Aperçu des images modifiées : côte à côte, balayage ou superposition.
+    pub image_diff_mode: ImageDiffMode,
     /// Historique trié topologiquement (sinon par date).
     pub topological_order: bool,
     /// Tags parcourus par le graphe et étiquetés dans l'historique.
@@ -173,6 +187,7 @@ impl Default for Settings {
             repo_list_visible: true,
             details_panel_visible: true,
             history_layout: HistoryLayout::Vertical,
+            image_diff_mode: ImageDiffMode::SideBySide,
             topological_order: false,
             show_tags: true,
             show_remote_branches: true,
