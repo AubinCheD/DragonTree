@@ -7,6 +7,7 @@ use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
 use super::actions::StashOp;
+use super::branch_drag::{BranchDrag, BranchDrop};
 use super::custom::Clicked;
 use super::patches::PatchSource;
 use super::scope::{Visibility, branch_pattern, folder_pattern, remote_branch_pattern, remote_pattern, visibility};
@@ -318,6 +319,7 @@ impl RepoTab {
                 }
             }
         });
+        self.branch_drag_ui(ui.ctx(), shared);
     }
 
     /// En-tête de section repliable ; renvoie vrai si la section est ouverte.
@@ -488,8 +490,30 @@ impl RepoTab {
             Leaf::Remote(b) => ("remote", b.full.as_str()),
             Leaf::Tag(t) => ("tag", t.name.as_str()),
         };
-        let (rect, resp) = widgets::row_response(ui, id_salt, ROW_H, selected, Sense::click());
+        // Les branches (locales ou distantes) se glissent sur une branche locale (fusion / rebase) ; un simple clic
+        // reste un clic.
+        let sense =
+            if matches!(leaf, Leaf::Local(_) | Leaf::Remote(_)) { Sense::click_and_drag() } else { Sense::click() };
+        let (rect, resp) = widgets::row_response(ui, id_salt, ROW_H, selected, sense);
         widgets::a11y(&resp, full, true);
+        if let Leaf::Remote(b) = leaf {
+            resp.dnd_set_drag_payload(BranchDrag(b.full.clone()));
+        }
+        if let Leaf::Local(b) = leaf {
+            resp.dnd_set_drag_payload(BranchDrag(b.name.clone()));
+            // Cible du glisser : cadre autour de la ligne ; le dépôt ouvre le menu des actions.
+            if let Some(drag) = resp.dnd_hover_payload::<BranchDrag>()
+                && drag.0 != b.name
+            {
+                ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.5, p.accent), egui::StrokeKind::Inside);
+            }
+            if let Some(drag) = resp.dnd_release_payload::<BranchDrag>()
+                && drag.0 != b.name
+            {
+                let pos = ui.ctx().pointer_latest_pos().unwrap_or(rect.center());
+                self.branch_drop = Some(BranchDrop { source: drag.0.clone(), target: b.name.clone(), pos });
+            }
+        }
         // Œil : au survol, ou en permanence quand l'élément est masqué du graphe (ligne atténuée).
         let pattern = match leaf {
             Leaf::Local(b) => branch_pattern(&b.name),

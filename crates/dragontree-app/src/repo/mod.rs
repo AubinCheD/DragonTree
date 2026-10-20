@@ -5,6 +5,7 @@ mod ai;
 mod bisect;
 mod blame;
 mod branch_batch;
+mod branch_drag;
 mod changes;
 mod commands;
 mod commit_message;
@@ -447,6 +448,10 @@ pub struct RepoTab {
     auth_warned: bool,
     /// Dossier à ouvrir dans un onglet quand l'opération (numéro) réussit : un worktree qui vient d'être créé.
     open_after_op: Option<(u64, PathBuf)>,
+    /// Révision à fusionner (dialogue de fusion) quand le checkout (numéro) réussit : dépôt d'une branche sur une autre.
+    merge_after_op: Option<(u64, String)>,
+    /// Menu ouvert après le dépôt d'une branche sur une autre dans la barre latérale.
+    branch_drop: Option<branch_drag::BranchDrop>,
     /// Numéro du push demandé par le dialogue de pull request : la création suit quand il réussit.
     pr_after_push: Option<(u64, u64)>,
     /// Numéro du dernier dialogue de pull request ouvert (voir `PullRequestForm::generation`).
@@ -497,6 +502,8 @@ impl RepoTab {
             quick_dirty: false,
             auth_warned: false,
             open_after_op: None,
+            merge_after_op: None,
+            branch_drop: None,
             pr_after_push: None,
             pr_generation: 0,
         };
@@ -987,6 +994,7 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                 }
                 self.refresh(shared, refresh);
                 self.after_lfs_op(shared, id);
+                self.after_checkout_merge(id, succeeded);
                 self.after_pr_push(shared, id, succeeded);
                 if self.open_after_op.as_ref().is_some_and(|(op, _)| *op == id)
                     && let Some((_, path)) = self.open_after_op.take()
