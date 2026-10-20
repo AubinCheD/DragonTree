@@ -67,20 +67,11 @@ impl ConfigScope {
 /// `ssh-keygen` de Git pour Windows (`<racine>\usr\bin\ssh-keygen.exe`), déduit du chemin de `git.exe`
 /// (`<racine>\cmd`, `<racine>\bin` ou `<racine>\mingw64\bin`) ; sinon celui du PATH.
 pub fn find_ssh_keygen(git_exe: &Path) -> PathBuf {
-    let exe = if git_exe.parent().is_some_and(|p| !p.as_os_str().is_empty()) {
-        Some(git_exe.to_path_buf())
-    } else {
-        // `git` seul : on le cherche dans le PATH pour en connaître le dossier.
-        let paths = std::env::var_os("PATH").unwrap_or_default();
-        std::env::split_paths(&paths).map(|dir| dir.join("git.exe")).find(|p| p.is_file())
-    };
-    let from_git = exe.and_then(|exe| {
-        exe.ancestors()
-            .skip(1)
-            .take(3)
-            .map(|root| root.join("usr").join("bin").join("ssh-keygen.exe"))
-            .find(|candidate| candidate.is_file())
-    });
+    let path_var = std::env::var_os("PATH");
+    let from_git = crate::runner::git_install_roots(git_exe, path_var.as_deref(), |p| p.is_file())
+        .into_iter()
+        .map(|root| root.join("usr").join("bin").join("ssh-keygen.exe"))
+        .find(|candidate| candidate.is_file());
     from_git.unwrap_or_else(|| PathBuf::from("ssh-keygen"))
 }
 

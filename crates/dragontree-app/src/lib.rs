@@ -22,6 +22,7 @@ pub mod settings;
 pub mod settings_ui;
 pub mod ssh_keys;
 pub mod tabbar;
+pub mod terminal;
 pub mod theme;
 pub mod tickets;
 pub mod toasts;

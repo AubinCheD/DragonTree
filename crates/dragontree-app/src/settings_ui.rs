@@ -11,6 +11,7 @@ use crate::custom_commands::{self, CommandKind, CommandTarget, CustomCommand};
 use crate::external_tools::{self, DetectedTool, ToolChoice, ToolKind, ToolPreset};
 use crate::icons;
 use crate::settings::{Settings, ThemeChoice, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, path_key};
+use crate::terminal::TerminalChoice;
 use crate::theme::Palette;
 
 /// Onglet de la fenêtre des réglages.
@@ -260,6 +261,25 @@ impl SettingsWindow {
             &shared.tools,
             p,
         );
+
+        section(ui, tr!("Terminal"));
+        ui.label(
+            RichText::new(tr!(
+                "Terminal utilisé par « Ouvrir un terminal ». PowerShell choisit pwsh s'il est installé ; Git Bash est déduit du chemin de git."
+            ))
+            .color(p.weak)
+            .size(12.0),
+        );
+        ui.horizontal(|ui| {
+            let label = ui.label(tr!("Terminal"));
+            let response =
+                egui::ComboBox::from_id_salt("terminal-choice").selected_text(d.terminal.label()).show_ui(ui, |ui| {
+                    for choice in TerminalChoice::ALL {
+                        ui.selectable_value(&mut d.terminal, choice, choice.label());
+                    }
+                });
+            response.response.labelled_by(label.id);
+        });
 
         section(ui, tr!("Réseau"));
         ui.horizontal(|ui| {

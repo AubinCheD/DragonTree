@@ -152,7 +152,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 |---|---|---|
 | C1 | Langue français / anglais | ✅ (dans Réglages) |
 | C2 | Outils externes de diff et de merge configurables, avec préréglages VS Code, WinMerge, Beyond Compare, KDiff3, P4Merge (`git mergetool` existe déjà) | ✅ |
-| C3 | Terminal à utiliser (Windows Terminal, PowerShell, Git Bash) | 🆕 P |
+| C3 | Terminal à utiliser (Windows Terminal, PowerShell, Git Bash) | ✅ |
 | C4 | Identité git globale (nom, email) | 🆕 P |
 | C5 | Message de commit : indicateur de longueur 50/72, colonne guide, messages récents, Co-authored-by | 🆕 M (un compteur « n/72 » sur le résumé existe déjà : `crates/dragontree-app/src/repo/changes.rs:562-567`) |
 | C6 | Diff : police, taille, largeur de tabulation, espaces visibles | 🆕 P |
@@ -185,7 +185,7 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 | B3 | Décocher « Amend » trop vite écrase le message restauré | revue finale, mineur n°13 | basse |
 | B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié | revue finale, mineur n°10 | basse |
 | B5 | La fenêtre Réglages écrase des changements faits ailleurs (corrigé en partie) | revue finale, mineur n°8 | basse |
-| B6 | `wt.exe -d` coupe un chemin contenant « ; » | revue finale, annexe de I8 | basse |
+| B6 | `wt.exe -d` coupe un chemin contenant « ; » (corrigé) | revue finale, annexe de I8 | basse |
 | B7 | Menu contextuel d'onglet lié à la position de l'onglet | arbitrage de la revue (M14) | basse |
 
 ### Fonctionnalités à terminer
@@ -465,7 +465,7 @@ Synthèse au 2026-10-19. Chaque point est détaillé plus bas, sous son identifi
 #### B6 — `wt.exe -d` coupe un chemin contenant « ; »
 
 - **Contexte :** annexe du point important n°8 de la revue finale.
-- **État :** `crates/dragontree-app/src/util.rs:61-66` passe le chemin à `wt.exe -d`. Windows Terminal lit « ; » comme un séparateur de commandes.
+- **État :** corrigé avec C3. `wt_directory_arg` (`crates/dragontree-app/src/terminal.rs`) écrit « ; » en `\;` pour `wt.exe -d`, et les autres terminaux reçoivent le dossier par `current_dir`. Test unitaire : `windows_terminal_escapes_semicolons_and_keeps_other_characters`. Windows Terminal lisait « ; » comme un séparateur de commandes.
 - **À faire :** échapper « ; » (`\;`), ou passer par PowerShell quand le chemin en contient un.
 - **Critère de fin :** test unitaire sur la commande construite pour un chemin contenant « ; ».
 - **Priorité :** basse.

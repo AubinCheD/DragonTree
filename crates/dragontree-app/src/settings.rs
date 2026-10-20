@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::custom_commands::CustomCommand;
 use crate::external_tools::ToolChoice;
+use crate::terminal::TerminalChoice;
 
 /// Bornes et pas de la taille de l'interface (curseur des réglages, zoom au clavier).
 pub const UI_SCALE_MIN: f32 = 0.8;
@@ -120,6 +121,8 @@ pub struct Settings {
     /// Le code de sortie de la commande de merge personnalisée dit si le fichier est résolu (sinon git compare le fichier
     /// avant et après). À cocher seulement si l'outil renvoie un code d'échec quand on le ferme sans résoudre.
     pub custom_merge_tool_trust_exit: bool,
+    /// Terminal de « Ouvrir un terminal » (Réglages › Terminal).
+    pub terminal: TerminalChoice,
 }
 
 impl Default for Settings {
@@ -168,6 +171,7 @@ impl Default for Settings {
             merge_tool: ToolChoice::Git,
             custom_merge_tool: String::new(),
             custom_merge_tool_trust_exit: false,
+            terminal: TerminalChoice::Auto,
         }
     }
 }

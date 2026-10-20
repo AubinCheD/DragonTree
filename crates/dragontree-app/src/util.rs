@@ -1,6 +1,5 @@
 //! Intégrations Windows : Explorateur, terminal, éditeur, ouverture de fichiers et d'URL.
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -47,31 +46,6 @@ pub fn reveal_in_explorer(path: &Path) {
 /// Ouvre un fichier avec l'application associée.
 pub fn open_with_default_app(path: &Path) {
     let _ = Command::new("explorer.exe").arg(native_path(path)).spawn();
-}
-
-fn find_in(path_var: Option<&OsStr>, exe: &str) -> Option<PathBuf> {
-    std::env::split_paths(path_var?).map(|dir| dir.join(exe)).find(|p| p.is_file())
-}
-
-fn in_path(exe: &str) -> bool {
-    find_in(std::env::var_os("PATH").as_deref(), exe).is_some()
-}
-
-/// Terminal dans le dossier : Windows Terminal si disponible, sinon PowerShell.
-pub fn open_terminal(path: &Path) {
-    let wt = dirs::data_local_dir().map(|d| d.join("Microsoft").join("WindowsApps").join("wt.exe"));
-    if (wt.as_ref().is_some_and(|p| p.exists()) || in_path("wt.exe"))
-        && Command::new("wt.exe").arg("-d").arg(path).spawn().is_ok()
-    {
-        return;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        let _ =
-            Command::new("powershell.exe").arg("-NoExit").current_dir(path).creation_flags(CREATE_NEW_CONSOLE).spawn();
-    }
 }
 
 pub fn open_url(ctx: &egui::Context, url: &str) {

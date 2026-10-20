@@ -454,7 +454,7 @@ impl RepoListState {
                 ui.close();
             }
             if ui.button(format!("{} {}", icons::TERMINAL_WINDOW, tr!("Ouvrir un terminal"))).clicked() {
-                crate::util::open_terminal(&r.path);
+                shared.open_terminal(&r.path);
                 ui.close();
             }
             ui.menu_button(format!("{} {}", icons::CODE, tr!("Ouvrir dans")), |ui| {

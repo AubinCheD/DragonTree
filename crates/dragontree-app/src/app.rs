@@ -143,6 +143,23 @@ impl Shared {
     pub fn toast(&mut self, t: Toast) {
         self.toasts.push(t);
     }
+
+    /// « Ouvrir un terminal » avec le terminal des réglages ; notification si le choix était indisponible.
+    pub fn open_terminal(&mut self, path: &std::path::Path) {
+        let git = self.git.as_ref().map(|g| g.exe().to_path_buf());
+        match crate::terminal::open(self.settings.terminal, path, git.as_deref()) {
+            Ok(None) => {}
+            Ok(Some((choice, crate::terminal::Unavailable::Missing))) => self.toast(Toast::info(tr!(
+                "Terminal : {choice} est introuvable, un autre terminal est utilisé à la place.",
+                choice = choice.label()
+            ))),
+            Ok(Some((choice, crate::terminal::Unavailable::Failed))) => self.toast(Toast::info(tr!(
+                "Terminal : {choice} n'a pas pu être lancé, un autre terminal est utilisé à la place.",
+                choice = choice.label()
+            ))),
+            Err(e) => self.toast(Toast::error(tr!("Aucun terminal n'a pu être lancé"), e)),
+        }
+    }
 }
 
 /// Options de lancement (ligne de commande).

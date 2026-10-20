@@ -154,7 +154,7 @@ impl RepoTab {
             Command::RepoSettings => self.open_repo_settings(shared),
             Command::RepoStats => self.open_stats(shared),
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
-            Command::OpenTerminal => crate::util::open_terminal(&self.path),
+            Command::OpenTerminal => shared.open_terminal(&self.path),
             Command::OpenInEditor => self.open_in_editor(
                 shared,
                 crate::editors::main_editor(&shared.editors, shared.settings.last_editor.as_deref()),

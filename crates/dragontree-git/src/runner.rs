@@ -46,6 +46,19 @@ pub struct Git {
     exe: PathBuf,
 }
 
+/// Dossiers d'installation de Git pour Windows déduits de l'exécutable (`<racine>\cmd\git.exe`,
+/// `<racine>\bin\git.exe` ou `<racine>\mingw64\bin\git.exe` : on remonte de quelques dossiers, du plus proche
+/// au plus lointain). Un `git` seul (trouvé par le PATH) est d'abord résolu en `git.exe` dans `path_var`.
+/// `exists` isole le disque pour les tests.
+pub fn git_install_roots(git_exe: &Path, path_var: Option<&OsStr>, exists: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+    let exe = if git_exe.parent().is_some_and(|p| !p.as_os_str().is_empty()) {
+        Some(git_exe.to_path_buf())
+    } else {
+        path_var.and_then(|paths| std::env::split_paths(paths).map(|dir| dir.join("git.exe")).find(|p| exists(p)))
+    };
+    exe.map(|exe| exe.ancestors().skip(1).take(4).map(Path::to_path_buf).collect()).unwrap_or_default()
+}
+
 impl Git {
     /// Cherche `git` dans le PATH, puis dans les emplacements d'installation usuels.
     pub fn discover() -> Result<Git, GitError> {
