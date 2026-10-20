@@ -189,14 +189,6 @@ impl Settings {
     }
 }
 
-/// Champs de `Settings` propres aux espaces et aux couleurs (pour l'enregistrement des réglages, qui ne doit pas
-/// écraser ce que la barre d'onglets a changé pendant l'édition).
-pub fn keep_workspace_state(draft: &mut Settings, live: &Settings) {
-    draft.tab_colors = live.tab_colors.clone();
-    draft.workspaces = live.workspaces.clone();
-    draft.current_workspace = live.current_workspace.clone();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,19 +278,5 @@ mod tests {
         assert!(s.tab_colors.is_empty());
         let json = serde_json::to_string(&Settings { tab_colors: [("x".into(), TabColor::Blue)].into(), ..s }).unwrap();
         assert!(json.contains(r#""x":"blue""#), "{json}");
-    }
-
-    #[test]
-    fn workspace_state_survives_a_settings_draft() {
-        let live = {
-            let mut s = Settings::default();
-            s.create_workspace("Contoso").unwrap();
-            s.set_tab_color(Path::new("a"), Some(TabColor::Red));
-            s
-        };
-        let mut draft = Settings::default();
-        keep_workspace_state(&mut draft, &live);
-        assert_eq!(draft.workspaces, live.workspaces);
-        assert_eq!(draft.tab_colors, live.tab_colors);
     }
 }

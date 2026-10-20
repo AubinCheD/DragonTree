@@ -174,7 +174,7 @@ Activation et licence, mises à jour automatiques, modèle « Lean Branching » 
 
 ## Reste à faire
 
-Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B6 (branche `options-fork`).
+Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`).
 
 ### Bugs à corriger
 
@@ -184,7 +184,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | B2 | Dossier `.git/dragontree-rebase` laissé après un rebase arrêté puis terminé | revue finale, mineur n°20 | basse |
 | B3 | Décocher « Amend » trop vite écrase le message restauré | revue finale, mineur n°13 | basse |
 | B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié | revue finale, mineur n°10 | basse |
-| B5 | La fenêtre Réglages écrase des changements faits ailleurs (corrigé en partie) | revue finale, mineur n°8 | basse |
+| B5 | La fenêtre Réglages écrase des changements faits ailleurs (corrigé) | revue finale, mineur n°8 | basse |
 | B6 | `wt.exe -d` coupe un chemin contenant « ; » (corrigé) | revue finale, annexe de I8 | basse |
 | B7 | Menu contextuel d'onglet lié à la position de l'onglet | arbitrage de la revue (M14) | basse |
 
@@ -447,22 +447,13 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin :** test : modifier le jeton pendant la vérification ; le jeton enregistré est celui qui a été vérifié.
 - **Priorité :** basse.
 
-#### B5 — La fenêtre Réglages écrase des changements faits ailleurs
+#### B5 — La fenêtre Réglages écrase des changements faits ailleurs (fait)
 
-- **Contexte :** mineur n°8 de la revue finale, corrigé en partie.
-- **État :**
-  - l'enregistrement conserve déjà les onglets, les dépôts récents, les comptes, les associations de comptes et les favoris modifiés ailleurs (`crates/dragontree-app/src/settings_ui.rs:243-249`) ;
-  - il écrase encore les réglages changés pendant que la fenêtre est ouverte :
-    - diff côte à côte et espaces (`crates/dragontree-app/src/repo/details.rs:270-280`) ;
-    - « Pousser après le commit » (`crates/dragontree-app/src/repo/changes.rs:597-600`) ;
-    - dépôts masqués (`crates/dragontree-app/src/repo_list.rs:484`) ;
-    - largeur et visibilité de la liste de droite (`crates/dragontree-app/src/app.rs:467`, `:539`, `:636`) ;
-    - affichage des lectures dans le journal (`crates/dragontree-app/src/app.rs:682`) ;
-    - dossier de clonage par défaut (`crates/dragontree-app/src/clone.rs:59`) ;
-    - dossiers racines (`crates/dragontree-app/src/app.rs:409`, `:416`).
-- **À faire :** n'appliquer que les champs modifiés dans la fenêtre, en comparant le brouillon à l'état d'ouverture.
-- **Critère de fin :** test : la fenêtre est ouverte ; on change « Espaces » dans la vue diff, puis on enregistre un autre réglage ; « Espaces » est conservé.
-- **Priorité :** basse.
+- **Contexte :** mineur n°8 de la revue finale, corrigé en partie, puis relevé de nouveau par la revue de la branche `options-fork`.
+- **État :** corrigé. Avant : l'enregistrement remplaçait tous les réglages par le brouillon pris à l'ouverture de la fenêtre, sauf une liste de champs conservés (onglets, dépôts récents, comptes, favoris, espaces de travail, messages récents) ; tout autre réglage changé ailleurs pendant que la fenêtre était ouverte reprenait sa valeur d'ouverture : liens vers les tickets et références masquées d'un dépôt, options du menu Affichage, mode du diff d'images, dernier éditeur, taille et thème, diff côte à côte et espaces, « Pousser après le commit », dépôts masqués, largeur et visibilité de la liste de droite, dossiers racines…
+- **Réalisé :** la fenêtre garde l'état d'ouverture (`SettingsWindow::opened`) ; à l'enregistrement, elle part des réglages actuels et n'y reporte que les champs qu'elle modifie, et seulement ceux qui diffèrent de l'état d'ouverture (`take_edits`, `crates/dragontree-app/src/settings_ui.rs`). La liste de champs conservés est supprimée ; le nouveau scan et le changement d'exécutable git ne se déclenchent que si leurs réglages ont changé.
+- **Critère de fin :** atteint — test unitaire `take_edits_keeps_what_changed_elsewhere` (dont « Espaces » changé dans la vue diff pendant qu'on enregistre un autre réglage) et test d'interface `saving_the_settings_window_keeps_what_changed_elsewhere_while_it_was_open` (`crates/dragontree-app/tests/ui_settings_window.rs`).
+- **Priorité :** terminé.
 
 #### B6 — `wt.exe -d` coupe un chemin contenant « ; » (fait)
 
@@ -636,7 +627,7 @@ Chacun de ces arbitrages a un coût annoncé. Ce sont des pistes d'amélioration
 
 ## Branche `options-fork` (2026-10-20)
 
-La branche `options-fork` livre toutes les options des tableaux ci-dessus (F2–F4, V2–V13, R1–R20, C2–C8, H1–H4) ainsi que la barre de menus Fichier / Affichage / Dépôt / Configuration (T2), un commit par option (id en tête du sujet), corrections de relecture en `fixup!`. Elle résout T1 (worktrees, via R3), T2, N2, B1 et B6 (via C3), et tranche les raccourcis (Ctrl+Maj+L reste le journal, Pull = Ctrl+Maj+U, Ctrl+Maj+C reste Cloner). Tout passe par un registre de commandes unique (`crates/dragontree-app/src/commands.rs`) : menus, raccourcis, palette Ctrl+P et fenêtre des raccourcis en dérivent. Les commandes personnalisées (R15) refusent les valeurs dangereuses pour `cmd.exe` et passent aussi les valeurs acceptées en variables `DT_*` ; l'IA (C7) lance Claude Code sans aucun outil, consigne sur stdin, et reste désactivée par défaut. La suite compte 860 tests, clippy et rustfmt sont verts. Restent ouverts : B2 à B5 et B7, T3 à T6, N1, N3, RV1 à RV5, P1 à P4, L1 à L6.
+La branche `options-fork` livre toutes les options des tableaux ci-dessus (F2–F4, V2–V13, R1–R20, C2–C8, H1–H4) ainsi que la barre de menus Fichier / Affichage / Dépôt / Configuration (T2), un commit par option (id en tête du sujet), corrections de relecture en `fixup!`. Elle résout T1 (worktrees, via R3), T2, N2, B1, B5 et B6 (via C3), et tranche les raccourcis (Ctrl+Maj+L reste le journal, Pull = Ctrl+Maj+U, Ctrl+Maj+C reste Cloner). Tout passe par un registre de commandes unique (`crates/dragontree-app/src/commands.rs`) : menus, raccourcis, palette Ctrl+P et fenêtre des raccourcis en dérivent. Les commandes personnalisées (R15) refusent les valeurs dangereuses pour `cmd.exe` et passent aussi les valeurs acceptées en variables `DT_*` ; l'IA (C7) lance Claude Code sans aucun outil, consigne sur stdin, et reste désactivée par défaut. La suite compte 870 tests, clippy et rustfmt sont verts. Restent ouverts : B2 à B4 et B7, T3 à T6, N1, N3, RV1 à RV5, P1 à P4, L1 à L6.
 
 ## État du plan d'implémentation
 

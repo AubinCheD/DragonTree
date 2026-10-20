@@ -24,6 +24,8 @@ pub enum SettingsTab {
 
 pub struct SettingsWindow {
     tab: SettingsTab,
+    /// Réglages à l'ouverture de la fenêtre : l'enregistrement ne reporte que les champs du brouillon qui en diffèrent.
+    opened: Settings,
     draft: Settings,
     skip_dirs: String,
     git_path: String,
@@ -36,6 +38,7 @@ impl SettingsWindow {
             tab: SettingsTab::General,
             skip_dirs: settings.scan_skip_dirs.join(", "),
             git_path: settings.git_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+            opened: settings.clone(),
             draft: settings.clone(),
             git_version: None,
         }
@@ -98,27 +101,23 @@ impl SettingsWindow {
             d.commit_hard_limit = d.commit_hard_limit.max(d.commit_soft_limit);
             d.custom_diff_tool = d.custom_diff_tool.trim().to_string();
             d.custom_merge_tool = d.custom_merge_tool.trim().to_string();
-            // Les listes modifiées ailleurs pendant l'édition (onglets, comptes) sont conservées.
-            d.open_tabs = shared.settings.open_tabs.clone();
-            d.active_tab = shared.settings.active_tab;
-            d.recent_repos = shared.settings.recent_repos.clone();
-            crate::workspaces::keep_workspace_state(&mut d, &shared.settings);
-            d.accounts = shared.settings.accounts.clone();
-            d.repo_accounts = shared.settings.repo_accounts.clone();
-            d.favorites = shared.settings.favorites.clone();
-            d.recent_messages = shared.settings.recent_messages.clone();
-            let rescan = d.scan_roots != shared.settings.scan_roots
-                || d.scan_max_depth != shared.settings.scan_max_depth
-                || d.scan_skip_dirs != shared.settings.scan_skip_dirs
-                || d.scan_deep != shared.settings.scan_deep
-                || d.hidden_repos != shared.settings.hidden_repos;
-            if d.git_path != shared.settings.git_path {
-                shared.git = match &d.git_path {
+            // Les réglages actuels, avec seulement ce que la fenêtre a changé : un réglage modifié ailleurs pendant
+            // qu'elle était ouverte (menu Affichage, réglages du dépôt, barre d'onglets, vue diff…) est conservé.
+            let mut merged = shared.settings.clone();
+            take_edits(&mut merged, &self.opened, &d);
+            let rescan = merged.scan_roots != shared.settings.scan_roots
+                || merged.scan_max_depth != shared.settings.scan_max_depth
+                || merged.scan_skip_dirs != shared.settings.scan_skip_dirs
+                || merged.scan_deep != shared.settings.scan_deep
+                || merged.hidden_repos != shared.settings.hidden_repos;
+            if merged.git_path != shared.settings.git_path {
+                shared.git = match &merged.git_path {
                     Some(p) => Some(Git::with_exe(p.clone())),
                     None => Git::discover().ok(),
                 };
             }
-            shared.settings = d;
+            // Thème, taille, langue et police du diff s'appliquent à l'image suivante, s'ils ont changé.
+            shared.settings = merged;
             shared.save_settings();
             if rescan {
                 shared.actions.push(AppAction::Rescan);
@@ -493,6 +492,61 @@ impl SettingsWindow {
     }
 }
 
+/// Reporte dans `live` (les réglages actuels) les champs que la fenêtre modifie et qui, dans le brouillon `edited`,
+/// diffèrent de l'état d'ouverture `opened`. Les autres réglages, et ceux que la fenêtre montre mais qu'on n'y a pas
+/// touchés, gardent leur valeur actuelle, même changée ailleurs pendant que la fenêtre était ouverte. Un champ
+/// ajouté à la fenêtre doit être ajouté à cette liste.
+fn take_edits(live: &mut Settings, opened: &Settings, edited: &Settings) {
+    macro_rules! take {
+        ($($field:ident),* $(,)?) => {
+            $(
+                if edited.$field != opened.$field {
+                    live.$field.clone_from(&edited.$field);
+                }
+            )*
+        };
+    }
+    take!(
+        // Apparence, git, liste des dépôts, clonage.
+        theme,
+        language,
+        ui_scale,
+        git_path,
+        scan_roots,
+        scan_max_depth,
+        scan_skip_dirs,
+        scan_deep,
+        status_sweep,
+        hidden_repos,
+        default_clone_dir,
+        // Diff et commit.
+        diff_context,
+        ignore_whitespace,
+        split_diff,
+        syntax_highlight,
+        diff_font,
+        diff_font_size,
+        diff_tab_width,
+        diff_show_whitespace,
+        push_after_commit,
+        commit_soft_limit,
+        commit_hard_limit,
+        // Outils externes, terminal, IA, réseau.
+        diff_tool,
+        custom_diff_tool,
+        merge_tool,
+        custom_merge_tool,
+        custom_merge_tool_trust_exit,
+        terminal,
+        ai_enabled,
+        ai_cli_path,
+        ai_model,
+        auto_fetch_minutes,
+        // Onglet « Commandes ».
+        custom_commands,
+    );
+}
+
 /// Choix d'un outil externe : « Configuration de git », un préréglage (grisé tant qu'il n'est pas détecté) ou une
 /// commande personnalisée avec la syntaxe de ses variables.
 fn tool_picker(
@@ -596,4 +650,47 @@ fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(10.0);
     ui.label(RichText::new(title).strong().size(14.5));
     ui.separator();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+    use crate::settings::TicketRule;
+    use crate::workspaces::TabColor;
+
+    #[test]
+    fn take_edits_keeps_what_changed_elsewhere() {
+        let opened = Settings::default();
+        // Ailleurs, pendant que la fenêtre était ouverte : menu Affichage, réglages du dépôt, zoom, « Espaces » dans la
+        // vue diff, barre d'onglets.
+        let mut live = opened.clone();
+        live.show_tags = false;
+        live.topological_order = true;
+        let rule = TicketRule { pattern: r"#(\d+)".into(), url: "https://forge.contoso.test/issues/$1".into() };
+        live.ticket_links.insert("c:/dev/fabrikam".into(), vec![rule]);
+        live.hidden_refs.insert("c:/dev/fabrikam".into(), vec!["refs/heads/old".into()]);
+        live.ui_scale = 1.25;
+        live.ignore_whitespace = true;
+        live.open_tabs = vec![PathBuf::from(r"C:\DEV\fabrikam")];
+        live.create_workspace("Contoso").unwrap();
+        live.set_tab_color(Path::new(r"C:\DEV\fabrikam"), Some(TabColor::Red));
+        live.diff_context = 5;
+        // Dans la fenêtre : la coloration syntaxique et les lignes de contexte (changées aussi ailleurs).
+        let mut edited = opened.clone();
+        edited.syntax_highlight = false;
+        edited.diff_context = 8;
+
+        let mut merged = live.clone();
+        take_edits(&mut merged, &opened, &edited);
+        assert!(!merged.syntax_highlight, "réglage changé dans la fenêtre");
+        assert_eq!(merged.diff_context, 8, "changé dans la fenêtre et ailleurs : la fenêtre l'emporte");
+        assert_eq!(Settings { syntax_highlight: true, diff_context: 5, ..merged }, live, "le reste est conservé");
+
+        // Rien de changé dans la fenêtre : les réglages actuels restent tels quels.
+        let mut untouched = live.clone();
+        take_edits(&mut untouched, &opened, &opened);
+        assert_eq!(untouched, live);
+    }
 }
