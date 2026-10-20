@@ -37,6 +37,8 @@ pub enum AppEvent {
     Initialized(PathBuf, Result<(), GitError>),
     /// Résultat de la détection de `git lfs`.
     LfsDetected(bool),
+    /// Éditeurs externes trouvés sur la machine (détection faite une fois, hors du thread de l'interface).
+    EditorsDetected(Vec<crate::editors::Editor>),
 }
 
 /// Demandes des vues à l'application (traitées après l'affichage).
@@ -89,6 +91,8 @@ pub struct Shared {
     pub pull_rebase: bool,
     /// Git LFS est installé : `None` tant que la détection (une fois par exécution, en tâche de fond) n'a pas répondu.
     pub lfs: Option<bool>,
+    /// Éditeurs de « Ouvrir dans » : seul l'éditeur par défaut de Windows tant que la détection n'a pas répondu.
+    pub editors: Vec<crate::editors::Editor>,
 }
 
 impl Shared {
@@ -115,6 +119,7 @@ impl Shared {
             ctx,
             pull_rebase: false,
             lfs: None,
+            editors: vec![crate::editors::Editor::system_default()],
         };
         (shared, rx)
     }
@@ -229,6 +234,8 @@ impl DragonTreeApp {
                 .spawn("lfs-detect", move || Some(AppEvent::LfsDetected(dragontree_git::lfs_available(&git)))),
             None => shared.lfs = Some(false),
         }
+        // Détection des éditeurs externes (Program Files, Toolbox JetBrains, PATH) : une fois, hors du thread de l'interface.
+        shared.jobs.spawn("editors-detect", || Some(AppEvent::EditorsDetected(crate::editors::detect_system())));
         if shared.git.is_none() {
             shared.toasts.push(Toast::error(
                 tr!("git est introuvable"),
@@ -474,6 +481,7 @@ impl DragonTreeApp {
                     }
                 },
                 AppEvent::LfsDetected(available) => self.shared.lfs = Some(available),
+                AppEvent::EditorsDetected(editors) => self.shared.editors = editors,
                 AppEvent::Initialized(path, result) => match result {
                     Ok(()) => self.shared.actions.push(AppAction::OpenRepo(path)),
                     Err(e) => self.shared.toast(Toast::error(tr!("Création du dépôt impossible"), e.to_string())),
@@ -592,6 +600,7 @@ impl DragonTreeApp {
             repo,
             can_reopen_tab: !self.closed_tabs.is_empty(),
             lfs_available: self.shared.lfs,
+            editors: &self.shared.editors,
         }
     }
 
@@ -603,6 +612,8 @@ impl DragonTreeApp {
         let mut list: Vec<(Command, String)> = registry.map(|c| (c, c.palette_label().to_string())).collect();
         let custom = commands::custom_entries(cx.settings).into_iter().filter(|(c, _)| c.enabled(&cx));
         list.extend(custom.map(|(c, name)| (c, tr!("Commande personnalisée : {name}", name))));
+        let editors = cx.editors.iter().enumerate().map(|(i, e)| (Command::OpenIn(i), e.kind.label()));
+        list.extend(editors.filter(|(c, _)| c.enabled(&cx)).map(|(c, name)| (c, tr!("Ouvrir dans {name}", name))));
         list
     }
 

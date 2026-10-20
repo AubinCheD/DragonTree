@@ -55,7 +55,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `branch_batch`), `DeleteStaleBranches::items` vaut `None` tant que la liste est lue et `force` demande `-D` ;
 /// `RestoreFile` : fichier à remettre dans son état à `rev` (`label` décrit la version), demandé seulement quand il a
 /// des modifications locales ; `PullRequest` : formulaire de création d'une pull request, qui reste ouvert pendant le push
-/// et l'appel à la forge (voir `pull_request`).
+/// et l'appel à la forge (voir `pull_request`) ; `OpenSolution` : solution à ouvrir dans `editor` (Visual Studio) quand le
+/// dépôt en contient plusieurs, `chosen` est sa position dans `solutions`.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -102,6 +103,7 @@ pub enum Dialog {
     DeleteStaleBranches { items: Option<Vec<super::branch_batch::BranchChoice>>, force: bool },
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
     CustomCommand(Box<Prepared>),
+    OpenSolution { editor: crate::editors::Editor, solutions: Vec<PathBuf>, chosen: usize },
     Confirm { title: String, text: String, action: ConfirmAction },
 }
 
@@ -197,6 +199,9 @@ impl Dialog {
                 (tr!("Supprimer les branches périmées").into(), tr!("Supprimer").into(), true)
             }
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
+            Dialog::OpenSolution { editor, .. } => {
+                (tr!("Ouvrir dans {editor}", editor = editor.kind.label()), tr!("Ouvrir").into(), false)
+            }
             // Un script peut tout faire : sa confirmation exige un clic.
             Dialog::CustomCommand(c) if c.kind == CommandKind::Script => {
                 (tr!("Exécuter « {name} » ?", name = c.name), tr!("Exécuter").into(), true)
@@ -597,6 +602,7 @@ impl RepoTab {
             Dialog::DeleteStaleBranches { items, force } => Self::delete_stale_body(ui, items, force, p),
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
             Dialog::CustomCommand(prepared) => self.custom_command_body(ui, prepared, p),
+            Dialog::OpenSolution { solutions, chosen, .. } => self.open_solution_body(ui, solutions, chosen, p),
             Dialog::Confirm { text, .. } => {
                 ui.label(text.as_str());
                 true
@@ -745,6 +751,9 @@ impl RepoTab {
             }
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
             Dialog::CustomCommand(prepared) => self.launch_custom(shared, *prepared),
+            Dialog::OpenSolution { editor, solutions, chosen } => {
+                self.open_solution(shared, &editor, &solutions, chosen)
+            }
             Dialog::Confirm { action, .. } => match action {
                 ConfirmAction::CheckoutDetached(oid) => self.op_checkout(shared, oid.to_hex()),
                 ConfirmAction::AbortOp(state) => {

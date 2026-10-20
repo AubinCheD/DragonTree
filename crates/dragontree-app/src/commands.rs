@@ -20,6 +20,7 @@ use dragontree_i18n::{Lang, tr, tr_mark};
 use egui::{Key, KeyboardShortcut, ModifierNames, Modifiers};
 
 use crate::custom_commands::{self, CommandTarget};
+use crate::editors::Editor;
 use crate::icons;
 use crate::repo::{RepoTab, RepoView};
 use crate::settings::{HistoryLayout, Settings, ThemeChoice};
@@ -132,7 +133,11 @@ pub enum Command {
     ManageCustomCommands,
     OpenExplorer,
     OpenTerminal,
-    OpenVsCode,
+    /// Ouvre le dépôt dans l'éditeur du clic principal de la barre d'outils (le dernier utilisé).
+    OpenInEditor,
+    /// Ouvre le dépôt dans l'éditeur détecté à cette position de `Shared::editors`. Hors de [`Command::ALL`] : la liste
+    /// vient de la détection (voir `MenuItem::OpenInEditors`).
+    OpenIn(usize),
     /// Réglages du dépôt : identité locale, liens vers les tickets, modèle de message de commit.
     RepoSettings,
     Settings,
@@ -157,9 +162,11 @@ pub enum MenuItem {
     Submenu(&'static str, &'static [MenuItem]),
     /// Les commandes personnalisées de cible « dépôt », lues dans les réglages à l'affichage ([`custom_entries`]).
     CustomCommands,
+    /// Les éditeurs détectés (`CommandContext::editors`), un par entrée : Dépôt › Ouvrir dans.
+    OpenInEditors,
 }
 
-use MenuItem::{Cmd, CustomCommands, Separator, Submenu};
+use MenuItem::{Cmd, CustomCommands, OpenInEditors, Separator, Submenu};
 
 /// Contenu de la barre de menus : (titre du menu marqué par `tr_mark!`, entrées).
 pub const MENUS: &[(&str, &[MenuItem])] = &[
@@ -285,7 +292,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::OpenExplorer),
             Cmd(Command::OpenTerminal),
-            Cmd(Command::OpenVsCode),
+            Submenu(tr_mark!("Ouvrir dans"), &[OpenInEditors]),
             Separator,
             Cmd(Command::RepoSettings),
         ],
@@ -308,8 +315,9 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
     ),
 ];
 
-/// Commandes sans entrée de menu (raccourci ou palette seulement).
-pub const NOT_IN_MENUS: &[Command] = &[];
+/// Commandes sans entrée de menu (raccourci ou palette seulement) : `OpenInEditor` est le clic principal de la barre
+/// d'outils, le menu liste les éditeurs un par un.
+pub const NOT_IN_MENUS: &[Command] = &[Command::OpenInEditor];
 
 /// État lu pour griser ou cocher les entrées, à chaque affichage et avant d'exécuter une commande. Construit
 /// en un seul point, `DragonTreeApp::command_context`, pour la barre de menus, les raccourcis et la palette.
@@ -321,6 +329,8 @@ pub struct CommandContext<'a> {
     pub can_reopen_tab: bool,
     /// Git LFS est installé : `None` tant que la détection n'a pas répondu.
     pub lfs_available: Option<bool>,
+    /// Éditeurs de « Ouvrir dans » (`Shared::editors`).
+    pub editors: &'a [Editor],
 }
 
 impl Command {
@@ -398,7 +408,7 @@ impl Command {
         Command::ManageCustomCommands,
         Command::OpenExplorer,
         Command::OpenTerminal,
-        Command::OpenVsCode,
+        Command::OpenInEditor,
         Command::RepoSettings,
         Command::Settings,
         Command::Language(None),
@@ -483,7 +493,9 @@ impl Command {
             Command::ManageCustomCommands => tr!("Gérer les commandes…"),
             Command::OpenExplorer => tr!("Ouvrir dans l'Explorateur"),
             Command::OpenTerminal => tr!("Ouvrir un terminal"),
-            Command::OpenVsCode => tr!("Ouvrir dans VS Code"),
+            Command::OpenInEditor => tr!("Ouvrir dans l'éditeur"),
+            // Le menu et la palette affichent le nom de l'éditeur (`Shared::editors`).
+            Command::OpenIn(_) => tr!("Ouvrir dans"),
             Command::RepoSettings => tr!("Réglages du dépôt…"),
             Command::Settings => tr!("Réglages…"),
             Command::Language(None) => tr!("Système"),
@@ -584,7 +596,7 @@ impl Command {
             Command::CustomCommand(_) | Command::ManageCustomCommands => icons::TERMINAL_WINDOW,
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
-            Command::OpenVsCode => icons::CODE,
+            Command::OpenInEditor | Command::OpenIn(_) => icons::CODE,
             Command::RepoSettings => icons::GEAR_SIX,
             Command::Settings => icons::GEAR_SIX,
             Command::Language(_) => icons::TRANSLATE,
@@ -665,7 +677,8 @@ impl Command {
             | Command::CustomCommand(_)
             | Command::OpenExplorer
             | Command::OpenTerminal
-            | Command::OpenVsCode
+            | Command::OpenInEditor
+            | Command::OpenIn(_)
             | Command::RepoSettings => Scope::Repo,
         }
     }
@@ -725,6 +738,9 @@ impl Command {
                 // « Démarrer » et « Terminer » n'ont de sens que sous le sous-menu Bisect.
                 | Command::BisectStart
                 | Command::BisectReset
+                // Le clic principal de la barre d'outils ; la palette propose chaque éditeur par son nom.
+                | Command::OpenInEditor
+                | Command::OpenIn(_)
         )
     }
 
@@ -765,6 +781,8 @@ impl Command {
                 cx.repo.is_some_and(|tab| tab.can_run(self))
                     && custom_entries(cx.settings).iter().any(|(cmd, _)| *cmd == self)
             }
+            // Éditeur détecté à cette position (la liste est remplacée une fois la détection terminée).
+            Scope::Repo if matches!(self, Command::OpenIn(i) if i >= cx.editors.len()) => false,
             // Rien à réafficher : l'entrée est grisée.
             Scope::Repo if self == Command::ShowHiddenRefs => {
                 cx.repo.is_some_and(|tab| tab.can_run(self) && !cx.settings.hidden_refs_of(&tab.path).is_empty())
@@ -838,7 +856,7 @@ mod tests {
         for item in items {
             match item {
                 Cmd(cmd) => out.push(*cmd),
-                Separator | CustomCommands => {}
+                Separator | CustomCommands | OpenInEditors => {}
                 Submenu(title, sub) => {
                     assert!(!title.trim().is_empty(), "sous-menu sans titre");
                     menu_commands(sub, out);
@@ -924,8 +942,13 @@ mod tests {
     #[test]
     fn the_lfs_submenu_is_greyed_with_a_reason_while_git_lfs_is_missing_or_not_detected() {
         let settings = Settings::default();
-        let cx =
-            |lfs_available| CommandContext { settings: &settings, repo: None, can_reopen_tab: false, lfs_available };
+        let cx = |lfs_available| CommandContext {
+            settings: &settings,
+            repo: None,
+            can_reopen_tab: false,
+            lfs_available,
+            editors: &[],
+        };
         let lfs = repository_submenu(tr_mark!("Git LFS"));
         let missing = submenu_disabled_hint(lfs, &cx(Some(false))).expect("grisé quand git lfs est absent");
         assert!(missing.contains("Git LFS"), "{missing}");
@@ -980,7 +1003,13 @@ mod tests {
         let entries = custom_entries(&settings);
         assert_eq!(entries, [(Command::CustomCommand(1), "Construire"), (Command::CustomCommand(3), "Tester")]);
         // Sans dépôt ouvert, elles sont grisées comme toute commande de dépôt.
-        let cx = CommandContext { settings: &settings, repo: None, can_reopen_tab: false, lfs_available: None };
+        let cx = CommandContext {
+            settings: &settings,
+            repo: None,
+            can_reopen_tab: false,
+            lfs_available: None,
+            editors: &[],
+        };
         assert!(!Command::CustomCommand(1).enabled(&cx));
         assert_eq!(Command::CustomCommand(1).scope(), Scope::Repo);
         assert!(repository_submenu(tr_mark!("Commandes personnalisées")).iter().any(|i| matches!(i, CustomCommands)));

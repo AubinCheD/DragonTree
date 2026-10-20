@@ -118,13 +118,18 @@ impl RepoTab {
                 {
                     shared.actions.push(AppAction::ShowLog);
                 }
-                // Bouton masqué (plutôt que grisé) quand VS Code n'est pas installé.
-                if self.can_run(Command::OpenVsCode)
-                    && toolbar_button(ui, icons::CODE, "VS Code", true, false)
-                        .on_hover_text(tr!("Ouvrir dans VS Code"))
+                // « Ouvrir dans ▾ » : le clic principal reprend le dernier éditeur utilisé, la flèche liste les autres.
+                // Dessinés de droite à gauche : la flèche d'abord.
+                self.open_in_dropdown(ui, shared);
+                let main = crate::editors::main_editor(&shared.editors, shared.settings.last_editor.as_deref());
+                let editor = shared.editors.get(main).map(|e| e.kind);
+                let (icon, name) = editor.map_or((icons::CODE, ""), |k| (k.icon(), k.label()));
+                if self.can_run(Command::OpenInEditor)
+                    && toolbar_button(ui, icon, name, true, false)
+                        .on_hover_text(tr!("Ouvrir dans {name}", name))
                         .clicked()
                 {
-                    self.run_command(Command::OpenVsCode, shared);
+                    self.run_command(Command::OpenInEditor, shared);
                 }
                 if toolbar_button(ui, icons::FOLDER_OPEN, tr!("Explorateur"), true, false).clicked() {
                     self.run_command(Command::OpenExplorer, shared);
@@ -162,6 +167,40 @@ impl RepoTab {
                 ui.menu_button(label.clone(), |ui| self.stash_menu(ui, shared, s.oid, &label));
             }
         });
+    }
+
+    /// Flèche à côté du bouton « Ouvrir dans » : tous les éditeurs détectés.
+    fn open_in_dropdown(&mut self, ui: &mut Ui, shared: &mut Shared) {
+        let label = tr!("Choisir l'éditeur");
+        let enabled = self.can_run(Command::OpenInEditor);
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 46.0), egui::Sense::click());
+        crate::widgets::a11y(&resp, label, enabled);
+        let p = Palette::current(ui.ctx());
+        if enabled && resp.hovered() {
+            ui.painter().rect_filled(rect, egui::CornerRadius::same(6), p.hover);
+        }
+        ui.painter().text(
+            rect.center_top() + egui::vec2(0.0, 15.0),
+            egui::Align2::CENTER_CENTER,
+            icons::CARET_DOWN,
+            egui::FontId::proportional(13.0),
+            if enabled { p.text } else { p.weak.gamma_multiply(0.6) },
+        );
+        if !enabled {
+            return;
+        }
+        let mut chosen = None;
+        egui::Popup::menu(&resp.on_hover_text(tr!("Ouvrir le dépôt dans un autre éditeur"))).show(|ui| {
+            for (i, editor) in shared.editors.iter().enumerate() {
+                if ui.button(format!("{} {}", editor.kind.icon(), editor.kind.label())).clicked() {
+                    chosen = Some(i);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(i) = chosen {
+            self.run_command(Command::OpenIn(i), shared);
+        }
     }
 
     /// Checkout demandé depuis la palette Ctrl+P.

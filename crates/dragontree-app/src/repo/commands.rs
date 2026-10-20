@@ -54,7 +54,6 @@ impl RepoTab {
             Command::LfsPull => has_remote && self.op_state == OpState::None,
             Command::CollapseAllMerges => !self.history.folding.is_all(),
             Command::ExpandAllMerges => !self.history.folding.is_none(),
-            Command::OpenVsCode => crate::util::vscode_available(),
             _ => true,
         }
     }
@@ -154,7 +153,11 @@ impl RepoTab {
             Command::RepoSettings => self.open_repo_settings(shared),
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),
-            Command::OpenVsCode => crate::util::open_in_vscode(&self.path),
+            Command::OpenInEditor => self.open_in_editor(
+                shared,
+                crate::editors::main_editor(&shared.editors, shared.settings.last_editor.as_deref()),
+            ),
+            Command::OpenIn(index) => self.open_in_editor(shared, index),
             Command::CustomCommand(index) => self.run_custom_command(shared, index, super::custom::Clicked::Repo),
             _ => debug_assert!(false, "{cmd:?} : commande de dépôt sans traitement dans RepoTab::run_command"),
         }

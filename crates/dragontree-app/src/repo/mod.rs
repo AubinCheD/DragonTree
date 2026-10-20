@@ -19,6 +19,7 @@ mod history;
 mod ignore;
 mod image_diff;
 mod lfs;
+mod open_in;
 mod patches;
 mod pull_request;
 mod rebase_ui;

@@ -23,7 +23,9 @@ pub fn show(ui: &mut Ui, cx: &CommandContext) -> Option<Command> {
 /// Entrées d'un menu ou d'un sous-menu.
 fn entries(ui: &mut Ui, items: &[MenuItem], cx: &CommandContext, chosen: &mut Option<Command>) {
     // Colonne des coches, réservée quand une entrée de ce menu peut être cochée (libellés alignés).
-    let column = items.iter().any(|item| matches!(item, MenuItem::Cmd(cmd) if cmd.checked(cx).is_some()));
+    let column = items.iter().any(|item| {
+        matches!(item, MenuItem::OpenInEditors) || matches!(item, MenuItem::Cmd(cmd) if cmd.checked(cx).is_some())
+    });
     for item in items {
         match item {
             MenuItem::Cmd(cmd) => {
@@ -46,6 +48,7 @@ fn entries(ui: &mut Ui, items: &[MenuItem], cx: &CommandContext, chosen: &mut Op
                 }
             }
             MenuItem::CustomCommands => custom_command_entries(ui, cx, column, chosen),
+            MenuItem::OpenInEditors => open_in_entries(ui, cx, column, chosen),
         }
     }
 }
@@ -60,6 +63,19 @@ fn custom_command_entries(ui: &mut Ui, cx: &CommandContext, column: bool, chosen
     for (cmd, name) in list {
         let button = Button::new(with_check_column(name, column.then_some(false)));
         if ui.add_enabled(cmd.enabled(cx), button).clicked() {
+            *chosen = Some(cmd);
+            ui.close();
+        }
+    }
+}
+
+/// Éditeurs détectés, un par entrée ; le dernier utilisé est coché.
+fn open_in_entries(ui: &mut Ui, cx: &CommandContext, column: bool, chosen: &mut Option<Command>) {
+    let main = crate::editors::main_editor(cx.editors, cx.settings.last_editor.as_deref());
+    for (i, editor) in cx.editors.iter().enumerate() {
+        let cmd = Command::OpenIn(i);
+        let label = with_check_column(editor.kind.label(), column.then_some(i == main));
+        if ui.add_enabled(cmd.enabled(cx), Button::new(label)).clicked() {
             *chosen = Some(cmd);
             ui.close();
         }

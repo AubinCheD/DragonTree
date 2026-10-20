@@ -14,6 +14,7 @@ use crate::app::{AppAction, AppEvent, Shared};
 use crate::icons;
 use crate::settings::{cache_dir, path_key};
 use crate::theme::Palette;
+use crate::toasts::Toast;
 use crate::widgets;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -456,12 +457,26 @@ impl RepoListState {
                 crate::util::open_terminal(&r.path);
                 ui.close();
             }
-            if crate::util::vscode_available()
-                && ui.button(format!("{} {}", icons::CODE, tr!("Ouvrir dans VS Code"))).clicked()
-            {
-                crate::util::open_in_vscode(&r.path);
-                ui.close();
-            }
+            ui.menu_button(format!("{} {}", icons::CODE, tr!("Ouvrir dans")), |ui| {
+                for editor in shared.editors.clone() {
+                    if ui.button(format!("{} {}", editor.kind.icon(), editor.kind.label())).clicked() {
+                        shared.settings.last_editor = Some(editor.kind.id().to_string());
+                        shared.settings_dirty = true;
+                        // Plusieurs solutions à départager : le choix se fait dans l'onglet du dépôt.
+                        match crate::editors::open(&editor, &r.path) {
+                            Ok(crate::editors::OpenOutcome::Launched) => {}
+                            Ok(crate::editors::OpenOutcome::Choose(_)) => shared.toast(Toast::info(tr!(
+                                "Plusieurs solutions : ouvrez le dépôt dans un onglet pour choisir celle à ouvrir"
+                            ))),
+                            Err(e) => shared.toast(Toast::error(
+                                tr!("{editor} n'a pas pu être lancé", editor = editor.kind.label()),
+                                e,
+                            )),
+                        }
+                        ui.close();
+                    }
+                }
+            });
             if ui.button(format!("{} {}", icons::COPY, tr!("Copier le chemin"))).clicked() {
                 ui.ctx().copy_text(r.path.display().to_string());
                 ui.close();

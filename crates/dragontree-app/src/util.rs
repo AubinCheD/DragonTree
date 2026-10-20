@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(windows)]
-fn detached(cmd: &mut Command) -> &mut Command {
+pub(crate) fn detached(cmd: &mut Command) -> &mut Command {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     cmd.creation_flags(CREATE_NO_WINDOW)
 }
 
 #[cfg(not(windows))]
-fn detached(cmd: &mut Command) -> &mut Command {
+pub(crate) fn detached(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
@@ -74,49 +74,13 @@ pub fn open_terminal(path: &Path) {
     }
 }
 
-pub fn vscode_available() -> bool {
-    in_path("code.cmd")
-}
-
-/// Commande qui ouvre `path` dans VS Code (`path_var` : valeur de PATH où chercher `code.cmd`).
-/// `code.cmd` est lancé directement, jamais via `cmd.exe /C` : Rust échappe alors les arguments
-/// d'un script `.cmd`, et un chemin contenant `&`, `^` ou `%` n'est pas interprété.
-pub fn vscode_command_in(path: &Path, path_var: Option<&OsStr>) -> Option<Command> {
-    let mut cmd = Command::new(find_in(path_var, "code.cmd")?);
-    cmd.arg(path);
-    Some(cmd)
-}
-
-pub fn open_in_vscode(path: &Path) {
-    if let Some(mut cmd) = vscode_command_in(path, std::env::var_os("PATH").as_deref()) {
-        let _ = detached(&mut cmd).spawn();
-    }
-}
-
 pub fn open_url(ctx: &egui::Context, url: &str) {
     ctx.open_url(egui::OpenUrl::new_tab(url));
 }
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
-
     use super::*;
-
-    #[test]
-    fn vscode_is_launched_directly_without_cmd() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin = dir.path().join("VS Code").join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        std::fs::write(bin.join("code.cmd"), "@echo off\r\n").unwrap();
-        let path_var = std::env::join_paths([dir.path().join("vide"), bin.clone()]).unwrap();
-        // Un nom de dossier avec « & » ne doit jamais passer par l'interpréteur cmd.exe.
-        let target = Path::new(r"C:\DEV\x&calc");
-        let cmd = vscode_command_in(target, Some(&path_var)).expect("VS Code trouvé dans le PATH");
-        assert_eq!(Path::new(cmd.get_program()), bin.join("code.cmd"));
-        assert_eq!(cmd.get_args().collect::<Vec<_>>(), [OsStr::new(r"C:\DEV\x&calc")]);
-        assert!(vscode_command_in(target, Some(OsStr::new(""))).is_none(), "absent du PATH : rien à lancer");
-    }
 
     #[test]
     fn explorer_select_uses_windows_separators() {

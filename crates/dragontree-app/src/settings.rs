@@ -108,6 +108,8 @@ pub struct Settings {
     pub ticket_links: BTreeMap<String, Vec<TicketRule>>,
     /// Commandes personnalisées (Réglages › Commandes), dans l'ordre des menus.
     pub custom_commands: Vec<CustomCommand>,
+    /// Dernier éditeur choisi dans « Ouvrir dans » (identifiant de `EditorKind`) : l'action du clic principal.
+    pub last_editor: Option<String>,
 }
 
 impl Default for Settings {
@@ -150,6 +152,7 @@ impl Default for Settings {
             show_read_commands_in_log: false,
             ticket_links: BTreeMap::new(),
             custom_commands: Vec::new(),
+            last_editor: None,
         }
     }
 }
