@@ -670,6 +670,7 @@ impl RepoTab {
             mode,
             &mut self.changes.diff_state,
             shared.settings.split_diff,
+            &crate::diff_style::DiffStyle::from_settings(&shared.settings),
             hl,
             p,
             ("work", self.id),

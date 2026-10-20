@@ -9,6 +9,7 @@ pub mod clone;
 pub mod closed_tabs;
 pub mod commands;
 pub mod custom_commands;
+pub mod diff_style;
 pub mod editors;
 pub mod external_tools;
 pub mod git_identity;

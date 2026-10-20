@@ -157,7 +157,7 @@ impl FileHistoryWindow {
                 }
                 ui.separator();
                 if self.blame_mode {
-                    select = self.blame_ui(ui, p);
+                    select = self.blame_ui(ui, &crate::diff_style::DiffStyle::from_settings(&shared.settings), p);
                 } else {
                     self.history_ui(ui, shared, p);
                 }
@@ -233,6 +233,7 @@ impl FileHistoryWindow {
                     DiffMode::ReadOnly,
                     &mut self.diff_state,
                     shared.settings.split_diff,
+                    &crate::diff_style::DiffStyle::from_settings(&shared.settings),
                     None,
                     p,
                     ("fh-diff", self.tab),
@@ -247,14 +248,14 @@ impl FileHistoryWindow {
         });
     }
 
-    fn blame_ui(&mut self, ui: &mut Ui, p: &Palette) -> Option<Oid> {
+    fn blame_ui(&mut self, ui: &mut Ui, style: &crate::diff_style::DiffStyle, p: &Palette) -> Option<Oid> {
         let Some((lines, commits)) = &self.blame else {
             ui.centered_and_justified(|ui| ui.spinner());
             return None;
         };
         let mut select = None;
-        let font = FontId::monospace(12.5);
-        let row_h = 18.0;
+        let font = style.font_id();
+        let row_h = (ui.painter().layout_no_wrap("Mg".into(), font.clone(), p.text).size().y + 4.0).round().max(18.0);
         let gutter_w = 300.0;
         let now = widgets::now_ts();
         egui::ScrollArea::both().auto_shrink([false, false]).show_rows(ui, row_h, lines.len(), |ui, range| {
@@ -293,13 +294,13 @@ impl FileHistoryWindow {
                     egui::pos2(rect.left() + gutter_w + 6.0, rect.center().y),
                     Align2::RIGHT_CENTER,
                     l.line_no.to_string(),
-                    FontId::monospace(11.0),
+                    style.small_font_id(1.5),
                     p.weak,
                 );
                 ui.painter().text(
                     egui::pos2(rect.left() + gutter_w + 46.0, rect.center().y),
                     Align2::LEFT_CENTER,
-                    diff_view::display_text(&l.text),
+                    style.render(&l.text),
                     font.clone(),
                     p.text,
                 );

@@ -211,6 +211,9 @@ pub struct DragonTreeApp {
     window_focused: bool,
     last_sweep: Instant,
     applied_theme: (ThemeChoice, f32),
+    applied_diff_font: crate::diff_style::DiffFont,
+    /// Dernier changement de police du diff demandé : un chargement plus ancien qui finit après lui est ignoré.
+    diff_font_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     /// Langue de Windows, lue au démarrage (réglage « Système »).
     system_lang: Lang,
     window_title: String,
@@ -221,7 +224,6 @@ pub struct DragonTreeApp {
 impl DragonTreeApp {
     pub fn new(cc: &eframe::CreationContext<'_>, start: StartOptions) -> DragonTreeApp {
         let ctx = cc.egui_ctx.clone();
-        theme::install_fonts(&ctx);
         let settings_path = match &start.profile_dir {
             Some(dir) => dir.join("settings.json"),
             None => Settings::file(),
@@ -240,6 +242,7 @@ impl DragonTreeApp {
         {
             settings.scan_roots.push(root.clone());
         }
+        theme::install_fonts(&ctx, settings.diff_font);
         theme::apply(&ctx, settings.theme, settings.ui_scale);
 
         let git = match &settings.git_path {
@@ -248,6 +251,7 @@ impl DragonTreeApp {
         };
         let repo_list = RepoListState::load_cache(start.profile_dir.as_deref());
         let applied_theme = (settings.theme, settings.ui_scale);
+        let applied_diff_font = settings.diff_font;
         let (mut shared, rx) = Shared::new(ctx.clone(), settings, settings_store, start.profile_dir.clone(), git);
         if let Some(msg) = settings_error {
             shared.toasts.push(Toast::error(tr!("Réglages réinitialisés"), msg));
@@ -295,6 +299,8 @@ impl DragonTreeApp {
             window_focused: true,
             last_sweep: Instant::now(),
             applied_theme,
+            applied_diff_font,
+            diff_font_generation: Default::default(),
             system_lang,
             window_title: String::new(),
             closed_tabs: ClosedTabs::default(),
@@ -534,6 +540,20 @@ impl DragonTreeApp {
         if wanted != self.applied_theme {
             theme::apply(ctx, wanted.0, wanted.1);
             self.applied_theme = wanted;
+        }
+        // Nouvelle police du diff : relecture des fichiers de police hors du thread de l'interface.
+        if self.shared.settings.diff_font != self.applied_diff_font {
+            self.applied_diff_font = self.shared.settings.diff_font;
+            let generation = {
+                let mut latest = self.diff_font_generation.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                *latest += 1;
+                *latest
+            };
+            let (font, ctx, latest) = (self.applied_diff_font, ctx.clone(), self.diff_font_generation.clone());
+            std::thread::spawn(move || {
+                theme::install_fonts_if_latest(&ctx, font, &latest, generation);
+                ctx.request_repaint();
+            });
         }
         let lang = self.shared.settings.language.unwrap_or(self.system_lang);
         if lang != dragontree_i18n::lang() {

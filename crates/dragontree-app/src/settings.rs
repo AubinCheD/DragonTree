@@ -9,6 +9,7 @@ use dragontree_i18n::{Lang, tr};
 use serde::{Deserialize, Serialize};
 
 use crate::custom_commands::CustomCommand;
+use crate::diff_style::DiffFont;
 use crate::external_tools::ToolChoice;
 use crate::terminal::TerminalChoice;
 
@@ -112,6 +113,11 @@ pub struct Settings {
     pub ignore_whitespace: bool,
     pub split_diff: bool,
     pub syntax_highlight: bool,
+    /// Police, taille, largeur de tabulation et espaces visibles du texte des diffs, du blame et des conflits.
+    pub diff_font: DiffFont,
+    pub diff_font_size: f32,
+    pub diff_tab_width: u8,
+    pub diff_show_whitespace: bool,
     pub push_after_commit: bool,
     /// Minutes entre deux fetch automatiques des onglets ouverts (0 = jamais).
     pub auto_fetch_minutes: u32,
@@ -176,6 +182,10 @@ impl Default for Settings {
             ignore_whitespace: false,
             split_diff: false,
             syntax_highlight: true,
+            diff_font: DiffFont::Builtin,
+            diff_font_size: 12.5,
+            diff_tab_width: 4,
+            diff_show_whitespace: false,
             push_after_commit: false,
             auto_fetch_minutes: 10,
             show_read_commands_in_log: false,

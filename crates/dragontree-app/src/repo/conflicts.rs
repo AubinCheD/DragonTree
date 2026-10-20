@@ -43,6 +43,7 @@ impl RepoTab {
 
     pub(super) fn conflict_window(&mut self, ctx: &egui::Context, shared: &mut Shared, p: &Palette) {
         let Some(ed) = &mut self.conflict_editor else { return };
+        let style = crate::diff_style::DiffStyle::from_settings(&shared.settings);
         let mut open = true;
         let mut save = false;
         let (ours_label, theirs_label) = match self.op_state {
@@ -129,11 +130,7 @@ impl RepoTab {
                                                 ui.label(RichText::new(tr!("(vide)")).italics().color(p.weak));
                                             }
                                             for l in lines {
-                                                ui.label(
-                                                    RichText::new(super::diff_view::display_text(l))
-                                                        .monospace()
-                                                        .size(12.5),
-                                                );
+                                                ui.label(RichText::new(style.render(l)).font(style.font_id()));
                                             }
                                         },
                                     );

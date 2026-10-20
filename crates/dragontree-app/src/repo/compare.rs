@@ -221,7 +221,8 @@ impl CompareWindow {
                 let hl = shared.settings.syntax_highlight.then_some(&mut self.highlighter);
                 let split = shared.settings.split_diff;
                 let salt = ("compare-diff", self.tab);
-                diff_view::show(ui, &diff, DiffMode::ReadOnly, &mut self.diff_state, split, hl, p, salt);
+                let style = crate::diff_style::DiffStyle::from_settings(&shared.settings);
+                diff_view::show(ui, &diff, DiffMode::ReadOnly, &mut self.diff_state, split, &style, hl, p, salt);
             } else if self.diff_loading {
                 ui.centered_and_justified(|ui| ui.spinner());
             } else if !self.files_loading && self.files.is_empty() && self.error.is_none() {

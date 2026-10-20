@@ -155,7 +155,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | C3 | Terminal à utiliser (Windows Terminal, PowerShell, Git Bash) | ✅ |
 | C4 | Identité git globale (nom, email) | ✅ |
 | C5 | Message de commit : indicateur de longueur 50/72, colonne guide, messages récents, Co-authored-by | ✅ |
-| C6 | Diff : police, taille, largeur de tabulation, espaces visibles | 🆕 P |
+| C6 | Diff : police, taille, largeur de tabulation, espaces visibles | ✅ |
 | C7 | IA : message de commit et revue de branche par Claude Code (dans Fork depuis la 2.14) | 🆕 M |
 | C8 | Fenêtre des raccourcis clavier, À propos | 🆕 P |
 

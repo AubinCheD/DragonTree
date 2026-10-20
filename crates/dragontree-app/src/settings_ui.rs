@@ -243,6 +243,35 @@ impl SettingsWindow {
         ui.checkbox(&mut d.ignore_whitespace, tr!("Ignorer les différences d'espaces"));
         ui.checkbox(&mut d.split_diff, tr!("Diff côte à côte par défaut"));
         ui.checkbox(&mut d.syntax_highlight, tr!("Coloration syntaxique"));
+        ui.horizontal(|ui| {
+            let label = ui.label(tr!("Police du diff"));
+            let response =
+                egui::ComboBox::from_id_salt("diff-font").selected_text(d.diff_font.label()).show_ui(ui, |ui| {
+                    // Polices système réellement présentes (la liste est lue à l'ouverture du menu seulement).
+                    for font in crate::diff_style::DiffFont::available() {
+                        ui.selectable_value(&mut d.diff_font, font, font.label());
+                    }
+                });
+            response.response.labelled_by(label.id);
+            let label = ui.label(tr!("taille"));
+            ui.add(
+                egui::DragValue::new(&mut d.diff_font_size)
+                    .range(crate::diff_style::FONT_SIZE_MIN..=crate::diff_style::FONT_SIZE_MAX)
+                    .speed(0.1)
+                    .max_decimals(1),
+            )
+            .labelled_by(label.id);
+            let label = ui.label(tr!("tabulation"));
+            let response = egui::ComboBox::from_id_salt("diff-tab-width")
+                .selected_text(d.diff_tab_width.to_string())
+                .show_ui(ui, |ui| {
+                    for width in crate::diff_style::TAB_WIDTHS {
+                        ui.selectable_value(&mut d.diff_tab_width, width as u8, width.to_string());
+                    }
+                });
+            response.response.labelled_by(label.id);
+        });
+        ui.checkbox(&mut d.diff_show_whitespace, tr!("Afficher les espaces (· et →)"));
         ui.checkbox(&mut d.push_after_commit, tr!("Pousser après chaque commit (valeur par défaut)"));
         ui.horizontal(|ui| {
             let label = ui.label(tr!("Résumé du commit : longueur conseillée"));

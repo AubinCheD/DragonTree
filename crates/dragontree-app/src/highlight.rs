@@ -13,7 +13,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
-use crate::repo::diff_view::display_text;
+use crate::diff_style::expand_tabs;
 
 /// Au-delà, pas de coloration (le diff resterait fluide mais le calcul serait trop long).
 const MAX_LINES: usize = 3000;
@@ -34,7 +34,7 @@ type Spans = Vec<(Range<usize>, Color32)>;
 
 #[derive(Default)]
 pub struct Highlighter {
-    key: Option<(String, usize, bool)>,
+    key: Option<(String, usize, bool, usize)>,
     lines: HashMap<(usize, usize), Spans>,
     dark: bool,
 }
@@ -48,10 +48,10 @@ impl Highlighter {
         self.dark
     }
 
-    /// Calcule les couleurs si le diff a changé.
-    pub fn prepare(&mut self, diff: &FileDiff) {
+    /// Calcule les couleurs si le diff a changé (ou la largeur de tabulation : les plages sont celles du texte affiché).
+    pub fn prepare(&mut self, diff: &FileDiff, tab_width: usize) {
         let total: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
-        let key = (diff.display_path().to_string(), total, self.dark);
+        let key = (diff.display_path().to_string(), total, self.dark, tab_width);
         if self.key.as_ref() == Some(&key) {
             return;
         }
@@ -88,7 +88,7 @@ impl Highlighter {
                     if !on_side && !(line.kind == LineKind::Context && side_old) {
                         continue;
                     }
-                    let text = display_text(&line.text);
+                    let text = expand_tabs(&line.text, tab_width);
                     let with_nl = format!("{text}\n");
                     let Ok(ranges) = h.highlight_line(&with_nl, ss) else { continue };
                     if !on_side {
@@ -134,7 +134,7 @@ mod tests {
             + "\n";
         let diff = parse_unified_diff(&text).remove(0);
         let mut h = Highlighter::new(false);
-        h.prepare(&diff);
+        h.prepare(&diff, 4);
         let spans = h.colors(&diff, 0, 1, "", false).expect("ligne ajoutée colorée");
         let distinct: std::collections::HashSet<_> = spans.iter().map(|(_, c)| *c).collect();
         assert!(distinct.len() >= 2, "{spans:?}");
@@ -147,7 +147,7 @@ mod tests {
             ["diff --git a/x.zzz b/x.zzz", "--- a/x.zzz", "+++ b/x.zzz", "@@ -1 +1 @@", "-a", "+b"].join("\n") + "\n";
         let diff = parse_unified_diff(&text).remove(0);
         let mut h = Highlighter::new(false);
-        h.prepare(&diff);
+        h.prepare(&diff, 4);
         assert!(h.colors(&diff, 0, 1, "", false).is_none());
     }
 }

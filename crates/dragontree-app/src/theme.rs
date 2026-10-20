@@ -18,7 +18,27 @@ fn load_system_font(names: &[&str]) -> Option<Vec<u8>> {
 
 /// Polices : Segoe UI pour l'interface, Cascadia Mono/Consolas pour le code, Phosphor pour les
 /// icônes ; les polices par défaut d'egui restent en dernier recours (emoji, autres alphabets).
-pub fn install_fonts(ctx: &egui::Context) {
+pub fn install_fonts(ctx: &egui::Context, diff_font: crate::diff_style::DiffFont) {
+    ctx.set_fonts(font_definitions(diff_font));
+}
+
+/// Comme [`install_fonts`] pour un changement de police du diff fait hors du thread de l'interface : les fichiers sont
+/// lus sans verrou, puis les polices ne sont appliquées que si `generation` est encore la dernière demandée (deux
+/// changements rapprochés peuvent finir dans le désordre).
+pub fn install_fonts_if_latest(
+    ctx: &egui::Context,
+    diff_font: crate::diff_style::DiffFont,
+    latest: &std::sync::Mutex<u64>,
+    generation: u64,
+) {
+    let fonts = font_definitions(diff_font);
+    let guard = latest.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if *guard == generation {
+        ctx.set_fonts(fonts);
+    }
+}
+
+fn font_definitions(diff_font: crate::diff_style::DiffFont) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let default_prop = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let default_mono = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
@@ -44,6 +64,13 @@ pub fn install_fonts(ctx: &egui::Context) {
         mono.push("mono".to_string());
     }
 
+    // Police du diff : le fichier système choisi, sinon (ou si absent) la chasse fixe ci-dessus.
+    let mut diff = Vec::new();
+    if let Some(bytes) = diff_font.load() {
+        fonts.font_data.insert("diff-font".into(), Arc::new(FontData::from_owned(bytes)));
+        diff.push("diff-font".to_string());
+    }
+
     prop.push("phosphor".into());
     prop.extend(default_prop.iter().cloned());
     bold.extend(prop.iter().cloned());
@@ -52,9 +79,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     mono.extend(default_prop.iter().cloned());
 
     fonts.families.insert(FontFamily::Proportional, prop);
+    diff.extend(mono.iter().cloned());
     fonts.families.insert(FontFamily::Monospace, mono);
+    fonts.families.insert(FontFamily::Name(crate::diff_style::DIFF_FAMILY.into()), diff);
     fonts.families.insert(bold_family(), bold);
-    ctx.set_fonts(fonts);
+    fonts
 }
 
 /// Couleurs propres à DragonTree, déclinées selon le thème.

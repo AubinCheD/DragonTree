@@ -11,6 +11,7 @@ use dragontree_i18n::{tr, trn};
 use egui::text::LayoutJob;
 use egui::{Align2, FontId, Rect, RichText, Sense, TextFormat, Ui};
 
+use crate::diff_style::{DiffStyle, copy_text, expand_tabs, lines_to_copy, whitespace_markers};
 use crate::highlight::Highlighter;
 use crate::icons;
 use crate::theme::Palette;
@@ -38,6 +39,7 @@ enum Row {
 struct RowCache {
     key: u64,
     split: bool,
+    tab_width: usize,
     rows: Vec<Row>,
     highlights: HashMap<(usize, usize), Vec<Range<usize>>>,
     max_chars: usize,
@@ -65,27 +67,6 @@ impl DiffViewState {
     }
 }
 
-/// Texte affiché : tabulations développées (4 colonnes), `\r` final retiré.
-pub fn display_text(raw: &str) -> String {
-    let raw = raw.strip_suffix('\r').unwrap_or(raw);
-    if !raw.contains('\t') {
-        return raw.to_string();
-    }
-    let mut out = String::with_capacity(raw.len() + 8);
-    let mut col = 0;
-    for c in raw.chars() {
-        if c == '\t' {
-            let n = 4 - col % 4;
-            out.extend(std::iter::repeat_n(' ', n));
-            col += n;
-        } else {
-            out.push(c);
-            col += 1;
-        }
-    }
-    out
-}
-
 fn fingerprint(diff: &FileDiff) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     diff.display_path().hash(&mut h);
@@ -100,13 +81,13 @@ fn fingerprint(diff: &FileDiff) -> u64 {
     h.finish()
 }
 
-fn build_rows(diff: &FileDiff, split: bool) -> (Vec<Row>, usize) {
+fn build_rows(diff: &FileDiff, split: bool, tab_width: usize) -> (Vec<Row>, usize) {
     let mut rows = Vec::new();
     let mut max_chars = 0;
     for (h, hunk) in diff.hunks.iter().enumerate() {
         rows.push(Row::Header(h));
         for l in &hunk.lines {
-            max_chars = max_chars.max(display_text(&l.text).chars().count());
+            max_chars = max_chars.max(expand_tabs(&l.text, tab_width).chars().count());
         }
         if !split {
             rows.extend((0..hunk.lines.len()).map(|l| Row::Line(h, l)));
@@ -139,7 +120,7 @@ fn build_rows(diff: &FileDiff, split: bool) -> (Vec<Row>, usize) {
 }
 
 /// Plages de caractères modifiés pour chaque paire de lignes supprimée/ajoutée d'un même bloc.
-fn build_highlights(diff: &FileDiff) -> HashMap<(usize, usize), Vec<Range<usize>>> {
+fn build_highlights(diff: &FileDiff, tab_width: usize) -> HashMap<(usize, usize), Vec<Range<usize>>> {
     let mut out = HashMap::new();
     let total: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
     if total > 20_000 {
@@ -167,7 +148,7 @@ fn build_highlights(diff: &FileDiff) -> HashMap<(usize, usize), Vec<Range<usize>
                 continue;
             }
             for (&r, &a) in removed.iter().zip(added.iter()) {
-                let (old, new) = (display_text(&lines[r].text), display_text(&lines[a].text));
+                let (old, new) = (expand_tabs(&lines[r].text, tab_width), expand_tabs(&lines[a].text, tab_width));
                 if old.len() > 2000 || new.len() > 2000 {
                     continue;
                 }
@@ -227,6 +208,7 @@ pub fn show(
     mode: DiffMode,
     state: &mut DiffViewState,
     split: bool,
+    style: &DiffStyle,
     highlighter: Option<&mut Highlighter>,
     p: &Palette,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
@@ -251,14 +233,15 @@ pub fn show(
     }
 
     let key = fingerprint(diff);
-    if state.cache.as_ref().is_none_or(|c| c.key != key || c.split != split) {
-        let (rows, max_chars) = build_rows(diff, split);
-        let highlights = build_highlights(diff);
-        state.cache = Some(RowCache { key, split, rows, highlights, max_chars });
+    let tab_width = style.tab_width;
+    if state.cache.as_ref().is_none_or(|c| c.key != key || c.split != split || c.tab_width != tab_width) {
+        let (rows, max_chars) = build_rows(diff, split, tab_width);
+        let highlights = build_highlights(diff, tab_width);
+        state.cache = Some(RowCache { key, split, tab_width, rows, highlights, max_chars });
     }
     let cache = state.cache.take().expect("cache construit");
 
-    let font = FontId::monospace(12.5);
+    let font = style.font_id();
     let char_w = ui.painter().layout_no_wrap("M".into(), font.clone(), p.text).size().x;
     let row_h = (ui.painter().layout_no_wrap("Mg".into(), font.clone(), p.text).size().y + 4.0).round();
     let max_no =
@@ -268,7 +251,7 @@ pub fn show(
     let mut action = None;
     let mut highlighter = highlighter;
     if let Some(hl) = highlighter.as_deref_mut() {
-        hl.prepare(diff);
+        hl.prepare(diff, tab_width);
     }
 
     let interactive = mode != DiffMode::ReadOnly;
@@ -302,7 +285,7 @@ pub fn show(
                             egui::pos2(rect.left() + 8.0, rect.center().y),
                             Align2::LEFT_CENTER,
                             &hunk.header,
-                            FontId::monospace(11.5),
+                            style.small_font_id(1.0),
                             p.weak,
                         );
                         if interactive {
@@ -386,7 +369,7 @@ pub fn show(
                     }
                     Row::Line(h, l) => {
                         let resp =
-                            ui.allocate_rect(rect, if interactive { Sense::click_and_drag() } else { Sense::hover() });
+                            ui.allocate_rect(rect, if interactive { Sense::click_and_drag() } else { Sense::click() });
                         paint_unified_line(
                             ui,
                             rect,
@@ -396,13 +379,14 @@ pub fn show(
                             state,
                             no_w,
                             char_w,
-                            &font,
+                            style,
                             highlighter.as_deref_mut(),
                             p,
                         );
                         if interactive {
                             handle_selection(state, diff, (h, l), &resp, modifiers, ui);
                         }
+                        copy_menu(&resp, diff, state, (h, l));
                     }
                     Row::Pair(left_line, right_line) => {
                         let half = rect.width() / 2.0;
@@ -412,7 +396,7 @@ pub fn show(
                         for (side_rect, line, old_side) in [(lrect, left_line, true), (rrect, right_line, false)] {
                             let resp = ui.allocate_rect(
                                 side_rect,
-                                if interactive { Sense::click_and_drag() } else { Sense::hover() },
+                                if interactive { Sense::click_and_drag() } else { Sense::click() },
                             );
                             match line {
                                 Some(hl) => {
@@ -425,14 +409,14 @@ pub fn show(
                                         &cache,
                                         state,
                                         no_w,
-                                        char_w,
-                                        &font,
+                                        style,
                                         highlighter.as_deref_mut(),
                                         p,
                                     );
                                     if interactive {
                                         handle_selection(state, diff, hl, &resp, modifiers, ui);
                                     }
+                                    copy_menu(&resp, diff, state, hl);
                                 }
                                 None => {
                                     ui.painter().rect_filled(side_rect, 0.0, p.gutter);
@@ -449,6 +433,19 @@ pub fn show(
     action
 }
 
+/// Menu contextuel d'une ligne : copie les lignes sélectionnées (ou la ligne cliquée) telles qu'elles sont dans le
+/// fichier, sans marqueur de diff ni espaces visibles.
+fn copy_menu(resp: &egui::Response, diff: &FileDiff, state: &DiffViewState, key: (usize, usize)) {
+    resp.context_menu(|ui| {
+        let lines = lines_to_copy(&state.selected, key);
+        let label = trn!(lines.len(), "Copier {n} ligne", "Copier {n} lignes");
+        if ui.button(label).clicked() {
+            ui.ctx().copy_text(copy_text(diff, &lines));
+            ui.close();
+        }
+    });
+}
+
 fn handle_selection(
     state: &mut DiffViewState,
     diff: &FileDiff,
@@ -460,7 +457,9 @@ fn handle_selection(
     let selectable = |k: (usize, usize)| {
         diff.hunks.get(k.0).and_then(|h| h.lines.get(k.1)).is_some_and(|l| l.kind != LineKind::Context)
     };
-    if resp.drag_started() || (resp.is_pointer_button_down_on() && state.drag_origin.is_none()) {
+    // Seul le bouton principal sélectionne : un clic droit (menu « Copier ») garde la sélection.
+    let primary_down = ui.ctx().input(|i| i.pointer.button_down(egui::PointerButton::Primary));
+    if resp.drag_started() || (resp.is_pointer_button_down_on() && primary_down && state.drag_origin.is_none()) {
         state.drag_origin = Some(key);
         if !modifiers.ctrl && !modifiers.shift {
             state.selected.clear();
@@ -520,6 +519,7 @@ fn line_job(
     ranges: Option<&Vec<Range<usize>>>,
     font: &FontId,
     colors: Option<Vec<(Range<usize>, egui::Color32)>>,
+    marked: Option<&str>,
     p: &Palette,
 ) -> LayoutJob {
     let (_, hl, _) = line_colors(kind, p);
@@ -550,8 +550,13 @@ fn line_job(
             .as_ref()
             .and_then(|c| c.iter().find(|(r, _)| r.start <= a && b <= r.end).map(|(_, col)| *col))
             .unwrap_or(p.text);
+        // Espaces visibles : mêmes colonnes que le texte, les coupures ci-dessus restent valables.
+        let piece: std::borrow::Cow<str> = match marked {
+            Some(m) => m.chars().skip(text[..a].chars().count()).take(text[a..b].chars().count()).collect(),
+            None => text[a..b].into(),
+        };
         job.append(
-            &text[a..b],
+            &piece,
             0.0,
             TextFormat {
                 font_id: font.clone(),
@@ -574,10 +579,11 @@ fn paint_unified_line(
     state: &DiffViewState,
     no_w: f32,
     char_w: f32,
-    font: &FontId,
+    style: &DiffStyle,
     highlighter: Option<&mut Highlighter>,
     p: &Palette,
 ) {
+    let font = &style.font_id();
     let line = &diff.hunks[h].lines[l];
     let (bg, _, marker) = line_colors(line.kind, p);
     let selected = state.selected.contains(&(h, l));
@@ -590,14 +596,14 @@ fn paint_unified_line(
         egui::pos2(rect.left() + no_w - 4.0, rect.center().y),
         Align2::RIGHT_CENTER,
         no(line.old_no),
-        FontId::monospace(11.0),
+        style.small_font_id(1.5),
         p.weak,
     );
     painter.text(
         egui::pos2(rect.left() + 2.0 * no_w - 4.0, rect.center().y),
         Align2::RIGHT_CENTER,
         no(line.new_no),
-        FontId::monospace(11.0),
+        style.small_font_id(1.5),
         p.weak,
     );
     let marker_color = match line.kind {
@@ -612,9 +618,10 @@ fn paint_unified_line(
         font.clone(),
         marker_color,
     );
-    let text = display_text(&line.text);
+    let text = expand_tabs(&line.text, style.tab_width);
+    let marked = style.show_whitespace.then(|| whitespace_markers(&line.text, style.tab_width));
     let colors = highlighter.and_then(|hl| hl.colors(diff, h, l, &text, p.dark));
-    let job = line_job(&text, line.kind, cache.highlights.get(&(h, l)), font, colors, p);
+    let job = line_job(&text, line.kind, cache.highlights.get(&(h, l)), font, colors, marked.as_deref(), p);
     let galley = painter.layout_job(job);
     painter.galley(
         egui::pos2(rect.left() + 2.0 * no_w + 18.0, rect.center().y - galley.size().y / 2.0),
@@ -643,11 +650,11 @@ fn paint_split_line(
     cache: &RowCache,
     state: &DiffViewState,
     no_w: f32,
-    _char_w: f32,
-    font: &FontId,
+    style: &DiffStyle,
     highlighter: Option<&mut Highlighter>,
     p: &Palette,
 ) {
+    let font = &style.font_id();
     let line = &diff.hunks[h].lines[l];
     let (bg, _, _) = line_colors(line.kind, p);
     let selected = state.selected.contains(&(h, l)) && line.kind != LineKind::Context;
@@ -660,12 +667,13 @@ fn paint_split_line(
         egui::pos2(rect.left() + no_w - 4.0, rect.center().y),
         Align2::RIGHT_CENTER,
         n.map(|n| n.to_string()).unwrap_or_default(),
-        FontId::monospace(11.0),
+        style.small_font_id(1.5),
         p.weak,
     );
-    let text = display_text(&line.text);
+    let text = expand_tabs(&line.text, style.tab_width);
+    let marked = style.show_whitespace.then(|| whitespace_markers(&line.text, style.tab_width));
     let colors = highlighter.and_then(|hl| hl.colors(diff, h, l, &text, p.dark));
-    let job = line_job(&text, line.kind, cache.highlights.get(&(h, l)), font, colors, p);
+    let job = line_job(&text, line.kind, cache.highlights.get(&(h, l)), font, colors, marked.as_deref(), p);
     let galley = painter.layout_job(job);
     painter.galley(egui::pos2(rect.left() + no_w + 6.0, rect.center().y - galley.size().y / 2.0), galley, p.text);
 }
@@ -684,26 +692,20 @@ mod tests {
     }
 
     #[test]
-    fn tabs_are_expanded_and_cr_removed() {
-        assert_eq!(display_text("\tx\r"), "    x");
-        assert_eq!(display_text("ab\tc"), "ab  c");
-    }
-
-    #[test]
     fn split_rows_pair_removed_and_added() {
-        let (rows, max) = build_rows(&sample(), true);
+        let (rows, max) = build_rows(&sample(), true, 4);
         assert_eq!(rows[0], Row::Header(0));
         assert_eq!(rows[1], Row::Pair(Some((0, 0)), Some((0, 0))));
         assert_eq!(rows[2], Row::Pair(Some((0, 1)), Some((0, 2))));
         assert_eq!(rows.len(), 4);
         assert_eq!(max, "let x = 42;".len());
-        let (unified, _) = build_rows(&sample(), false);
+        let (unified, _) = build_rows(&sample(), false, 4);
         assert_eq!(unified.len(), 5);
     }
 
     #[test]
     fn intra_line_highlight_marks_only_changed_chars() {
-        let hl = build_highlights(&sample());
+        let hl = build_highlights(&sample(), 4);
         let old = &hl[&(0, 1)];
         let new = &hl[&(0, 2)];
         assert_eq!(&"let x = 1;"[old[0].clone()], "1");

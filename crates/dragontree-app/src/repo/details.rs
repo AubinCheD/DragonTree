@@ -197,6 +197,7 @@ impl RepoTab {
                     DiffMode::ReadOnly,
                     &mut self.history.diff_state,
                     shared.settings.split_diff,
+                    &crate::diff_style::DiffStyle::from_settings(&shared.settings),
                     hl,
                     p,
                     ("hist", self.id),
