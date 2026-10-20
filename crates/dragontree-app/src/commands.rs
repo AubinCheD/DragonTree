@@ -138,6 +138,8 @@ pub enum Command {
     /// Ouvre le dépôt dans l'éditeur détecté à cette position de `Shared::editors`. Hors de [`Command::ALL`] : la liste
     /// vient de la détection (voir `MenuItem::OpenInEditors`).
     OpenIn(usize),
+    /// Fenêtre des statistiques du dépôt (commits, contributeurs, commits par mois, taille).
+    RepoStats,
     /// Réglages du dépôt : identité locale, liens vers les tickets, modèle de message de commit.
     RepoSettings,
     Settings,
@@ -294,6 +296,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Cmd(Command::OpenTerminal),
             Submenu(tr_mark!("Ouvrir dans"), &[OpenInEditors]),
             Separator,
+            Cmd(Command::RepoStats),
             Cmd(Command::RepoSettings),
         ],
     ),
@@ -409,6 +412,7 @@ impl Command {
         Command::OpenExplorer,
         Command::OpenTerminal,
         Command::OpenInEditor,
+        Command::RepoStats,
         Command::RepoSettings,
         Command::Settings,
         Command::Language(None),
@@ -496,6 +500,7 @@ impl Command {
             Command::OpenInEditor => tr!("Ouvrir dans l'éditeur"),
             // Le menu et la palette affichent le nom de l'éditeur (`Shared::editors`).
             Command::OpenIn(_) => tr!("Ouvrir dans"),
+            Command::RepoStats => tr!("Statistiques…"),
             Command::RepoSettings => tr!("Réglages du dépôt…"),
             Command::Settings => tr!("Réglages…"),
             Command::Language(None) => tr!("Système"),
@@ -597,6 +602,7 @@ impl Command {
             Command::OpenExplorer => icons::FOLDER_OPEN,
             Command::OpenTerminal => icons::TERMINAL_WINDOW,
             Command::OpenInEditor | Command::OpenIn(_) => icons::CODE,
+            Command::RepoStats => icons::CHART_BAR,
             Command::RepoSettings => icons::GEAR_SIX,
             Command::Settings => icons::GEAR_SIX,
             Command::Language(_) => icons::TRANSLATE,
@@ -679,6 +685,7 @@ impl Command {
             | Command::OpenTerminal
             | Command::OpenInEditor
             | Command::OpenIn(_)
+            | Command::RepoStats
             | Command::RepoSettings => Scope::Repo,
         }
     }

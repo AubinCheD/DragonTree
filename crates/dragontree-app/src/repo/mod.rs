@@ -27,6 +27,7 @@ mod repo_settings;
 mod restore;
 mod scope;
 mod sidebar;
+mod stats;
 mod submodules;
 mod toolbar;
 mod watcher;
@@ -267,6 +268,7 @@ struct Gens {
     patch: u64,
     compare: u64,
     lfs_locks: u64,
+    stats: u64,
     repo_settings: u64,
     ignore: u64,
     template: u64,
@@ -337,6 +339,8 @@ pub enum RepoEvent {
     Compare(compare::CompareEvent),
     /// Verrous Git LFS lus sur le serveur pour la fenêtre des verrous.
     LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
+    /// Statistiques calculées pour la fenêtre des statistiques.
+    Stats(u64, Result<Box<dragontree_git::RepoStats>, GitError>),
     /// Branches périmées lues pour le dialogue qui les attend.
     StaleBranches(Result<Vec<dragontree_git::StaleBranch>, GitError>),
     /// Branche par défaut du remote, lue pour le dialogue de pull request.
@@ -394,6 +398,8 @@ pub struct RepoTab {
     pub lfs_files: HashSet<String>,
     /// Fenêtre des verrous Git LFS ouverte.
     pub lfs_locks: Option<lfs::LfsLocksWindow>,
+    /// Fenêtre des statistiques du dépôt ouverte.
+    pub stats: Option<stats::StatsWindow>,
     /// Fenêtre de sortie de la dernière commande personnalisée qui l'a demandée.
     pub custom_output: Option<custom::CustomOutputWindow>,
     pub view: RepoView,
@@ -448,6 +454,7 @@ impl RepoTab {
             lfs_patterns: Vec::new(),
             lfs_files: HashSet::new(),
             lfs_locks: None,
+            stats: None,
             custom_output: None,
             view: RepoView::History,
             history: HistoryState::default(),
@@ -983,6 +990,7 @@ impl RepoTab {
             }
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
+            RepoEvent::Stats(g, result) => self.on_stats(g, result),
             RepoEvent::StaleBranches(found) => self.on_stale_branches(shared, found),
             RepoEvent::PullRequestDefault(generation, default) => self.on_pull_request_default(generation, default),
             RepoEvent::PullRequest(generation, result) => self.on_pull_request(shared, generation, result),
@@ -1211,6 +1219,7 @@ impl RepoTab {
             self.compare = None;
         }
         self.lfs_locks_window(&ctx, shared, &p);
+        self.stats_window(&ctx, shared, &p);
         self.custom_output_window(&ctx, &p);
         self.rebase_window(&ctx, shared, &p);
         self.conflict_window(&ctx, shared, &p);

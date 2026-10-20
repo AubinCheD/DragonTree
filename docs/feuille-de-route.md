@@ -144,7 +144,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | R17 | Remettre un fichier dans son état à un commit donné | ✅ |
 | R18 | Créer une pull request (GitHub, GitLab, Azure DevOps) | ✅ |
 | R19 | « Ouvrir dans ▾ » avec d'autres éditeurs (Visual Studio .sln, Rider, Cursor…) | ✅ |
-| R20 | Statistiques du dépôt | 🆕 M |
+| R20 | Statistiques du dépôt | ✅ |
 
 ### Config
 

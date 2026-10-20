@@ -30,6 +30,7 @@ impl RepoTab {
             | Command::CreateWorktree
             | Command::AddSubmodule
             | Command::IgnoreFiles
+            | Command::RepoStats
             | Command::RepoSettings => self.refs.is_some(),
             // Une opération en cours (fusion, rebase, session am…) : un patch s'y mélangerait.
             Command::ApplyPatch | Command::PastePatch => self.refs.is_some() && self.op_state == OpState::None,
@@ -151,6 +152,7 @@ impl RepoTab {
             Command::LfsPrune => self.op_lfs_prune(shared),
             Command::LfsLocks => self.open_lfs_locks(shared),
             Command::RepoSettings => self.open_repo_settings(shared),
+            Command::RepoStats => self.open_stats(shared),
             Command::OpenExplorer => crate::util::open_in_explorer(&self.path),
             Command::OpenTerminal => crate::util::open_terminal(&self.path),
             Command::OpenInEditor => self.open_in_editor(

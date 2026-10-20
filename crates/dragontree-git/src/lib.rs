@@ -32,6 +32,7 @@ pub mod runner;
 pub mod shell;
 pub mod ssh;
 pub mod stash;
+pub mod stats;
 pub mod status;
 pub mod submodule;
 pub mod worktree;
@@ -56,5 +57,6 @@ pub use refs::{HeadState, LocalBranch, RefKind, RefLabel, RefsSnapshot, RemoteBr
 pub use repo::{CommitInfo, OpState, Remote, Repo, Submodule};
 pub use runner::{CancelToken, Git, GitCommand, Output};
 pub use stash::{StashEntry, fold_stashes};
+pub use stats::{Contributor, MonthCount, ObjectStats, RepoStats};
 pub use status::{ConflictKind, FileState, StatusEntry, StatusSnapshot};
 pub use worktree::{Worktree, WorktreeStart};
