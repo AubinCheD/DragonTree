@@ -6,6 +6,7 @@ use dragontree_git::{ConflictKind, FileState, OpState, PatchMode, StatusEntry, S
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, Key, RichText, Ui};
 
+use super::commit_message::{self, LengthLevel};
 use super::details::file_row;
 use super::diff_view::{self, DiffMode};
 use super::patches::PatchSource;
@@ -14,8 +15,22 @@ use crate::app::{AppAction, Shared};
 use crate::commands::Command;
 use crate::external_tools::ExternalDiff;
 use crate::icons;
+use crate::settings::{RECENT_MESSAGES_MAX, RecentMessage};
 use crate::theme::Palette;
 use crate::widgets;
+
+/// Auteurs listés au plus dans le menu « Co-auteur » (la recherche restreint la liste).
+const COAUTHORS_SHOWN: usize = 50;
+
+/// Résumé raccourci pour un élément de menu.
+fn ellipsized(subject: &str) -> String {
+    const MAX: usize = 70;
+    if subject.chars().count() <= MAX {
+        subject.to_string()
+    } else {
+        format!("{}…", subject.chars().take(MAX - 1).collect::<String>())
+    }
+}
 
 const ROW_H: f32 = 22.0;
 
@@ -669,6 +684,72 @@ impl RepoTab {
         }
     }
 
+    /// Contenu du menu « Messages récents » : messages mémorisés pour ce dépôt, puis sujets de l'historique chargé.
+    /// Renvoie le choix et vrai s'il remplace aussi la description (message mémorisé) ; un sujet de l'historique ne
+    /// remplace que le résumé : la description saisie n'est jamais effacée.
+    fn recent_messages_menu(&self, ui: &mut Ui, shared: &Shared, p: &Palette) -> Option<(RecentMessage, bool)> {
+        let stored = shared.settings.recent_messages_of(&self.path);
+        let history = commit_message::recent_subjects(&self.history.loaded.commits, stored, RECENT_MESSAGES_MAX);
+        let mut picked = None;
+        if stored.is_empty() && history.is_empty() {
+            ui.label(RichText::new(tr!("Aucun message pour l'instant.")).color(p.weak));
+        }
+        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+            for message in stored {
+                let mut response = ui.button(ellipsized(&message.subject));
+                if !message.body.is_empty() {
+                    response = response.on_hover_text(&message.body);
+                }
+                if response.clicked() {
+                    picked = Some((message.clone(), true));
+                    ui.close();
+                }
+            }
+            if !history.is_empty() {
+                if !stored.is_empty() {
+                    ui.separator();
+                }
+                ui.label(RichText::new(tr!("Sujets de l'historique")).color(p.weak).size(11.5));
+                for subject in &history {
+                    if ui.button(ellipsized(subject)).clicked() {
+                        picked = Some((RecentMessage { subject: subject.clone(), body: String::new() }, false));
+                        ui.close();
+                    }
+                }
+            }
+        });
+        picked
+    }
+
+    /// Contenu du menu « Co-auteur » : auteurs de l'historique chargé, avec recherche.
+    fn coauthors_menu(&mut self, ui: &mut Ui, p: &Palette) -> Option<commit_message::Author> {
+        let commits = &self.history.loaded.commits;
+        if self.changes.authors.as_ref().is_none_or(|(loaded, _)| !Arc::ptr_eq(loaded, commits)) {
+            self.changes.authors = Some((Arc::clone(commits), commit_message::known_authors(commits)));
+        }
+        let authors = self.changes.authors.as_ref().map_or(&[][..], |(_, list)| list.as_slice());
+        ui.add(
+            egui::TextEdit::singleline(&mut self.changes.coauthor_query)
+                .hint_text(tr!("Rechercher un auteur"))
+                .desired_width(280.0),
+        );
+        let mut picked = None;
+        let mut shown = 0;
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            for author in authors.iter().filter(|a| a.matches(&self.changes.coauthor_query)).take(COAUTHORS_SHOWN) {
+                shown += 1;
+                if ui.button(format!("{} <{}>", author.name, author.email)).clicked() {
+                    picked = Some(author.clone());
+                    ui.close();
+                }
+            }
+        });
+        if shown == 0 {
+            ui.label(RichText::new(tr!("Aucun auteur trouvé.")).color(p.weak));
+        }
+        picked
+    }
+
     fn commit_box(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette, status: &Arc<StatusSnapshot>) {
         let staged = status.staged().len();
         let conflicts = status.conflicted().len();
@@ -682,20 +763,64 @@ impl RepoTab {
                 .desired_width(f32::INFINITY)
                 .font(egui::TextStyle::Body),
         );
+        let soft = shared.settings.commit_soft_limit;
+        let hard = shared.settings.commit_hard_limit.max(soft);
         let len = self.changes.subject.chars().count();
+        let (mut picked, mut coauthor) = (None, None);
         ui.horizontal(|ui| {
+            ui.menu_button(format!("{} {}", tr!("Messages récents"), icons::CARET_DOWN), |ui| {
+                picked = self.recent_messages_menu(ui, shared, p);
+            });
+            ui.menu_button(format!("{} {}", tr!("Co-auteur"), icons::CARET_DOWN), |ui| {
+                coauthor = self.coauthors_menu(ui, p);
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let color = if len > 72 { p.modified_fg } else { p.weak };
-                ui.label(RichText::new(format!("{len}/72")).size(11.0).color(color));
+                let level = commit_message::length_level(len, soft, hard);
+                let color = match level {
+                    LengthLevel::Normal => p.weak,
+                    LengthLevel::Warning => p.modified_fg,
+                    LengthLevel::Error => p.removed_fg,
+                };
+                // Sous la première limite on compte vers elle, au-delà vers la seconde.
+                let shown = if level == LengthLevel::Normal { soft } else { hard };
+                ui.label(RichText::new(format!("{len}/{shown}")).size(11.0).color(color)).on_hover_text(tr!(
+                    "Résumé : {soft} caractères conseillés, {hard} au plus",
+                    soft,
+                    hard
+                ));
             });
         });
+        if let Some((message, with_body)) = picked {
+            self.changes.subject = message.subject;
+            if with_body {
+                self.changes.body = message.body;
+            }
+            // Le message est celui de l'utilisateur : le modèle ne le remplacera plus.
+            self.changes.template_prefill = None;
+        }
+        if let Some(author) = coauthor {
+            commit_message::add_coauthor(&mut self.changes.body, &author);
+        }
+        // Police à chasse fixe : la colonne guide tombe sur un nombre de caractères exact.
+        let font = egui::TextStyle::Monospace.resolve(ui.style());
+        let margin = egui::Margin::symmetric(4, 2);
         let body = ui.add(
             egui::TextEdit::multiline(&mut self.changes.body)
                 .id_salt(("body", self.id))
                 .hint_text(tr!("Description (facultatif)"))
+                .font(font.clone())
+                .margin(margin)
                 .desired_rows(4)
                 .desired_width(f32::INFINITY),
         );
+        let char_width = ui.ctx().fonts_mut(|f| f.glyph_width(&font, '0'));
+        let guide_x = body.rect.left() + f32::from(margin.left) + char_width * hard as f32;
+        if guide_x < body.rect.right() - f32::from(margin.right) {
+            let line = [egui::pos2(guide_x, body.rect.top() + 1.0), egui::pos2(guide_x, body.rect.bottom() - 1.0)];
+            ui.painter()
+                .with_clip_rect(body.rect)
+                .line_segment(line, egui::Stroke::new(1.0, p.weak.gamma_multiply(0.45)));
+        }
         ui.add_space(4.0);
         if conflicts > 0 {
             ui.label(

@@ -252,7 +252,8 @@ impl RepoTab {
             Ok(Some(if amend { tr!("Commit modifié") } else { tr!("Commit créé") }.into()))
         });
         if self.next_op_id != before {
-            self.changes.pending_commit = Some(PendingCommit { op: self.next_op_id, after });
+            let message = (self.changes.subject.clone(), self.changes.body.clone());
+            self.changes.pending_commit = Some(PendingCommit { op: self.next_op_id, after, message });
         }
     }
 

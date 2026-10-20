@@ -95,6 +95,7 @@ impl SettingsWindow {
                 c.name = c.name.trim().to_string();
                 c.command = c.command.trim().to_string();
             }
+            d.commit_hard_limit = d.commit_hard_limit.max(d.commit_soft_limit);
             d.custom_diff_tool = d.custom_diff_tool.trim().to_string();
             d.custom_merge_tool = d.custom_merge_tool.trim().to_string();
             // Les listes modifiées ailleurs pendant l'édition (onglets, comptes) sont conservées.
@@ -104,6 +105,7 @@ impl SettingsWindow {
             d.accounts = shared.settings.accounts.clone();
             d.repo_accounts = shared.settings.repo_accounts.clone();
             d.favorites = shared.settings.favorites.clone();
+            d.recent_messages = shared.settings.recent_messages.clone();
             let rescan = d.scan_roots != shared.settings.scan_roots
                 || d.scan_max_depth != shared.settings.scan_max_depth
                 || d.scan_skip_dirs != shared.settings.scan_skip_dirs
@@ -242,6 +244,12 @@ impl SettingsWindow {
         ui.checkbox(&mut d.split_diff, tr!("Diff côte à côte par défaut"));
         ui.checkbox(&mut d.syntax_highlight, tr!("Coloration syntaxique"));
         ui.checkbox(&mut d.push_after_commit, tr!("Pousser après chaque commit (valeur par défaut)"));
+        ui.horizontal(|ui| {
+            let label = ui.label(tr!("Résumé du commit : longueur conseillée"));
+            ui.add(egui::DragValue::new(&mut d.commit_soft_limit).range(1..=200)).labelled_by(label.id);
+            let label = ui.label(tr!("maximale (colonne guide)"));
+            ui.add(egui::DragValue::new(&mut d.commit_hard_limit).range(1..=200)).labelled_by(label.id);
+        });
 
         section(ui, tr!("Outils externes"));
         ui.label(

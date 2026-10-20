@@ -43,6 +43,16 @@ pub enum ThemeChoice {
     Dark,
 }
 
+/// Nombre de messages de commit gardés par dépôt (« Messages récents »).
+pub const RECENT_MESSAGES_MAX: usize = 20;
+
+/// Message de commit déjà utilisé (résumé et description), proposé par « Messages récents ».
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RecentMessage {
+    pub subject: String,
+    pub body: String,
+}
+
 /// Règle de lien vers un ticket : les occurrences de `pattern` (expression régulière) dans un message de commit
 /// deviennent des liens vers `url`, où `$1`, `${nom}`… sont remplacés par les groupes capturés.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -123,6 +133,12 @@ pub struct Settings {
     pub custom_merge_tool_trust_exit: bool,
     /// Terminal de « Ouvrir un terminal » (Réglages › Terminal).
     pub terminal: TerminalChoice,
+    /// Longueurs du résumé d'un commit : au-delà de la première, avertissement ; au-delà de la seconde, erreur
+    /// (la seconde est aussi la colonne guide de la description). Réglages › Diff et commit.
+    pub commit_soft_limit: usize,
+    pub commit_hard_limit: usize,
+    /// Dépôt (chemin) -> derniers messages de commit, le plus récent d'abord (voir [`Settings::remember_message`]).
+    pub recent_messages: BTreeMap<String, Vec<RecentMessage>>,
 }
 
 impl Default for Settings {
@@ -172,6 +188,9 @@ impl Default for Settings {
             custom_merge_tool: String::new(),
             custom_merge_tool_trust_exit: false,
             terminal: TerminalChoice::Auto,
+            commit_soft_limit: 50,
+            commit_hard_limit: 72,
+            recent_messages: BTreeMap::new(),
         }
     }
 }
@@ -333,6 +352,25 @@ impl Settings {
         self.ticket_links.get(&path_key(repo)).map_or(&[], Vec::as_slice)
     }
 
+    /// Derniers messages de commit d'un dépôt, le plus récent d'abord.
+    pub fn recent_messages_of(&self, repo: &Path) -> &[RecentMessage] {
+        self.recent_messages.get(&path_key(repo)).map_or(&[], Vec::as_slice)
+    }
+
+    /// Retient un message de commit réussi : en tête de liste, sans doublon, au plus [`RECENT_MESSAGES_MAX`].
+    /// Un message sans résumé n'est pas gardé.
+    pub fn remember_message(&mut self, repo: &Path, subject: &str, body: &str) {
+        let (subject, body) = (subject.trim(), body.trim_end());
+        if subject.is_empty() {
+            return;
+        }
+        let list = self.recent_messages.entry(path_key(repo)).or_default();
+        let message = RecentMessage { subject: subject.to_string(), body: body.to_string() };
+        list.retain(|m| *m != message);
+        list.insert(0, message);
+        list.truncate(RECENT_MESSAGES_MAX);
+    }
+
     /// Remplace les règles d'un dépôt ; les règles sans motif ni URL sont écartées, et un dépôt sans règle n'a
     /// plus d'entrée.
     pub fn set_ticket_rules(&mut self, repo: &Path, rules: Vec<TicketRule>) {
@@ -465,6 +503,33 @@ mod tests {
         assert!(s.ticket_rules_of(Path::new(r"C:\DEV\B")).is_empty());
         s.set_ticket_rules(Path::new(r"C:\DEV\A"), Vec::new());
         assert!(s.ticket_links.is_empty(), "plus d'entrée pour un dépôt sans règle");
+    }
+
+    #[test]
+    fn recent_messages_are_per_repo_deduplicated_and_capped() {
+        let mut s = Settings::default();
+        let repo = Path::new(r"C:\DEV\A");
+        s.remember_message(repo, "feat: a", "corps");
+        s.remember_message(repo, "fix: b", "");
+        s.remember_message(Path::new(r"c:\dev\a\"), "feat: a", "corps\n");
+        // Même dépôt (clé normalisée) : le doublon remonte en tête.
+        let subjects: Vec<_> = s.recent_messages_of(repo).iter().map(|m| m.subject.as_str()).collect();
+        assert_eq!(subjects, ["feat: a", "fix: b"]);
+        assert!(s.recent_messages_of(Path::new(r"C:\DEV\B")).is_empty());
+        // Un résumé vide n'est pas gardé ; la liste est plafonnée.
+        s.remember_message(repo, "  ", "orphelin");
+        for i in 0..30 {
+            s.remember_message(repo, &format!("commit {i}"), "");
+        }
+        assert_eq!(s.recent_messages_of(repo).len(), RECENT_MESSAGES_MAX);
+        assert_eq!(s.recent_messages_of(repo)[0].subject, "commit 29");
+    }
+
+    #[test]
+    fn an_old_settings_file_has_the_default_commit_limits_and_no_recent_messages() {
+        let s: Settings = serde_json::from_str(r#"{"theme":"Dark"}"#).unwrap();
+        assert_eq!((s.commit_soft_limit, s.commit_hard_limit), (50, 72));
+        assert!(s.recent_messages.is_empty());
     }
 
     #[test]

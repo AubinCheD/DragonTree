@@ -6,6 +6,7 @@ mod blame;
 mod branch_batch;
 mod changes;
 mod commands;
+mod commit_message;
 mod compare;
 mod conflicts;
 mod custom;
@@ -238,11 +239,18 @@ pub struct ChangesState {
     template_prefill: Option<(String, String)>,
     /// Commit lancé : le message n'est effacé (et le push éventuel lancé) qu'en cas de succès.
     pending_commit: Option<PendingCommit>,
+    /// Recherche du menu « Co-auteur ».
+    coauthor_query: String,
+    /// Auteurs de l'historique chargé, recalculés quand la liste change (la liste d'origine est gardée pour comparer
+    /// par identité : une adresse libérée puis réutilisée ne passerait pas pour la même liste).
+    authors: Option<(Arc<Vec<Commit>>, Vec<commit_message::Author>)>,
 }
 
 struct PendingCommit {
     op: u64,
     after: AfterCommit,
+    /// Résumé et description envoyés : retenus dans « Messages récents » si le commit réussit.
+    message: (String, String),
 }
 
 /// Suite d'un commit réussi.
@@ -982,6 +990,8 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                     && let Some(commit) = self.changes.pending_commit.take()
                     && succeeded
                 {
+                    shared.settings.remember_message(&self.path, &commit.message.0, &commit.message.1);
+                    shared.settings_dirty = true;
                     self.after_commit(shared, commit.after);
                 }
             }
