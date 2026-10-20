@@ -23,20 +23,45 @@ pub struct Toast {
     pub kind: ToastKind,
     pub title: String,
     pub detail: Option<String>,
+    /// Bouton d'action de la notification (traité par l'application).
+    pub action: Option<ToastAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastAction {
+    OpenGitIdentity,
+}
+
+impl ToastAction {
+    fn label(self) -> String {
+        match self {
+            ToastAction::OpenGitIdentity => tr!("Régler l'identité git…").to_string(),
+        }
+    }
 }
 
 impl Toast {
     pub fn info(title: impl Into<String>) -> Toast {
-        Toast { kind: ToastKind::Info, title: title.into(), detail: None }
+        Toast { kind: ToastKind::Info, title: title.into(), detail: None, action: None }
     }
 
     pub fn success(title: impl Into<String>) -> Toast {
-        Toast { kind: ToastKind::Success, title: title.into(), detail: None }
+        Toast { kind: ToastKind::Success, title: title.into(), detail: None, action: None }
     }
 
     pub fn error(title: impl Into<String>, detail: impl Into<String>) -> Toast {
         let detail = detail.into();
-        Toast { kind: ToastKind::Error, title: title.into(), detail: (!detail.trim().is_empty()).then_some(detail) }
+        Toast {
+            kind: ToastKind::Error,
+            title: title.into(),
+            detail: (!detail.trim().is_empty()).then_some(detail),
+            action: None,
+        }
+    }
+
+    pub fn with_action(mut self, action: ToastAction) -> Toast {
+        self.action = Some(action);
+        self
     }
 }
 
@@ -63,7 +88,9 @@ impl Toasts {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, p: &Palette) {
+    /// Affiche les notifications ; renvoie l'action dont le bouton a été cliqué.
+    pub fn show(&mut self, ctx: &egui::Context, p: &Palette) -> Option<ToastAction> {
+        let mut clicked = None;
         let now = Instant::now();
         // Les erreurs restent jusqu'à fermeture ; les autres disparaissent seules.
         self.items.retain(|t| t.toast.kind == ToastKind::Error || now - t.born < TOAST_LIFETIME);
@@ -97,6 +124,12 @@ impl Toasts {
                                         if ui.small_button(format!("{} {}", icons::COPY, tr!("Copier"))).clicked() {
                                             ui.ctx().copy_text(format!("{}\n{detail}", t.toast.title));
                                         }
+                                        if let Some(action) = t.toast.action
+                                            && ui.small_button(action.label()).clicked()
+                                        {
+                                            clicked = Some(action);
+                                            close = Some(t.id);
+                                        }
                                     });
                                 }
                             });
@@ -117,6 +150,7 @@ impl Toasts {
         if let Some(id) = close {
             self.items.retain(|t| t.id != id);
         }
+        clicked
     }
 }
 

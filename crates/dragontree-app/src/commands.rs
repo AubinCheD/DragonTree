@@ -37,6 +37,8 @@ pub enum Command {
     QuickOpen,
     Accounts,
     SshKeys,
+    /// Identité git globale (nom et e-mail des commits).
+    GitIdentity,
     /// Ferme l'application (pas de raccourci propre : Alt+F4 reste celui du système).
     Quit,
     ShowChanges,
@@ -314,6 +316,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             ),
             Separator,
             Cmd(Command::Accounts),
+            Cmd(Command::GitIdentity),
         ],
     ),
 ];
@@ -348,6 +351,7 @@ impl Command {
         Command::QuickOpen,
         Command::Accounts,
         Command::SshKeys,
+        Command::GitIdentity,
         Command::Quit,
         Command::ShowChanges,
         Command::ShowHistory,
@@ -432,6 +436,7 @@ impl Command {
             Command::QuickOpen => tr!("Palette de commandes"),
             Command::Accounts => tr!("Comptes…"),
             Command::SshKeys => tr!("Clés SSH…"),
+            Command::GitIdentity => tr!("Identité git…"),
             Command::Quit => tr!("Quitter"),
             Command::ShowChanges => tr!("Modifications locales"),
             Command::ShowHistory => tr!("Tous les commits"),
@@ -542,6 +547,7 @@ impl Command {
             Command::QuickOpen => icons::MAGNIFYING_GLASS,
             Command::Accounts => icons::USER_CIRCLE,
             Command::SshKeys => icons::KEY,
+            Command::GitIdentity => icons::USER,
             Command::Quit => icons::SIGN_OUT,
             Command::ShowChanges => icons::GIT_DIFF,
             Command::ShowHistory => icons::GIT_COMMIT,
@@ -621,6 +627,7 @@ impl Command {
             | Command::QuickOpen
             | Command::Accounts
             | Command::SshKeys
+            | Command::GitIdentity
             | Command::Quit
             | Command::ToggleRepoList
             | Command::ShowLog

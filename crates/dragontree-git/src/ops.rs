@@ -142,7 +142,15 @@ impl Repo {
         } else {
             cmd = cmd.args(["-F", "-"]).stdin(message.as_bytes().to_vec());
         }
-        cmd.run().map(|_| ())
+        cmd.run().map(|_| ()).map_err(|e| self.recognise_missing_identity(e))
+    }
+
+    /// Un commit refusé alors que git n'accepte aucune identité devient `GitError::IdentityMissing`.
+    fn recognise_missing_identity(&self, e: GitError) -> GitError {
+        match &e {
+            GitError::Failed { .. } if !self.identity_usable() => GitError::IdentityMissing(e.to_string()),
+            _ => e,
+        }
     }
 
     /// Checkout. Une branche locale déjà sortie dans un autre worktree est refusée par git : l'erreur nomme ce

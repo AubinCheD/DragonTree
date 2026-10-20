@@ -292,6 +292,7 @@ impl RepoTab {
                 kind: ToastKind::Info,
                 title: tr!("Le commit n'a pas été poussé").into(),
                 detail: Some(reason),
+                action: None,
             }),
         }
     }

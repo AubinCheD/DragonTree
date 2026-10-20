@@ -27,6 +27,9 @@ pub enum GitError {
     Refused(String),
     /// Checkout refusé : la branche est déjà sortie dans un autre worktree (`path`).
     CheckedOutElsewhere { branch: String, path: PathBuf },
+    /// Le commit a échoué et ni le nom ni l'e-mail de l'auteur ne sont configurés (reconnu d'après la configuration,
+    /// pas d'après le message de git, qui dépend de sa langue) ; contient le message de git.
+    IdentityMissing(String),
     /// Erreur interne de DragonTree (tâche interrompue par une panique).
     Internal(String),
 }
@@ -100,6 +103,7 @@ impl fmt::Display for GitError {
                 "{}",
                 tr!("La branche « {branch} » est déjà sortie dans le worktree {path}", branch, path = path.display())
             ),
+            GitError::IdentityMissing(detail) => write!(f, "{detail}"),
             GitError::Internal(e) => write!(f, "{}", tr!("erreur interne de DragonTree : {e}", e)),
         }
     }

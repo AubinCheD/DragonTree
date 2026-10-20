@@ -954,6 +954,19 @@ impl RepoTab {
                     Err(GitError::CheckedOutElsewhere { branch, path }) if self.dialog.is_none() => {
                         self.offer_worktree(branch, path)
                     }
+                    // Commit sans nom ou e-mail d'auteur : le bouton ouvre Configuration › Identité git.
+                    Err(GitError::IdentityMissing(detail)) => shared.toast(
+                        Toast::error(
+                            tr!("Commit impossible : aucune identité git"),
+                            tr!(
+                                "{detail}
+
+Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux dépôts qui n'ont pas d'identité propre (Dépôt › Réglages du dépôt).",
+                                detail
+                            ),
+                        )
+                        .with_action(crate::toasts::ToastAction::OpenGitIdentity),
+                    ),
                     Err(e) => shared.toast(Toast::error(tr!("{title} a échoué", title), e.to_string())),
                 }
                 self.refresh(shared, refresh);

@@ -11,6 +11,7 @@ pub mod commands;
 pub mod custom_commands;
 pub mod editors;
 pub mod external_tools;
+pub mod git_identity;
 pub mod highlight;
 pub mod icons;
 pub mod jobs;

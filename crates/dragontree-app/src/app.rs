@@ -32,6 +32,7 @@ pub enum AppEvent {
     Scan(ScanEvent),
     Forge(ForgeEvent),
     Ssh(SshEvent),
+    GitIdentity(crate::git_identity::IdentityEvent),
     Clone(CloneEvent),
     Trusted(PathBuf, Result<(), GitError>),
     Initialized(PathBuf, Result<(), GitError>),
@@ -53,6 +54,7 @@ pub enum AppAction {
     ShowClone,
     ShowAccounts,
     ShowSshKeys,
+    ShowGitIdentity,
     ShowSettings,
     /// Réglages ouverts sur un onglet donné (Dépôt › Commandes personnalisées › Gérer les commandes…).
     ShowSettingsTab(SettingsTab),
@@ -198,6 +200,7 @@ pub struct DragonTreeApp {
     repo_list: RepoListState,
     accounts: AccountsWindow,
     ssh_keys: SshKeysWindow,
+    git_identity: crate::git_identity::GitIdentityWindow,
     clone: Option<CloneWindow>,
     settings_window: Option<SettingsWindow>,
     log_open: bool,
@@ -281,6 +284,7 @@ impl DragonTreeApp {
             repo_list,
             accounts,
             ssh_keys: SshKeysWindow::new(ssh_dir),
+            git_identity: Default::default(),
             clone: None,
             settings_window: None,
             log_open: false,
@@ -476,6 +480,7 @@ impl DragonTreeApp {
                 AppEvent::Scan(ev) => self.repo_list.handle(ev, &mut self.shared),
                 AppEvent::Forge(ev) => self.accounts.handle(ev, &mut self.shared),
                 AppEvent::Ssh(ev) => self.ssh_keys.handle(ev, &mut self.shared),
+                AppEvent::GitIdentity(ev) => self.git_identity.handle(ev, &mut self.shared),
                 AppEvent::Clone(CloneEvent::Done(done)) => {
                     crate::clone::finish_clone(&mut self.shared, &done, self.clone.is_some());
                     if let Some(c) = &mut self.clone {
@@ -563,6 +568,7 @@ impl DragonTreeApp {
             }
             AppAction::ShowAccounts => self.accounts.open = true,
             AppAction::ShowSshKeys => self.ssh_keys.show(),
+            AppAction::ShowGitIdentity => self.git_identity.show(&self.shared),
             AppAction::ShowSettings => {
                 if self.settings_window.is_none() {
                     self.settings_window = Some(SettingsWindow::new(&self.shared.settings));
@@ -679,6 +685,7 @@ impl DragonTreeApp {
             Command::QuickOpen => self.shared.actions.push(AppAction::QuickOpen),
             Command::Accounts => self.shared.actions.push(AppAction::ShowAccounts),
             Command::SshKeys => self.shared.actions.push(AppAction::ShowSshKeys),
+            Command::GitIdentity => self.shared.actions.push(AppAction::ShowGitIdentity),
             Command::Settings => self.shared.actions.push(AppAction::ShowSettings),
             Command::ManageCustomCommands => {
                 self.shared.actions.push(AppAction::ShowSettingsTab(SettingsTab::Commands))
@@ -995,6 +1002,7 @@ impl eframe::App for DragonTreeApp {
             _ => None,
         };
         self.ssh_keys.ui(&ctx, &mut self.shared, active_repo.as_deref(), &p);
+        self.git_identity.ui(&ctx, &mut self.shared, &p);
         if let Some(c) = &mut self.clone
             && !c.ui(&ctx, &mut self.shared, &p)
         {
@@ -1026,7 +1034,11 @@ impl eframe::App for DragonTreeApp {
                 self.quick_open = None;
             }
         }
-        self.shared.toasts.show(&ctx, &p);
+        if let Some(action) = self.shared.toasts.show(&ctx, &p) {
+            match action {
+                crate::toasts::ToastAction::OpenGitIdentity => self.shared.actions.push(AppAction::ShowGitIdentity),
+            }
+        }
 
         self.process_actions(&ctx);
         self.maybe_screenshot(&ctx);

@@ -18,6 +18,7 @@ pub mod export;
 pub mod external;
 pub mod gitflow;
 pub mod graph;
+pub mod identity;
 pub mod ignore;
 pub mod lfs;
 pub mod log;
