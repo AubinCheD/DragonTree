@@ -151,7 +151,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | # | Option | État |
 |---|---|---|
 | C1 | Langue français / anglais | ✅ (dans Réglages) |
-| C2 | Outils externes de diff et de merge configurables, avec préréglages VS Code, WinMerge, Beyond Compare, KDiff3, P4Merge (`git mergetool` existe déjà) | 🆕 M |
+| C2 | Outils externes de diff et de merge configurables, avec préréglages VS Code, WinMerge, Beyond Compare, KDiff3, P4Merge (`git mergetool` existe déjà) | ✅ |
 | C3 | Terminal à utiliser (Windows Terminal, PowerShell, Git Bash) | 🆕 P |
 | C4 | Identité git globale (nom, email) | 🆕 P |
 | C5 | Message de commit : indicateur de longueur 50/72, colonne guide, messages récents, Co-authored-by | 🆕 M (un compteur « n/72 » sur le résumé existe déjà : `crates/dragontree-app/src/repo/changes.rs:562-567`) |

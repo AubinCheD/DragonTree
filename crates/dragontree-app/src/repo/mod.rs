@@ -12,6 +12,7 @@ mod custom;
 mod details;
 mod dialogs;
 pub mod diff_view;
+mod external_diff;
 mod folding;
 mod gitflow;
 mod graph_paint;
@@ -341,6 +342,8 @@ pub enum RepoEvent {
     LfsLocks(u64, Result<Vec<dragontree_git::LfsLock>, GitError>),
     /// Statistiques calculées pour la fenêtre des statistiques.
     Stats(u64, Result<Box<dragontree_git::RepoStats>, GitError>),
+    /// Échec du lancement d'un outil externe (titre, détail) : une notification.
+    ToolError(String, String),
     /// Branches périmées lues pour le dialogue qui les attend.
     StaleBranches(Result<Vec<dragontree_git::StaleBranch>, GitError>),
     /// Branche par défaut du remote, lue pour le dialogue de pull request.
@@ -991,6 +994,7 @@ impl RepoTab {
             RepoEvent::Compare(ev) => self.on_compare(shared, ev),
             RepoEvent::LfsLocks(g, result) => self.on_lfs_locks(g, result),
             RepoEvent::Stats(g, result) => self.on_stats(g, result),
+            RepoEvent::ToolError(title, detail) => shared.toast(crate::toasts::Toast::error(title, detail)),
             RepoEvent::StaleBranches(found) => self.on_stale_branches(shared, found),
             RepoEvent::PullRequestDefault(generation, default) => self.on_pull_request_default(generation, default),
             RepoEvent::PullRequest(generation, result) => self.on_pull_request(shared, generation, result),

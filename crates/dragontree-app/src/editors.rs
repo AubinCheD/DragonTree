@@ -111,16 +111,16 @@ impl SearchDirs {
         SearchDirs { path_var: std::env::var_os("PATH"), program_files, local_app_data: dirs::data_local_dir() }
     }
 
-    fn in_path(&self, exe: &str) -> Option<PathBuf> {
+    pub(crate) fn in_path(&self, exe: &str) -> Option<PathBuf> {
         std::env::split_paths(self.path_var.as_deref()?).map(|dir| dir.join(exe)).find(|p| p.is_file())
     }
 
     /// Premier fichier existant parmi `<Program Files>/<relative>`.
-    fn in_program_files(&self, relative: &str) -> Option<PathBuf> {
+    pub(crate) fn in_program_files(&self, relative: &str) -> Option<PathBuf> {
         self.program_files.iter().map(|pf| pf.join(relative)).find(|p| p.is_file())
     }
 
-    fn in_local_app_data(&self, relative: &str) -> Option<PathBuf> {
+    pub(crate) fn in_local_app_data(&self, relative: &str) -> Option<PathBuf> {
         self.local_app_data.as_ref().map(|d| d.join(relative)).filter(|p| p.is_file())
     }
 }
@@ -202,7 +202,7 @@ fn find_rider(dirs: &SearchDirs) -> Option<PathBuf> {
         .or_else(|| dirs.in_local_app_data("JetBrains/Toolbox/scripts/rider.cmd"))
 }
 
-fn find_program(kind: EditorKind, dirs: &SearchDirs) -> Option<PathBuf> {
+pub(crate) fn find_program(kind: EditorKind, dirs: &SearchDirs) -> Option<PathBuf> {
     match kind {
         EditorKind::VsCode => dirs
             .in_path("code.cmd")

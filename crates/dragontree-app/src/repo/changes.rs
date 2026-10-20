@@ -12,6 +12,7 @@ use super::patches::PatchSource;
 use super::{Dialog, RepoTab, Side};
 use crate::app::{AppAction, Shared};
 use crate::commands::Command;
+use crate::external_tools::ExternalDiff;
 use crate::icons;
 use crate::theme::Palette;
 use crate::widgets;
@@ -518,6 +519,13 @@ impl RepoTab {
                 PatchSource::Files { tracked, untracked: untracked_list, staged: side == Side::Staged },
             );
         }
+        if side != Side::Conflict {
+            // Renommage indexé : la version de HEAD est celle de l'ancien nom.
+            let old_path = status.entries.iter().find(|e| e.path == path).and_then(|e| e.orig_path.clone());
+            let staged = side == Side::Staged;
+            let diff = ExternalDiff::Working { path: path.to_string(), staged, old_path: old_path.filter(|_| staged) };
+            self.external_diff_entry(ui, shared, diff);
+        }
         ui.separator();
         self.file_menu(ui, shared, path, None, None);
     }
@@ -586,14 +594,11 @@ impl RepoTab {
                 });
                 ui.add_space(4.0);
                 if ui
-                    .button(format!("{} {}", icons::ARROW_SQUARE_OUT, tr!("Outil de merge externe (git mergetool)")))
+                    .button(format!("{} {}", icons::ARROW_SQUARE_OUT, tr!("Outil de merge externe")))
+                    .on_hover_text(tr!("L'outil choisi dans Réglages › Outils externes (git mergetool par défaut)"))
                     .clicked()
                 {
-                    let target = path.clone();
-                    self.run_simple(shared, tr!("Outil de merge"), super::Refresh::STATUS, move |r| {
-                        r.run_mergetool(&target)?;
-                        Ok(None)
-                    });
+                    self.run_external_merge(shared, path.clone());
                 }
             });
             return;

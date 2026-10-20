@@ -39,6 +39,8 @@ pub enum AppEvent {
     LfsDetected(bool),
     /// Éditeurs externes trouvés sur la machine (détection faite une fois, hors du thread de l'interface).
     EditorsDetected(Vec<crate::editors::Editor>),
+    /// Préréglages d'outils de diff et de merge installés (même détection, même moment).
+    ToolsDetected(Vec<crate::external_tools::DetectedTool>),
 }
 
 /// Demandes des vues à l'application (traitées après l'affichage).
@@ -93,6 +95,8 @@ pub struct Shared {
     pub lfs: Option<bool>,
     /// Éditeurs de « Ouvrir dans » : seul l'éditeur par défaut de Windows tant que la détection n'a pas répondu.
     pub editors: Vec<crate::editors::Editor>,
+    /// Préréglages d'outils externes trouvés sur la machine (vide tant que la détection n'a pas répondu).
+    pub tools: Vec<crate::external_tools::DetectedTool>,
 }
 
 impl Shared {
@@ -120,6 +124,7 @@ impl Shared {
             pull_rebase: false,
             lfs: None,
             editors: vec![crate::editors::Editor::system_default()],
+            tools: Vec::new(),
         };
         (shared, rx)
     }
@@ -236,6 +241,7 @@ impl DragonTreeApp {
         }
         // Détection des éditeurs externes (Program Files, Toolbox JetBrains, PATH) : une fois, hors du thread de l'interface.
         shared.jobs.spawn("editors-detect", || Some(AppEvent::EditorsDetected(crate::editors::detect_system())));
+        shared.jobs.spawn("tools-detect", || Some(AppEvent::ToolsDetected(crate::external_tools::detect_system())));
         if shared.git.is_none() {
             shared.toasts.push(Toast::error(
                 tr!("git est introuvable"),
@@ -482,6 +488,7 @@ impl DragonTreeApp {
                 },
                 AppEvent::LfsDetected(available) => self.shared.lfs = Some(available),
                 AppEvent::EditorsDetected(editors) => self.shared.editors = editors,
+                AppEvent::ToolsDetected(tools) => self.shared.tools = tools,
                 AppEvent::Initialized(path, result) => match result {
                     Ok(()) => self.shared.actions.push(AppAction::OpenRepo(path)),
                     Err(e) => self.shared.toast(Toast::error(tr!("Création du dépôt impossible"), e.to_string())),

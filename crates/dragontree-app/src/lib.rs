@@ -10,6 +10,7 @@ pub mod closed_tabs;
 pub mod commands;
 pub mod custom_commands;
 pub mod editors;
+pub mod external_tools;
 pub mod highlight;
 pub mod icons;
 pub mod jobs;

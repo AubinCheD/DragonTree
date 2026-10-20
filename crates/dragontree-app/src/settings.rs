@@ -9,6 +9,7 @@ use dragontree_i18n::{Lang, tr};
 use serde::{Deserialize, Serialize};
 
 use crate::custom_commands::CustomCommand;
+use crate::external_tools::ToolChoice;
 
 /// Bornes et pas de la taille de l'interface (curseur des réglages, zoom au clavier).
 pub const UI_SCALE_MIN: f32 = 0.8;
@@ -110,6 +111,15 @@ pub struct Settings {
     pub custom_commands: Vec<CustomCommand>,
     /// Dernier éditeur choisi dans « Ouvrir dans » (identifiant de `EditorKind`) : l'action du clic principal.
     pub last_editor: Option<String>,
+    /// Outil de diff externe (Réglages › Outils externes) et sa commande quand le choix est « personnalisée ».
+    pub diff_tool: ToolChoice,
+    pub custom_diff_tool: String,
+    /// Outil de merge externe des conflits et sa commande personnalisée.
+    pub merge_tool: ToolChoice,
+    pub custom_merge_tool: String,
+    /// Le code de sortie de la commande de merge personnalisée dit si le fichier est résolu (sinon git compare le fichier
+    /// avant et après). À cocher seulement si l'outil renvoie un code d'échec quand on le ferme sans résoudre.
+    pub custom_merge_tool_trust_exit: bool,
 }
 
 impl Default for Settings {
@@ -153,6 +163,11 @@ impl Default for Settings {
             ticket_links: BTreeMap::new(),
             custom_commands: Vec::new(),
             last_editor: None,
+            diff_tool: ToolChoice::Git,
+            custom_diff_tool: String::new(),
+            merge_tool: ToolChoice::Git,
+            custom_merge_tool: String::new(),
+            custom_merge_tool_trust_exit: false,
         }
     }
 }

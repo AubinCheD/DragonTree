@@ -8,6 +8,7 @@ use egui::RichText;
 
 use crate::app::{AppAction, Shared};
 use crate::custom_commands::{self, CommandKind, CommandTarget, CustomCommand};
+use crate::external_tools::{self, DetectedTool, ToolChoice, ToolKind, ToolPreset};
 use crate::icons;
 use crate::settings::{Settings, ThemeChoice, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, path_key};
 use crate::theme::Palette;
@@ -93,6 +94,8 @@ impl SettingsWindow {
                 c.name = c.name.trim().to_string();
                 c.command = c.command.trim().to_string();
             }
+            d.custom_diff_tool = d.custom_diff_tool.trim().to_string();
+            d.custom_merge_tool = d.custom_merge_tool.trim().to_string();
             // Les listes modifiées ailleurs pendant l'édition (onglets, comptes) sont conservées.
             d.open_tabs = shared.settings.open_tabs.clone();
             d.active_tab = shared.settings.active_tab;
@@ -239,6 +242,25 @@ impl SettingsWindow {
         ui.checkbox(&mut d.syntax_highlight, tr!("Coloration syntaxique"));
         ui.checkbox(&mut d.push_after_commit, tr!("Pousser après chaque commit (valeur par défaut)"));
 
+        section(ui, tr!("Outils externes"));
+        ui.label(
+            RichText::new(tr!(
+                "Outil de diff : « Ouvrir dans l'outil de diff externe » (menu d'un fichier). Outil de merge : bouton « Outil de merge externe » d'un conflit."
+            ))
+            .color(p.weak)
+            .size(12.0),
+        );
+        tool_picker(ui, ToolKind::Diff, &mut d.diff_tool, &mut d.custom_diff_tool, None, &shared.tools, p);
+        tool_picker(
+            ui,
+            ToolKind::Merge,
+            &mut d.merge_tool,
+            &mut d.custom_merge_tool,
+            Some(&mut d.custom_merge_tool_trust_exit),
+            &shared.tools,
+            p,
+        );
+
         section(ui, tr!("Réseau"));
         ui.horizontal(|ui| {
             let label = ui.label(tr!("Fetch automatique des onglets ouverts toutes les"));
@@ -366,6 +388,95 @@ impl SettingsWindow {
         if ui.button(format!("{} {}", icons::PLUS, tr!("Ajouter une commande"))).clicked() {
             self.draft.custom_commands.push(CustomCommand::default());
         }
+    }
+}
+
+/// Choix d'un outil externe : « Configuration de git », un préréglage (grisé tant qu'il n'est pas détecté) ou une
+/// commande personnalisée avec la syntaxe de ses variables.
+fn tool_picker(
+    ui: &mut egui::Ui,
+    kind: ToolKind,
+    choice: &mut ToolChoice,
+    custom: &mut String,
+    trust_exit: Option<&mut bool>,
+    detected: &[DetectedTool],
+    p: &Palette,
+) {
+    let (title, salt, hint) = match kind {
+        ToolKind::Diff => (tr!("Outil de diff"), "tool-diff", r#""C:\Outils\meld.exe" $LOCAL $REMOTE"#),
+        ToolKind::Merge => {
+            (tr!("Outil de merge"), "tool-merge", r#""C:\Outils\meld.exe" $LOCAL $BASE $REMOTE -o $MERGED"#)
+        }
+    };
+    let label_of = |choice: &ToolChoice| match choice {
+        ToolChoice::Git => tr!("Configuration de git").to_string(),
+        ToolChoice::Preset(preset) => preset.label().to_string(),
+        ToolChoice::Custom => tr!("Commande personnalisée").to_string(),
+    };
+    ui.horizontal(|ui| {
+        let label = ui.label(title);
+        let response = egui::ComboBox::from_id_salt(salt).selected_text(label_of(choice)).show_ui(ui, |ui| {
+            ui.selectable_value(choice, ToolChoice::Git, label_of(&ToolChoice::Git)).on_hover_text(match kind {
+                ToolKind::Diff => tr!("git difftool, tel que configuré dans git (diff.tool)"),
+                ToolKind::Merge => tr!("git mergetool, tel que configuré dans git (merge.tool)"),
+            });
+            for preset in ToolPreset::ALL {
+                let found = detected.iter().any(|d| d.preset == preset);
+                let text =
+                    if found { preset.label().to_string() } else { tr!("{tool} (introuvable)", tool = preset.label()) };
+                // Un préréglage absent ne se choisit pas, mais celui qui l'est déjà reste visible.
+                let selected = *choice == ToolChoice::Preset(preset);
+                ui.add_enabled_ui(found || selected, |ui| {
+                    ui.selectable_value(choice, ToolChoice::Preset(preset), text);
+                });
+            }
+            ui.selectable_value(choice, ToolChoice::Custom, label_of(&ToolChoice::Custom));
+        });
+        response.response.labelled_by(label.id);
+    });
+    if *choice != ToolChoice::Custom {
+        return;
+    }
+    ui.add(
+        egui::TextEdit::singleline(custom)
+            .hint_text(hint)
+            .font(egui::TextStyle::Monospace)
+            .desired_width(f32::INFINITY),
+    );
+    let help = match kind {
+        ToolKind::Diff => tr!("Variables : $LOCAL (version de gauche) et $REMOTE (version de droite)."),
+        ToolKind::Merge => tr!(
+            "Variables : $LOCAL (notre version), $REMOTE (la leur), $BASE (ancêtre commun) et $MERGED (fichier à résoudre)."
+        ),
+    };
+    ui.add(egui::Label::new(RichText::new(help).color(p.weak).size(12.0)).wrap());
+    ui.add(
+        egui::Label::new(
+            RichText::new(tr!(
+                "Syntaxe : le programme puis ses arguments, séparés par des espaces ; des guillemets doubles regroupent un argument qui contient des espaces. Aucun autre échappement (l'antislash et le ^ sont du texte), aucun guillemet dans un argument, et aucun interpréteur : chaque variable reste un seul argument."
+            ))
+            .color(p.weak)
+            .size(12.0),
+        )
+        .wrap(),
+    );
+    if let Some(trust) = trust_exit {
+        ui.checkbox(trust, tr!("Le code de sortie de l'outil dit si le conflit est résolu"));
+        ui.add(
+            egui::Label::new(
+                RichText::new(tr!(
+                    "À cocher seulement si l'outil renvoie un code d'échec quand on le ferme sans résoudre. Sinon, git compare le fichier avant et après : un fichier inchangé n'est pas indexé. Pour le merge, un texte qui contient une suite d'espaces est refusé : git la réduirait à un seul espace."
+                ))
+                .color(p.weak)
+                .size(12.0),
+            )
+            .wrap(),
+        );
+    }
+    if !custom.trim().is_empty()
+        && let Err(e) = external_tools::resolve(kind, &ToolChoice::Custom, custom, &[])
+    {
+        ui.label(RichText::new(format!("{} {e}", icons::WARNING)).color(p.modified_fg));
     }
 }
 

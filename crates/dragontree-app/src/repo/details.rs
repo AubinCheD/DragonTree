@@ -9,6 +9,7 @@ use super::custom::Clicked;
 use super::diff_view::{self, DiffMode};
 use super::restore::RestoreTarget;
 use crate::app::Shared;
+use crate::external_tools::ExternalDiff;
 use crate::icons;
 use crate::settings::TicketRule;
 use crate::theme::Palette;
@@ -158,7 +159,15 @@ impl RepoTab {
                             let commit = info.id;
                             let restore =
                                 RestoreTarget { commit, kind: Some(change.kind), has_parent: !info.parents.is_empty() };
+                            let diff = ExternalDiff::Commit {
+                                id: commit.to_hex(),
+                                has_parent: !info.parents.is_empty(),
+                                path: change.path.clone(),
+                                old_path: change.old_path.clone(),
+                            };
                             resp.context_menu(|ui| {
+                                self.external_diff_entry(ui, shared, diff);
+                                ui.separator();
                                 self.file_menu(ui, shared, &change.path, Some(commit), Some(restore))
                             });
                         }
