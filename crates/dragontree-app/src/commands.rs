@@ -147,6 +147,10 @@ pub enum Command {
     /// Revue de la branche courante par Claude Code (IA activée dans les réglages) : fenêtre avec le texte.
     AiReviewBranch,
     Settings,
+    /// Fenêtre des raccourcis clavier (ceux du registre et les raccourcis fixes).
+    KeyboardShortcuts,
+    /// Fenêtre « À propos » : version, git détecté, licence, crédits.
+    About,
     /// Langue de l'interface ; `None` : celle de Windows.
     Language(Option<Lang>),
 }
@@ -320,6 +324,9 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::Accounts),
             Cmd(Command::GitIdentity),
+            Separator,
+            Cmd(Command::KeyboardShortcuts),
+            Cmd(Command::About),
         ],
     ),
 ];
@@ -423,6 +430,8 @@ impl Command {
         Command::RepoSettings,
         Command::AiReviewBranch,
         Command::Settings,
+        Command::KeyboardShortcuts,
+        Command::About,
         Command::Language(None),
         Command::Language(Some(Lang::Fr)),
         Command::Language(Some(Lang::En)),
@@ -513,6 +522,8 @@ impl Command {
             Command::RepoSettings => tr!("Réglages du dépôt…"),
             Command::AiReviewBranch => tr!("Revue de la branche par Claude…"),
             Command::Settings => tr!("Réglages…"),
+            Command::KeyboardShortcuts => tr!("Raccourcis clavier"),
+            Command::About => tr!("À propos de DragonTree"),
             Command::Language(None) => tr!("Système"),
             // Chaque langue est nommée dans sa propre langue.
             Command::Language(Some(lang)) => lang.native_name(),
@@ -617,6 +628,8 @@ impl Command {
             Command::RepoSettings => icons::GEAR_SIX,
             Command::AiReviewBranch => icons::SPARKLE,
             Command::Settings => icons::GEAR_SIX,
+            Command::KeyboardShortcuts => icons::KEYBOARD,
+            Command::About => icons::INFO,
             Command::Language(_) => icons::TRANSLATE,
         }
     }
@@ -650,6 +663,8 @@ impl Command {
             | Command::ZoomReset
             | Command::Theme(_)
             | Command::Settings
+            | Command::KeyboardShortcuts
+            | Command::About
             | Command::ManageCustomCommands
             | Command::Language(_) => Scope::App,
             Command::ShowChanges

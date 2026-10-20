@@ -44,6 +44,8 @@ pub enum AppEvent {
     ToolsDetected(Vec<crate::external_tools::DetectedTool>),
     /// Test de la CLI Claude Code (Réglages › IA) : sa version, ou le message d'erreur.
     AiChecked(Result<String, String>),
+    /// Version de git lue pour « À propos » (numéro de la demande, version ou message d'erreur).
+    GitVersion(u64, Result<String, String>),
 }
 
 /// Test de la CLI Claude Code lancé depuis les réglages.
@@ -215,6 +217,8 @@ pub struct DragonTreeApp {
     accounts: AccountsWindow,
     ssh_keys: SshKeysWindow,
     git_identity: crate::git_identity::GitIdentityWindow,
+    shortcuts_window: crate::help::ShortcutsWindow,
+    about_window: crate::help::AboutWindow,
     clone: Option<CloneWindow>,
     settings_window: Option<SettingsWindow>,
     log_open: bool,
@@ -303,6 +307,8 @@ impl DragonTreeApp {
             accounts,
             ssh_keys: SshKeysWindow::new(ssh_dir),
             git_identity: Default::default(),
+            shortcuts_window: Default::default(),
+            about_window: Default::default(),
             clone: None,
             settings_window: None,
             log_open: false,
@@ -532,6 +538,7 @@ impl DragonTreeApp {
                 AppEvent::EditorsDetected(editors) => self.shared.editors = editors,
                 AppEvent::ToolsDetected(tools) => self.shared.tools = tools,
                 AppEvent::AiChecked(result) => self.shared.ai_check = AiCheck::Done(result),
+                AppEvent::GitVersion(req, version) => self.about_window.handle(req, version),
                 AppEvent::Initialized(path, result) => match result {
                     Ok(()) => self.shared.actions.push(AppAction::OpenRepo(path)),
                     Err(e) => self.shared.toast(Toast::error(tr!("Création du dépôt impossible"), e.to_string())),
@@ -721,6 +728,8 @@ impl DragonTreeApp {
             Command::Accounts => self.shared.actions.push(AppAction::ShowAccounts),
             Command::SshKeys => self.shared.actions.push(AppAction::ShowSshKeys),
             Command::GitIdentity => self.shared.actions.push(AppAction::ShowGitIdentity),
+            Command::KeyboardShortcuts => self.shortcuts_window.show(),
+            Command::About => self.about_window.show(&self.shared),
             Command::Settings => self.shared.actions.push(AppAction::ShowSettings),
             Command::ManageCustomCommands => {
                 self.shared.actions.push(AppAction::ShowSettingsTab(SettingsTab::Commands))
@@ -1038,6 +1047,8 @@ impl eframe::App for DragonTreeApp {
         };
         self.ssh_keys.ui(&ctx, &mut self.shared, active_repo.as_deref(), &p);
         self.git_identity.ui(&ctx, &mut self.shared, &p);
+        self.shortcuts_window.ui(&ctx, &p);
+        self.about_window.ui(&ctx, &p);
         if let Some(c) = &mut self.clone
             && !c.ui(&ctx, &mut self.shared, &p)
         {

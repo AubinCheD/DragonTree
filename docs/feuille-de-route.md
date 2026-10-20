@@ -157,7 +157,7 @@ La barre de menus elle-même n'existe pas encore (voir T2). Les états ci-dessou
 | C5 | Message de commit : indicateur de longueur 50/72, colonne guide, messages récents, Co-authored-by | ✅ |
 | C6 | Diff : police, taille, largeur de tabulation, espaces visibles | ✅ |
 | C7 | IA : message de commit et revue de branche par Claude Code (dans Fork depuis la 2.14) | ✅ |
-| C8 | Fenêtre des raccourcis clavier, À propos | 🆕 P |
+| C8 | Fenêtre des raccourcis clavier, À propos | ✅ |
 
 ### Hors menus, présents dans Fork
 
