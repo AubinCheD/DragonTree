@@ -22,11 +22,17 @@ fn keys_in_sources() -> (BTreeMap<String, String>, Vec<String>) {
     let mut keys = BTreeMap::new();
     let mut errors = Vec::new();
     for file in files {
-        let text = std::fs::read_to_string(&file).unwrap();
+        let text = normalize_newlines(&std::fs::read_to_string(&file).unwrap());
         let shown = file.strip_prefix(crates).unwrap_or(&file).display().to_string();
         scan(&text, &shown, &mut keys, &mut errors);
     }
     (keys, errors)
+}
+
+/// Fins de ligne CRLF ramenées à LF : avec `core.autocrlf=true` le checkout écrit les sources en CRLF, alors que
+/// rustc normalise les littéraux multilignes en LF.
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n")
 }
 
 fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -253,6 +259,21 @@ fn scanner_reads_the_three_macros() {
             "Échappé \"guillemets\"\n",
         ]
     );
+}
+
+#[test]
+fn scanner_is_insensitive_to_crlf_line_endings() {
+    let src = "let b = tr!(\"Multi\r\nligne\");\r\nlet c = tr!(\"Coupée \\\r\n   ici\");\r\n";
+    let mut keys = BTreeMap::new();
+    let mut errors = Vec::new();
+    scan(&normalize_newlines(src), "x.rs", &mut keys, &mut errors);
+    assert!(errors.is_empty(), "{errors:?}");
+    let found: Vec<&str> = keys.keys().map(String::as_str).collect();
+    assert_eq!(found, ["Coupée ici", "Multi\nligne"]);
+    // Sans normalisation, la clé multiligne garderait son \r.
+    let mut raw = BTreeMap::new();
+    scan(src, "x.rs", &mut raw, &mut errors);
+    assert!(raw.contains_key("Multi\r\nligne"));
 }
 
 #[test]
