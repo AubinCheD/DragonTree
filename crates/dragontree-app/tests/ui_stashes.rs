@@ -138,3 +138,33 @@ fn a_stash_on_a_hidden_branch_does_not_bring_that_branch_back() {
     click_label(&mut h, "Afficher dans le graphe : autre");
     wait_until(&mut h, "stash réaffiché avec sa base", |h| rows(h, SUMMARY) == 1 && rows(h, "Commit de autre") == 1);
 }
+
+/// T3 : avec des centaines de branches distantes, la section Stashes reste dans la partie visible de la barre
+/// latérale (elle vient avant Remotes et Tags).
+#[test]
+fn the_stash_entry_is_visible_in_the_sidebar_without_scrolling_despite_many_remote_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = stash_repo(tmp.path());
+    let refs: String = (0..400).map(|i| format!("create refs/remotes/origin/branche-{i:03} HEAD\n")).collect();
+    let mut update = std::process::Command::new("git")
+        .current_dir(&repo)
+        .args(["update-ref", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(update.stdin.as_mut().unwrap(), refs.as_bytes()).unwrap();
+    assert!(update.wait().unwrap().success());
+
+    let mut h = open(repo, tmp.path());
+    wait_until(&mut h, "entrée de stash dans la barre latérale", |h| {
+        h.query_all_by_label_contains("stash@{0}").count() > 0
+            && h.query_all_by_label_contains("branche-000").count() > 0
+    });
+    h.run_steps(5);
+    let screen = h.ctx.content_rect();
+    let entry = h.query_all_by_label_contains("stash@{0}").next().unwrap().rect();
+    assert!(screen.contains_rect(entry), "stash hors de l'écran : {entry:?} dans {screen:?}");
+    // Les branches distantes viennent après : le défilement n'est donc pas nécessaire pour voir le stash.
+    let first_remote = h.query_all_by_label_contains("branche-000").next().unwrap().rect();
+    assert!(entry.min.y < first_remote.min.y, "les stashs doivent précéder les remotes");
+}

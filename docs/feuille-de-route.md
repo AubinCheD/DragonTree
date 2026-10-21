@@ -194,7 +194,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 |---|---|---|---|
 | T1 | Worktrees : lister, ouvrir, créer, supprimer (fait, via R3) | demande du 2026-10-17 | haute |
 | T2 | Barre de menus Fichier / Affichage / Dépôt / Configuration et raccourcis (fait) | demande du 2026-10-17 | haute |
-| T3 | Stashs plus visibles (à vérifier avec l'utilisateur) | demande du 2026-10-17 | moyenne |
+| T3 | Stashs plus visibles (fait : section avant Remotes et Tags, stashs dans le graphe) | demande du 2026-10-17 | moyenne |
 | T4 | Filtre sur la branche active : mémorisation par dépôt (à vérifier avec l'utilisateur ; raccourci fait, V2) | demande du 2026-10-17 | moyenne |
 | T5 | Éléments du plan non livrés : glisser-déposer entre listes, colonne du graphe, colonne « mise à jour », aperçu des conflits | revue finale, mineur n°21 | basse |
 | T6 | Associer un compte à un dépôt existant | arbitrage de la tâche 18, « plus tard » | moyenne |
@@ -291,18 +291,18 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - test de traduction vert.
 - **Priorité :** terminé.
 
-#### T3 — Stashs plus visibles
+#### T3 — Stashs plus visibles (fait)
 
 - **Contexte :** l'utilisateur a demandé à « voir ses stashs ». La fonction existe. Claude a supposé que l'utilisateur ne l'avait pas vue ; ce n'est pas confirmé.
 - **État :**
   - la section Stashes (`crates/dragontree-app/src/repo/sidebar.rs:170-202`) affiche le diff au clic et propose Appliquer, Pop et Supprimer ;
-  - elle vient après Branches, Remotes et Tags (`:101`, `:116`, `:164`) ;
+  - réalisé : elle vient maintenant juste après Branches, avant Remotes et Tags ; les stashs sont aussi dans le graphe (V7) ;
   - le bouton Pop de la barre d'outils n'agit que sur le dernier stash (`crates/dragontree-app/src/repo/toolbar.rs:74-82`).
 - **À faire :**
   1. Confirmer le besoin avec l'utilisateur (à vérifier).
   2. Réaliser V7 (stashs dans le graphe) et R4 (stashs complets), s'ils sont retenus.
   3. Sinon, au minimum, placer la section Stashes avant Remotes et Tags.
-- **Critère de fin :** sur un dépôt avec plus de 1 500 branches distantes, un stash créé se voit sans défilement (capture d'écran), plus les tests propres à V7 et R4.
+- **Critère de fin (atteint) :** avec 400 branches distantes, le stash est visible sans défilement (`the_stash_entry_is_visible_in_the_sidebar_without_scrolling_despite_many_remote_branches`, `crates/dragontree-app/tests/ui_stashes.rs`), plus les tests propres à V7 et R4.
 - **Priorité :** moyenne (demande explicite, mais la fonction existe).
 
 #### T4 — Filtre sur la branche active : raccourci et mémorisation

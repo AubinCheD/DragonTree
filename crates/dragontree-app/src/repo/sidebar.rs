@@ -134,6 +134,24 @@ impl RepoTab {
                 self.leaves_ui(ui, shared, "loc", leaves, &filter, p);
             }
 
+            // Stashes avant Remotes et Tags : ces sections peuvent compter des centaines de lignes.
+            let stashes = self.stashes.clone();
+            if self.section(ui, "stashes", &format!("{} Stashes", icons::STACK), stashes.len(), p) {
+                for s in stashes.iter() {
+                    let label = super::scope::stash_label(s.index, &s.message);
+                    let selected = self.history.external.as_ref().is_some_and(|(o, _)| *o == s.oid);
+                    let (rect, resp) = widgets::row_response(ui, ("stash", s.oid), ROW_H, selected, Sense::click());
+                    widgets::a11y(&resp, &label, true);
+                    paint_row(ui, rect, 1, icons::STACK, &label, false, p.weak, p);
+                    let resp = resp.on_hover_text(format!("{}\n{}", s.message, widgets::format_date(s.time)));
+                    if resp.clicked() {
+                        self.select_external(shared, s.oid, label.clone());
+                    }
+                    let oid = s.oid;
+                    resp.context_menu(|ui| self.stash_menu(ui, shared, oid, &label));
+                }
+            }
+
             // Remotes : un sous-arbre par remote.
             let mut by_remote: BTreeMap<String, Vec<&RemoteBranch>> = BTreeMap::new();
             for r in &self.remotes.clone().iter().map(|r| r.name.clone()).collect::<Vec<_>>() {
@@ -216,23 +234,6 @@ impl RepoTab {
                 let leaves: Vec<(String, Leaf)> =
                     refs.tags.iter().rev().map(|t| (t.name.clone(), Leaf::Tag(t))).collect();
                 self.leaves_ui(ui, shared, "tag", leaves, &filter, p);
-            }
-
-            let stashes = self.stashes.clone();
-            if self.section(ui, "stashes", &format!("{} Stashes", icons::STACK), stashes.len(), p) {
-                for s in stashes.iter() {
-                    let label = super::scope::stash_label(s.index, &s.message);
-                    let selected = self.history.external.as_ref().is_some_and(|(o, _)| *o == s.oid);
-                    let (rect, resp) = widgets::row_response(ui, ("stash", s.oid), ROW_H, selected, Sense::click());
-                    widgets::a11y(&resp, &label, true);
-                    paint_row(ui, rect, 1, icons::STACK, &label, false, p.weak, p);
-                    let resp = resp.on_hover_text(format!("{}\n{}", s.message, widgets::format_date(s.time)));
-                    if resp.clicked() {
-                        self.select_external(shared, s.oid, label.clone());
-                    }
-                    let oid = s.oid;
-                    resp.context_menu(|ui| self.stash_menu(ui, shared, oid, &label));
-                }
             }
 
             let subs = self.submodules.clone();
