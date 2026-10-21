@@ -116,6 +116,13 @@ pub fn parse_conflicts(text: &str) -> Vec<ConflictRegion> {
 /// Remplace les régions de conflit par les choix (dans l'ordre) ; une région sans choix est
 /// conservée telle quelle. Les fins de ligne d'origine sont préservées.
 pub fn resolve(text: &str, choices: &[Resolution]) -> String {
+    let choices: Vec<Option<Resolution>> = choices.iter().copied().map(Some).collect();
+    resolve_partial(text, &choices)
+}
+
+/// Comme [`resolve`], avec des choix éventuellement absents : une région sans choix (`None`) est conservée telle
+/// quelle, marqueurs compris. Sert à l'aperçu du résultat au fil des choix.
+pub fn resolve_partial(text: &str, choices: &[Option<Resolution>]) -> String {
     let pieces: Vec<&str> = text.split_inclusive('\n').collect();
     let regions = parse_conflicts(text);
     let mut out = String::with_capacity(text.len());
@@ -129,7 +136,7 @@ pub fn resolve(text: &str, choices: &[Resolution]) -> String {
         };
         let ours = &pieces[region.start_line + 1..region.base_line.unwrap_or(region.sep_line)];
         let theirs = &pieces[region.sep_line + 1..region.end_line];
-        let chosen: Vec<&[&str]> = match choices.get(r) {
+        let chosen: Vec<&[&str]> = match choices.get(r).copied().flatten() {
             None => vec![&pieces[region.start_line..=region.end_line]],
             Some(Resolution::Ours) => vec![ours],
             Some(Resolution::Theirs) => vec![theirs],
@@ -157,5 +164,21 @@ impl Repo {
     pub fn checkout_side(&self, path: &str, ours: bool) -> Result<(), GitError> {
         let side = if ours { "--ours" } else { "--theirs" };
         self.write_paths().args(["checkout", side, "--", path]).run().map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEXT: &str =
+        "a\n<<<<<<< HEAD\nnous\n=======\neux\n>>>>>>> autre\nb\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> autre\nc\n";
+
+    #[test]
+    fn resolve_partial_keeps_the_regions_without_a_choice() {
+        let out = resolve_partial(TEXT, &[None, Some(Resolution::Theirs)]);
+        assert_eq!(out, "a\n<<<<<<< HEAD\nnous\n=======\neux\n>>>>>>> autre\nb\ny\nc\n");
+        assert_eq!(resolve_partial(TEXT, &[]), TEXT);
+        assert_eq!(resolve(TEXT, &[Resolution::Ours, Resolution::Both]), "a\nnous\nb\nx\ny\nc\n");
     }
 }

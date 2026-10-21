@@ -196,7 +196,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | T2 | Barre de menus Fichier / Affichage / Dépôt / Configuration et raccourcis (fait) | demande du 2026-10-17 | haute |
 | T3 | Stashs plus visibles (fait : section avant Remotes et Tags, stashs dans le graphe) | demande du 2026-10-17 | moyenne |
 | T4 | Filtre sur la branche active : mémorisation par dépôt (fait ; raccourci fait, V2) | demande du 2026-10-17 | moyenne |
-| T5 | Éléments du plan non livrés : glisser-déposer entre listes, colonne du graphe, colonne « mise à jour », aperçu des conflits | revue finale, mineur n°21 | basse |
+| T5 | Éléments du plan non livrés : glisser-déposer entre listes, colonne du graphe, colonne « mise à jour », aperçu des conflits (fait) | revue finale, mineur n°21 | basse |
 | T6 | Associer un compte à un dépôt existant | arbitrage de la tâche 18, « plus tard » | moyenne |
 
 ### À implémenter
@@ -336,10 +336,9 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - **c. Colonne « mise à jour » dans la liste de clonage** (tâche 18) (fait).
     - État : réalisé. Chaque ligne affiche la date de mise à jour à droite de la première ligne, à gauche du cadenas (relative si récente, absolue sinon : `widgets::format_time`), d'après `RemoteRepo::updated_timestamp` (GitHub : `pushed_at`, sinon `updated_at` ; GitLab : `last_activity_at`). Azure DevOps : colonne vide, décision documentée dans `crates/dragontree-forges/src/azure.rs` : l'API des dépôts ne donne aucune date par dépôt (le `project.lastUpdateTime` est celui du projet, donc trompeur) et le dernier push demanderait un appel par dépôt.
     - Fin (atteinte) : tests `updated_timestamp_reads_the_activity_date` (forges) et `the_update_date_is_relative_when_recent_and_absolute_otherwise` (formats GitHub et GitLab ; Azure sans date) ; `azure_repositories_fixture_parses` vérifie l'absence de date côté Azure.
-  - **d. Aperçu du résultat dans l'éditeur de conflits** (tâche 22).
-    - État : l'éditeur montre les deux côtés de chaque région, sans aperçu (`crates/dragontree-app/src/repo/conflicts.rs:91-164`). `resolve` (`crates/dragontree-git/src/conflict.rs:118`) sait déjà produire le texte final.
-    - À faire : afficher le résultat au fil des choix.
-    - Fin : test unitaire de l'aperçu pour chaque choix (notre, leur, les deux).
+  - **d. Aperçu du résultat dans l'éditeur de conflits** (tâche 22) (fait).
+    - État : réalisé. Un panneau « Aperçu du résultat » (lecture seule, redimensionnable, sous les régions) montre le fichier tel qu'il sera enregistré, mis à jour à chaque choix ; une région sans choix garde ses marqueurs. Le texte vient de `resolve_partial` (`crates/dragontree-git/src/conflict.rs`), variante de `resolve` qui accepte des choix absents ; l'aperçu n'est recalculé que lorsque les choix changent. Pas de défilement synchronisé.
+    - Fin (atteinte) : tests unitaires de l'aperçu pour chaque choix (notre, leur, les deux, les deux inversés, sans choix) dans `crates/dragontree-app/src/repo/conflicts.rs`, et test de `resolve_partial` dans le moteur.
 - **Priorité :** basse (mineurs différés).
 
 #### T6 — Associer un compte à un dépôt existant

@@ -46,7 +46,7 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   **worktrees** (section de la barre latérale : ouvrir dans un onglet, créer depuis une
   branche, une branche distante ou un commit, supprimer, nettoyer ; les branches sorties ailleurs sont signalées).
 - **Conflits** : bandeau d'opération en cours (Continuer/Annuler/Passer), résolution « notre/leur version »,
-  éditeur de conflits par région, outil de merge externe (`git mergetool`).
+  éditeur de conflits par région (avec aperçu du résultat), outil de merge externe (`git mergetool`).
 - **Bisect** : démarrer depuis le menu d'un commit ou Dépôt › Bisect, bandeau d'état (révisions restantes, Bon, Mauvais,
   Passer, Terminer), commits marqués étiquetés dans le graphe, premier mauvais commit annoncé.
 - **Git Flow** (Dépôt › Git Flow, sans l'extension git-flow) : initialiser (clés `gitflow.*` de git-flow, donc un dépôt déjà
