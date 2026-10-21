@@ -93,3 +93,35 @@ fn double_clicking_the_graph_handle_returns_to_the_computed_width() {
     h.run_steps(3);
     assert!((grip_center(&h).x - auto.x).abs() < 2.0);
 }
+
+/// Une largeur choisie en grande fenêtre ne pousse pas la poignée hors de la zone dans une fenêtre étroite : elle reste
+/// visible, se déplace, et la préférence enregistrée n'est pas modifiée par le simple affichage.
+#[test]
+fn a_large_chosen_width_keeps_the_handle_reachable_in_a_narrow_window() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("contoso");
+    init_repo(&repo);
+    commit_file(&repo, "a.txt", "1\n", "Premier");
+    std::fs::create_dir_all(tmp.path().join("profil")).unwrap();
+    std::fs::write(tmp.path().join("profil").join("settings.json"), r#"{"graph_column_width": 600.0}"#).unwrap();
+
+    let size = egui::vec2(820.0, 600.0);
+    let opts = StartOptions { open: vec![repo.clone()], view: Some("history".into()), ..start(tmp.path()) };
+    let mut h = Harness::builder().with_size(size).build_eframe(move |cc| DragonTreeApp::new(cc, opts));
+    wait_until(&mut h, "poignée", |h| h.query_by_label(GRIP).is_some());
+    h.run_steps(5);
+    let grip = h.query_by_label(GRIP).unwrap().rect();
+    assert!(grip.right() <= size.x && grip.left() > 0.0, "poignée dans la fenêtre : {grip:?}");
+    assert!(grip.center().x < size.x - 338.0 - 100.0, "auteur, date et SHA gardent leur place : {grip:?}");
+    assert_eq!(saved_width(tmp.path()), Some(600.0), "préférence intacte");
+
+    // Glisser loin à droite : la poignée reste dans la zone.
+    let start = grip.center();
+    pointer_at(&mut h, start, Some(true));
+    pointer_at(&mut h, egui::pos2(size.x - 5.0, start.y), None);
+    pointer_at(&mut h, egui::pos2(size.x - 5.0, start.y), Some(false));
+    h.remove_cursor();
+    h.run_steps(3);
+    let after = h.query_by_label(GRIP).unwrap().rect();
+    assert!(after.center().x < size.x - 338.0 - 100.0, "toujours bornée : {after:?}");
+}

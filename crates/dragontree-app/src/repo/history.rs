@@ -18,6 +18,14 @@ const ROW_H: f32 = 24.0;
 const AUTHOR_W: f32 = 150.0;
 const DATE_W: f32 = 118.0;
 const SHA_W: f32 = 70.0;
+/// Largeur minimale laissée à la description : la colonne du graphe ne peut pas la réduire davantage.
+const MIN_DESC_W: f32 = 120.0;
+
+/// Largeur maximale de la colonne du graphe dans une zone de `total` px : auteur, date et SHA gardent leur place et la
+/// poignée reste dans la zone. La préférence enregistrée n'est pas touchée, seule la largeur affichée est bornée.
+fn max_graph_width(total: f32) -> f32 {
+    (total - AUTHOR_W - DATE_W - SHA_W - MIN_DESC_W).max(graph_paint::MIN_CHOSEN_WIDTH)
+}
 
 impl RepoTab {
     pub(super) fn history_ui(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
@@ -220,8 +228,9 @@ impl RepoTab {
             return;
         }
         let show_graph = filtered.is_none();
+        let max_graph_w = max_graph_width(ui.available_width());
         let graph_w = if show_graph {
-            graph_paint::column_width(graph.max_lane, shared.settings.graph_column_width)
+            graph_paint::column_width(graph.max_lane, shared.settings.graph_column_width).min(max_graph_w)
         } else {
             0.0
         };
@@ -256,8 +265,8 @@ impl RepoTab {
             if resp.dragged()
                 && let Some(pos) = resp.interact_pointer_pos()
             {
-                let w =
-                    (pos.x - header_rect.left()).clamp(graph_paint::MIN_CHOSEN_WIDTH, graph_paint::MAX_CHOSEN_WIDTH);
+                let w = (pos.x - header_rect.left())
+                    .clamp(graph_paint::MIN_CHOSEN_WIDTH, max_graph_w.min(graph_paint::MAX_CHOSEN_WIDTH));
                 shared.settings.graph_column_width = Some(w);
             }
             if resp.drag_stopped() {
@@ -633,4 +642,17 @@ fn paint_label(ui: &Ui, painter: &egui::Painter, pos: egui::Pos2, l: &RefLabel, 
     let text = format!("{icon} {}", widgets::ellipsize_middle(&l.name, 34));
     let family = if l.is_head { bold_family() } else { egui::FontFamily::Proportional };
     paint_badge(ui, painter, pos, text, (bg, fg), family, l.is_head)
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    #[test]
+    fn the_graph_column_leaves_room_for_the_other_columns() {
+        let total = 1000.0;
+        let max = max_graph_width(total);
+        assert_eq!(total - max - AUTHOR_W - DATE_W - SHA_W, MIN_DESC_W);
+        assert_eq!(max_graph_width(300.0), graph_paint::MIN_CHOSEN_WIDTH, "zone trop étroite : largeur minimale");
+    }
 }
