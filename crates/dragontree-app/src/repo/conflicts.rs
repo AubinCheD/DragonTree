@@ -18,6 +18,8 @@ pub struct ConflictEditor {
     /// Aperçu du résultat pour `preview_choices` : recalculé seulement quand les choix changent.
     preview: String,
     preview_choices: Vec<Option<Resolution>>,
+    /// Étendue (en octets de `preview`) de chaque ligne de l'aperçu, pour n'afficher que les lignes visibles.
+    preview_lines: Vec<std::ops::Range<usize>>,
 }
 
 impl ConflictEditor {
@@ -27,10 +29,17 @@ impl ConflictEditor {
             regions.is_empty().then(|| tr!("Aucun marqueur de conflit trouvé dans le fichier.").to_string())
         });
         let choices = vec![None; regions.len()];
-        let mut ed =
-            ConflictEditor { path, text, regions, choices, error, preview: String::new(), preview_choices: vec![] };
-        ed.preview = ed.result_preview();
-        ed.preview_choices = ed.choices.clone();
+        let mut ed = ConflictEditor {
+            path,
+            text,
+            regions,
+            choices,
+            error,
+            preview: String::new(),
+            preview_choices: vec![],
+            preview_lines: vec![],
+        };
+        ed.set_preview();
         ed
     }
 
@@ -42,9 +51,23 @@ impl ConflictEditor {
     /// Recalcule l'aperçu si les choix ont changé depuis son dernier calcul.
     fn refresh_preview(&mut self) {
         if self.preview_choices != self.choices {
-            self.preview = self.result_preview();
-            self.preview_choices.clone_from(&self.choices);
+            self.set_preview();
         }
+    }
+
+    fn set_preview(&mut self) {
+        self.preview = self.result_preview();
+        self.preview_choices.clone_from(&self.choices);
+        let mut start = 0;
+        self.preview_lines = self
+            .preview
+            .split_inclusive('\n')
+            .map(|l| {
+                let range = start..start + l.trim_end_matches(['\n', '\r']).len();
+                start += l.len();
+                range
+            })
+            .collect();
     }
 }
 
@@ -135,15 +158,15 @@ impl RepoTab {
                                     .size(11.5),
                             );
                         }
-                        let lines: Vec<&str> = ed.preview.lines().collect();
                         let font = style.font_id();
                         let row_h = ui.fonts_mut(|f| f.row_height(&font));
                         Frame::new().fill(p.panel).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
                             egui::ScrollArea::both()
                                 .id_salt(("conflict-preview-rows", tab_id))
                                 .auto_shrink([false, false])
-                                .show_rows(ui, row_h, lines.len(), |ui, range| {
-                                    for line in &lines[range] {
+                                .show_rows(ui, row_h, ed.preview_lines.len(), |ui, range| {
+                                    for line in &ed.preview_lines[range] {
+                                        let line = &ed.preview[line.clone()];
                                         ui.add(
                                             egui::Label::new(RichText::new(style.render(line)).font(font.clone()))
                                                 .extend(),
@@ -272,6 +295,17 @@ mod tests {
     fn the_preview_shows_both_sides_in_the_chosen_order() {
         assert_eq!(editor_with(Some(Resolution::Both)).preview, "début\nnotre ligne\nleur ligne\nfin\n");
         assert_eq!(editor_with(Some(Resolution::BothReversed)).preview, "début\nleur ligne\nnotre ligne\nfin\n");
+    }
+
+    #[test]
+    fn the_preview_line_ranges_follow_the_preview_text() {
+        let mut ed = editor_with(Some(Resolution::Both));
+        let lines: Vec<&str> = ed.preview_lines.iter().map(|r| &ed.preview[r.clone()]).collect();
+        assert_eq!(lines, ["début", "notre ligne", "leur ligne", "fin"]);
+        ed.choices[0] = Some(Resolution::Ours);
+        ed.refresh_preview();
+        let lines: Vec<&str> = ed.preview_lines.iter().map(|r| &ed.preview[r.clone()]).collect();
+        assert_eq!(lines, ["début", "notre ligne", "fin"]);
     }
 
     #[test]

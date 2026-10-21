@@ -181,4 +181,14 @@ mod tests {
         assert_eq!(resolve_partial(TEXT, &[]), TEXT);
         assert_eq!(resolve(TEXT, &[Resolution::Ours, Resolution::Both]), "a\nnous\nb\nx\ny\nc\n");
     }
+
+    #[test]
+    fn resolve_partial_handles_diff3_regions_with_a_base_section() {
+        let text = "a\n<<<<<<< HEAD\nnous\n||||||| base\navant\n=======\neux\n>>>>>>> autre\nb\n";
+        assert_eq!(resolve_partial(text, &[None]), text, "région sans choix : conservée telle quelle");
+        assert_eq!(resolve_partial(text, &[Some(Resolution::Ours)]), "a\nnous\nb\n");
+        assert_eq!(resolve_partial(text, &[Some(Resolution::Theirs)]), "a\neux\nb\n");
+        assert_eq!(resolve_partial(text, &[Some(Resolution::Both)]), "a\nnous\neux\nb\n");
+        assert_eq!(resolve_partial(text, &[Some(Resolution::BothReversed)]), "a\neux\nnous\nb\n");
+    }
 }
