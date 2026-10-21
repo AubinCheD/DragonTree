@@ -1,8 +1,8 @@
 //! Travail en arrière-plan : aucune commande git ne tourne sur le thread de l'interface.
 //!
 //! - [`Jobs::spawn`] : un thread par tâche de lecture (chargements parallèles).
-//! - [`SerialWorker`] : une file par dépôt pour les écritures, exécutées dans l'ordre des clics
-//!   (pas de collision sur `index.lock`).
+//! - [`SerialWorker`] : file d'exécution séquentielle, la base des files d'opérations des dépôts (`op_queue` : une
+//!   file d'écriture par dépôt, partagée par ses onglets, et une file à part pour le réseau silencieux).
 
 use std::sync::mpsc::{self, Receiver, Sender};
 

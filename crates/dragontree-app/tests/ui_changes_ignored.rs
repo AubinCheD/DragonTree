@@ -43,15 +43,19 @@ fn ignored_files_show_on_demand_and_untracked_files_can_be_hidden() {
     click_menu_item(&mut h, "Masquer les fichiers non suivis");
     wait_until(&mut h, "non suivi réaffiché", |h| shown(h, "notes.txt"));
     h.get_by_label_contains("Tout indexer").click();
-    wait_git(&mut h, "notes.txt indexé", || git(&repo, &["diff", "--cached", "--name-only"]).trim() == "notes.txt");
+    wait_git(&mut h, "notes.txt indexé", || {
+        try_git(&repo, &["diff", "--cached", "--name-only"]).is_some_and(|s| s.trim() == "notes.txt")
+    });
     assert_eq!(git(&repo, &["diff", "--cached", "--name-only"]).trim(), "notes.txt");
 
-    // « Indexer quand même » (clic droit) : git add -f.
+    // « Indexer quand même » (clic droit) : git add -f. Les listes affichent d'abord l'indexation (sinon leur mise à
+    // jour, arrivée entre le clic droit et le choix, refermerait le menu).
+    wait_until(&mut h, "liste des indexés à jour", |h| h.query_by_label("Aucun fichier indexé").is_none());
     h.get_by_label("build.log").click_secondary();
     h.run_steps(3);
-    h.get_by_label_contains("Indexer quand même").click();
+    click_label_containing(&mut h, "Indexer quand même");
     wait_git(&mut h, "fichier ignoré forcé", || {
-        git(&repo, &["diff", "--cached", "--name-only"]).contains("build.log")
+        try_git(&repo, &["diff", "--cached", "--name-only"]).is_some_and(|s| s.contains("build.log"))
     });
 }
 

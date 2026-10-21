@@ -119,6 +119,11 @@ pub struct Shared {
     pub tools: Vec<crate::external_tools::DetectedTool>,
     /// Dernier test de la CLI Claude Code (Réglages › IA).
     pub ai_check: AiCheck,
+    /// Intervalle du fetch automatique imposé par les tests (`StartOptions::auto_fetch_every`) ; sinon celui des
+    /// réglages.
+    pub auto_fetch_every: Option<Duration>,
+    /// Files d'opérations des dépôts, partagées par leurs onglets (voir `op_queue`).
+    pub queues: crate::op_queue::OpQueues,
 }
 
 impl Shared {
@@ -148,6 +153,8 @@ impl Shared {
             editors: vec![crate::editors::Editor::system_default()],
             tools: Vec::new(),
             ai_check: AiCheck::Idle,
+            auto_fetch_every: None,
+            queues: Default::default(),
         };
         (shared, rx)
     }
@@ -203,6 +210,9 @@ pub struct StartOptions {
     /// Lecture des pull requests d'un compte (fenêtre « Pull requests ») : réservée aux tests, qui répondent sans
     /// réseau ni Gestionnaire d'identifiants ; `pull_requests::fetch_from_forge` par défaut.
     pub pull_request_source: Option<PullRequestSource>,
+    /// Intervalle du fetch automatique, à la place de celui des réglages : réservé aux tests (`Duration::ZERO` : dès
+    /// l'ouverture du dépôt).
+    pub auto_fetch_every: Option<Duration>,
 }
 
 pub enum TabKind {
@@ -281,6 +291,7 @@ impl DragonTreeApp {
         let applied_theme = (settings.theme, settings.ui_scale);
         let applied_diff_font = settings.diff_font;
         let (mut shared, rx) = Shared::new(ctx.clone(), settings, settings_store, start.profile_dir.clone(), git);
+        shared.auto_fetch_every = start.auto_fetch_every;
         if let Some(msg) = settings_error {
             shared.toasts.push(Toast::error(tr!("Réglages réinitialisés"), msg));
         }

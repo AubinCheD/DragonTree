@@ -213,7 +213,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 |---|---|---|---|
 | RV1 | Fluidité de l'interface sur un gros dépôt : filtre, copies par image, coloration synchrone (corrigé) | revue finale, mineur n°6 | moyenne |
 | RV2 | Gros diffs lus entièrement en mémoire avant la limite de 8 Mio (corrigé) | revue finale, mineur n°7 | moyenne |
-| RV3 | Fetch automatique dans la file des écritures ; deux files pour un même dépôt | revue finale, mineur n°16 | basse |
+| RV3 | Fetch automatique dans la file des écritures ; deux files pour un même dépôt (corrigé) | revue finale, mineur n°16 | basse |
 | RV4 | Points non jugés : processus git à la fermeture, instances multiples, proxy, cas des forges (à vérifier) | revue finale et rapport du crate forges | basse |
 | RV5 | Résidus de la relecture de la traduction : `--lang` enregistré, bouton Push occupé, textes figés | relecture de la traduction | basse |
 
@@ -514,19 +514,25 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - test `a_bounded_output_stops_reading_and_stops_git_at_the_limit` (`crates/dragontree-git/tests/runner.rs`) : une sortie sans fin (`yes`, lancé par `sh`) est coupée exactement à la limite et la commande se termine, ce qui n'est possible que si git et son sous-processus sont arrêtés ; une sortie de la taille exacte de la limite n'est pas coupée.
 - **Priorité :** moyenne.
 
-#### RV3 — Fetch automatique dans la file des écritures
+#### RV3 — Fetch automatique dans la file des écritures (corrigé)
 
 - **Contexte :** mineur n°16 de la revue finale.
-- **État :**
-  - le fetch automatique (`crates/dragontree-app/src/repo/mod.rs:779-788`) passe par la file de l'onglet (`crates/dragontree-app/src/repo/actions.rs:44`, `:91-96`) : une indexation lancée pendant un fetch lent attend la fin du fetch ;
-  - chaque onglet a sa propre file (`crates/dragontree-app/src/repo/mod.rs:293`) ;
-  - un même dépôt peut être ouvert dans deux onglets (« Ouvrir dans un nouvel onglet », `crates/dragontree-app/src/repo_list.rs:446-447`) : deux files écrivent alors sur le même dépôt, et des collisions sur `index.lock` sont possibles.
+- **État :** corrigé.
+  - Avant : le fetch automatique passait par la file de l'onglet, et une indexation lancée pendant un fetch lent attendait la fin du fetch ; chaque onglet avait sa propre file, si bien qu'un dépôt ouvert dans deux onglets (« Ouvrir dans un nouvel onglet ») avait deux files qui écrivaient en même temps, avec des collisions possibles sur `index.lock`.
+  - Désormais, les files d'opérations sont celles du dépôt, tenues dans un registre partagé (`Shared::queues`, `crates/dragontree-app/src/op_queue.rs`) et prises par l'onglet à sa première opération :
+    - écritures : une file par dossier git (`git_dir`, propre à chaque worktree comme son index et son `index.lock`), commune à tous les onglets du dépôt : leurs opérations s'exécutent dans l'ordre des clics ;
+    - réseau silencieux (fetch automatique) : une file à part par dépôt (`common_dir`, commun aux worktrees, qui partagent les refs) : un fetch lent ne fait plus attendre une indexation, un commit ou un checkout ;
+    - une file vit tant qu'un onglet la tient ou qu'une opération y attend : un dépôt rouvert entre-temps retrouve la même.
+  - Deux fetchs ne mettent jamais à jour les mêmes refs en même temps (décision du plan) :
+    - le fetch automatique passe son tour (jusqu'à l'échéance suivante) quand une opération réseau visible (fetch, pull, push, test de connexion) attend ou tourne sur une file d'écriture du dépôt, ou quand la file silencieuse n'est pas vide (un autre onglet du même dépôt fetche déjà) ; une écriture locale en cours ne l'empêche plus ;
+    - une opération réseau visible qui démarre annule le fetch automatique en cours et attend sa fin (au plus 10 s) ; ce fetch annulé ne fait pas de notification.
+  - Chaque file tient la liste de ses opérations en attente ou en cours, avec leur jeton d'annulation et leur caractère silencieux (`OpQueue::pending`, `OpQueues::pending`) : de quoi les retrouver et les annuler toutes à la fermeture (RV4a).
 - **À faire :**
-  1. Mettre les opérations réseau silencieuses dans une file à part.
-  2. Partager une seule file d'écriture par dépôt, indexée par chemin.
-- **Critère de fin :**
-  - test : pendant un fetch automatique bloqué (serveur HTTP muet, comme le test de clonage annulé), une indexation se termine tout de suite ;
-  - test : deux onglets sur le même dépôt partagent la même file.
+  1. Mettre les opérations réseau silencieuses dans une file à part (fait).
+  2. Partager une seule file d'écriture par dépôt, indexée par chemin (fait : par dossier git, comparé avec `path_key`).
+- **Critère de fin (atteint) :**
+  - test d'interface `staging_completes_while_the_automatic_fetch_is_blocked` (`crates/dragontree-app/tests/ui_op_queues.rs`) : remote servi par un serveur HTTP local muet, fetch automatique dès l'ouverture (`StartOptions::auto_fetch_every`, réservé aux tests) ; une fois le fetch bloqué, « Tout indexer » se termine aussitôt (vu rouge : délai de 40 s dépassé avec la file unique, environ 1 s ensuite) ;
+  - tests unitaires `two_tabs_on_the_same_repository_share_one_write_queue` (deux onglets sur le même dépôt : même file, et l'écriture du second attend celle, bloquée, du premier ; vu rouge avec une file par onglet : `["1 début", "2", "1 fin"]`), `the_automatic_fetch_gives_way_to_a_visible_network_operation_and_to_another_tab` et `a_visible_network_operation_stops_the_automatic_fetch_first` (`crates/dragontree-app/src/repo/actions.rs`), et ceux du registre (`crates/dragontree-app/src/op_queue.rs` : même dépôt écrit autrement, worktrees, durée de vie, annulation).
 - **Priorité :** basse.
 
 #### RV4 — Points non jugés par la revue et cas des forges

@@ -160,7 +160,8 @@ impl RepoTab {
         let Some(repo) = self.repo.clone() else { return };
         self.gens.template += 1;
         let (g, id, sender) = (self.gens.template, self.id, shared.jobs.sender());
-        self.worker.submit(move || {
+        let Some(queues) = self.queues(shared) else { return };
+        queues.writes.then(move || {
             sender.send(AppEvent::Repo(id, RepoEvent::CommitTemplate(g, repo.commit_template())));
         });
     }

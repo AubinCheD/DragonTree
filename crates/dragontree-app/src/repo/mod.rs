@@ -468,7 +468,8 @@ pub struct RepoTab {
     /// Sélection initiale demandée en ligne de commande (`--select`).
     pub select_commit_on_load: Option<usize>,
     gens: Gens,
-    worker: crate::jobs::SerialWorker,
+    /// Files d'opérations du dépôt, partagées avec ses autres onglets (prises à la première opération).
+    queues: Option<crate::op_queue::RepoQueues>,
     watcher: Option<watcher::RepoWatcher>,
     pending_refresh: Option<(Instant, Refresh)>,
     stale: Refresh,
@@ -524,7 +525,7 @@ impl RepoTab {
             conflict_editor: None,
             select_commit_on_load: None,
             gens: Gens::default(),
-            worker: crate::jobs::SerialWorker::new(&format!("repo-{id}")),
+            queues: None,
             watcher: None,
             pending_refresh: None,
             stale: Refresh::NONE,
@@ -548,6 +549,7 @@ impl RepoTab {
     pub fn reopen(&mut self, shared: &mut Shared) {
         self.open_error = None;
         self.repo = None;
+        self.queues = None;
         let Some(git) = shared.git.clone() else {
             self.open_error = Some(GitError::NotFound);
             return;
@@ -574,6 +576,12 @@ impl RepoTab {
     pub fn workdir(&self) -> PathBuf {
         let dir = self.repo.as_ref().map_or_else(|| self.path.clone(), |r| r.workdir.clone());
         crate::util::native_path(&dir)
+    }
+
+    /// Files d'opérations du dépôt ouvert (`None` avant son ouverture) : celles de tous ses onglets.
+    pub(crate) fn queues(&mut self, shared: &Shared) -> Option<crate::op_queue::RepoQueues> {
+        let repo = self.repo.as_ref()?;
+        Some(self.queues.get_or_insert_with(|| shared.queues.for_repo(repo)).clone())
     }
 
     pub fn is_busy(&self) -> bool {
@@ -991,6 +999,8 @@ impl RepoTab {
                             shared.toast(Toast::success(msg));
                         }
                     }
+                    // Fetch automatique arrêté pour laisser passer une opération réseau visible : rien à signaler.
+                    Err(GitError::Cancelled) if silent => {}
                     Err(GitError::Cancelled) => shared.toast(Toast::info(tr!("{title} : annulé", title))),
                     Err(e) if silent => {
                         // En arrière-plan, seules les erreurs d'authentification sont signalées
@@ -1179,11 +1189,20 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
             self.refresh(shared, what);
         }
         let minutes = shared.settings.auto_fetch_minutes;
-        if minutes > 0 && self.repo.is_some() && !self.remotes.is_empty() && self.running.is_empty() {
-            let every = Duration::from_secs(u64::from(minutes) * 60);
+        let every =
+            shared.auto_fetch_every.or_else(|| (minutes > 0).then(|| Duration::from_secs(u64::from(minutes) * 60)));
+        if let Some(every) = every
+            && !self.remotes.is_empty()
+            && let Some(queues) = self.queues(shared)
+        {
             if self.last_fetch.elapsed() >= every {
                 self.last_fetch = Instant::now();
-                self.op_fetch(shared, None, true, true);
+                // Sur sa propre file, le fetch automatique ne fait pas attendre les écritures. Il passe son tour (jusqu'à
+                // l'échéance suivante) si un autre onglet du dépôt fetche déjà, ou si une opération réseau visible
+                // attend ou tourne : elle met à jour les mêmes refs.
+                if queues.background.is_idle() && !shared.queues.network_busy(queues.group()) {
+                    self.op_fetch(shared, None, true, true);
+                }
             } else {
                 shared.ctx.request_repaint_after(every - self.last_fetch.elapsed());
             }

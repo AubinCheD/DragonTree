@@ -9,9 +9,14 @@ use dragontree_i18n::{tr, trn};
 
 use super::{AfterCommit, PendingCommit, Refresh, RepoEvent, RepoTab, RunningOp, Side};
 use crate::app::{AppEvent, Shared};
+use crate::op_queue::PendingOp;
 use crate::toasts::{Toast, ToastKind};
 
 type OpFn = dyn FnOnce(&Repo, &NetOptions, &mut dyn FnMut(Progress)) -> Result<Option<String>, GitError> + Send;
+
+/// Attente maximale de l'arrêt d'un fetch automatique avant une opération réseau visible (l'annulation arrête git en
+/// moins de quelques secondes ; au-delà, l'opération part quand même).
+const STOP_SILENT_OPS: Duration = Duration::from_secs(10);
 
 #[derive(Default, Clone, Copy)]
 pub struct OpOptions {
@@ -38,8 +43,12 @@ impl RepoTab {
         self.account(&shared.settings).cloned()
     }
 
+    /// Lance `f` sur une file du dépôt, partagée avec ses autres onglets (voir `op_queue`) : celle du réseau
+    /// silencieux pour une opération réseau silencieuse (fetch automatique), sinon celle des écritures. Une
+    /// opération réseau visible arrête d'abord l'opération silencieuse en cours, qui mettrait à jour les mêmes refs.
     pub(crate) fn run_op(&mut self, shared: &Shared, title: &str, refresh: Refresh, opts: OpOptions, f: Box<OpFn>) {
         let Some(repo) = self.repo.clone() else { return };
+        let Some(queues) = self.queues(shared) else { return };
         self.next_op_id += 1;
         let id = self.next_op_id;
         let cancel = dragontree_git::CancelToken::new();
@@ -52,7 +61,23 @@ impl RepoTab {
         });
         let account = if opts.network { self.net_account(shared) } else { None };
         let (sender, tab, title) = (shared.jobs.sender(), self.id, title.to_string());
-        self.worker.submit(move || {
+        let pending = PendingOp {
+            tab,
+            id,
+            title: title.clone(),
+            network: opts.network,
+            silent: opts.silent,
+            cancel: cancel.clone(),
+        };
+        let (queue, background) = match (opts.network, opts.silent) {
+            (true, true) => (queues.background, None),
+            (true, false) => (queues.writes, Some(queues.background)),
+            (false, _) => (queues.writes, None),
+        };
+        queue.submit(pending, move || {
+            if let Some(background) = background {
+                background.cancel_and_wait(STOP_SILENT_OPS);
+            }
             let net = NetOptions { env: auth_env(account.as_ref()), cancel, non_interactive: opts.silent };
             let progress_sender = sender.clone();
             let mut last = Instant::now() - Duration::from_secs(1);
@@ -62,8 +87,13 @@ impl RepoTab {
                     progress_sender.send(AppEvent::Repo(tab, RepoEvent::OpProgress(id, p)));
                 }
             };
-            // Une panique devient une erreur : l'opération se termine (plus de sablier bloqué).
-            let result = crate::jobs::guarded(|| f(&repo, &net, &mut on_progress));
+            // Annulée avant son tour (fetch automatique qui cède la place) : git n'est pas lancé. Une panique devient
+            // une erreur : l'opération se termine (plus de sablier bloqué).
+            let result = if net.cancel.is_cancelled() {
+                Err(GitError::Cancelled)
+            } else {
+                crate::jobs::guarded(|| f(&repo, &net, &mut on_progress))
+            };
             sender.send(AppEvent::Repo(tab, RepoEvent::OpDone { id, title, result, refresh }));
         });
     }
@@ -432,5 +462,156 @@ impl StashOp {
             StashOp::Pop => tr!("Pop du stash"),
             StashOp::Drop => tr!("Suppression du stash"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc::{self, Receiver};
+    use std::sync::{Arc, Mutex};
+
+    use dragontree_git::{CancelToken, Git, Remote};
+
+    use super::*;
+    use crate::app::TabId;
+    use crate::settings::SettingsFile;
+
+    /// État partagé (sans git : aucune tâche d'ouverture) et onglets ouverts sur un même dépôt temporaire.
+    fn tabs_on_one_repo(dir: &std::path::Path, ids: &[TabId]) -> (Shared, Receiver<AppEvent>, Vec<RepoTab>) {
+        let git = Git::discover().unwrap();
+        git.cmd(dir).args(["init", "-q"]).run().unwrap();
+        let (store, settings, _) = SettingsFile::load(&dir.join("settings.json"));
+        let (mut shared, events) = Shared::new(egui::Context::default(), settings, store, None, None);
+        let repo = Arc::new(Repo::open(&git, dir).unwrap());
+        let tabs = ids
+            .iter()
+            .map(|&id| {
+                let mut tab = RepoTab::new(id, dir.to_path_buf(), &mut shared);
+                tab.repo = Some(repo.clone());
+                tab
+            })
+            .collect();
+        (shared, events, tabs)
+    }
+
+    /// Fin de l'opération `id` de l'onglet `tab` (les autres événements sont ignorés).
+    fn wait_done(events: &Receiver<AppEvent>, tab: TabId, id: u64) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while let Ok(ev) = events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            if matches!(ev, AppEvent::Repo(t, RepoEvent::OpDone { id: i, .. }) if t == tab && i == id) {
+                return;
+            }
+        }
+        panic!("opération {id} de l'onglet {tab} jamais terminée");
+    }
+
+    #[test]
+    fn two_tabs_on_the_same_repository_share_one_write_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, events, mut tabs) = tabs_on_one_repo(dir.path(), &[1, 2]);
+        let first = tabs[0].queues(&shared).unwrap();
+        let second = tabs[1].queues(&shared).unwrap();
+        assert!(first.writes.same_as(&second.writes), "une seule file d'écriture pour le dépôt");
+        assert!(first.background.same_as(&second.background));
+
+        // L'écriture du second onglet attend celle du premier, même bloquée.
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let l = log.clone();
+        tabs[0].run_simple(&shared, "Première", Refresh::NONE, move |_| {
+            l.lock().unwrap().push("1 début");
+            let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+            l.lock().unwrap().push("1 fin");
+            Ok(None)
+        });
+        let l = log.clone();
+        tabs[1].run_simple(&shared, "Seconde", Refresh::NONE, move |_| {
+            l.lock().unwrap().push("2");
+            Ok(None)
+        });
+        // Avec une file par onglet, la seconde passerait pendant que la première attend : on lui en laisse le temps.
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline && !log.lock().unwrap().contains(&"2") {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        gate_tx.send(()).unwrap();
+        wait_done(&events, 2, 1);
+        assert_eq!(*log.lock().unwrap(), ["1 début", "1 fin", "2"]);
+    }
+
+    #[test]
+    fn the_automatic_fetch_gives_way_to_a_visible_network_operation_and_to_another_tab() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut shared, _events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let tab = &mut tabs[0];
+        shared.auto_fetch_every = Some(Duration::ZERO);
+        let url = "https://forge.test/contoso/depot.git".to_string();
+        tab.remotes = Arc::new(vec![Remote { name: "origin".into(), fetch_url: url.clone(), push_url: url }]);
+        let queues = tab.queues(&shared).unwrap();
+        let blocking = |network, silent| {
+            let op =
+                PendingOp { tab: 9, id: 1, title: "autre onglet".into(), network, silent, cancel: CancelToken::new() };
+            let (gate_tx, gate_rx) = mpsc::channel::<()>();
+            let wait = move || {
+                let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+            };
+            (op, gate_tx, wait)
+        };
+
+        // Pull d'un autre onglet en cours sur la file des écritures : le fetch automatique passe son tour.
+        let (pull, gate, wait) = blocking(true, false);
+        queues.writes.submit(pull, wait);
+        tab.tick(&mut shared, true);
+        assert!(tab.running.is_empty(), "pas de fetch automatique pendant un pull");
+        gate.send(()).unwrap();
+        assert!(queues.writes.cancel_and_wait(Duration::from_secs(10)));
+
+        // Fetch automatique d'un autre onglet du même dépôt en cours : pas de second.
+        let (fetch, gate, wait) = blocking(true, true);
+        queues.background.submit(fetch, wait);
+        tab.tick(&mut shared, true);
+        assert!(tab.running.is_empty(), "un seul fetch automatique à la fois");
+        gate.send(()).unwrap();
+        assert!(queues.background.cancel_and_wait(Duration::from_secs(10)));
+
+        // Une indexation en cours ne l'empêche plus : il part, sur la file du réseau silencieux.
+        let (staging, gate, wait) = blocking(false, false);
+        queues.writes.submit(staging, wait);
+        tab.tick(&mut shared, true);
+        assert!(tab.running.iter().any(|op| op.silent), "fetch automatique lancé");
+        // La file des écritures est occupée par l'indexation : le fetch n'y attend pas, il est sur la sienne.
+        assert!(!queues.writes.pending().iter().any(|op| op.tab == 1), "pas dans la file des écritures");
+        gate.send(()).unwrap();
+    }
+
+    #[test]
+    fn a_visible_network_operation_stops_the_automatic_fetch_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let queues = tabs[0].queues(&shared).unwrap();
+        // Fetch automatique bloqué (serveur muet), qui ne s'arrête que si on l'annule.
+        let fetch = PendingOp {
+            tab: 1,
+            id: 99,
+            title: "Fetch".into(),
+            network: true,
+            silent: true,
+            cancel: CancelToken::new(),
+        };
+        let cancel = fetch.cancel.clone();
+        queues.background.submit(fetch, move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !cancel.is_cancelled() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let saw_fetch_running = Arc::new(Mutex::new(None));
+        let (seen, background) = (saw_fetch_running.clone(), queues.background.clone());
+        tabs[0].run_net(&shared, "Pull", Refresh::NONE, false, move |_, _, _| {
+            *seen.lock().unwrap() = Some(!background.is_idle());
+            Ok(None)
+        });
+        wait_done(&events, 1, 1);
+        assert_eq!(*saw_fetch_running.lock().unwrap(), Some(false), "le fetch automatique est arrêté avant le pull");
     }
 }
