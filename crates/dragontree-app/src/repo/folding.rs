@@ -105,13 +105,17 @@ impl RepoTab {
     ) {
         let selected = self.history.selected;
         let row_before = selected.and_then(|oid| self.history.index.get(&oid).copied());
-        self.history.commits = list.commits;
+        let old = std::mem::replace(&mut self.history.commits, list.commits);
         self.history.graph = list.graph;
         self.history.index = list.index;
         self.history.folded = Arc::new(folded);
-        self.history.filter_applied = None;
-        self.history.filtered = None;
-        self.apply_filter();
+        // Les lignes du filtre désignent la liste affichée : ramenées à la nouvelle, puis recalculées (même liste :
+        // rien à refaire).
+        if !Arc::ptr_eq(&old, &self.history.commits) {
+            self.carry_filter_over(&old);
+            self.history.filter_applied = None;
+            self.apply_filter(shared);
+        }
         let Some(oid) = selected else { return };
         match self.history.index.get(&oid).copied() {
             Some(row) if follow_selection && Some(row) != row_before => self.scroll_to_commit(oid),

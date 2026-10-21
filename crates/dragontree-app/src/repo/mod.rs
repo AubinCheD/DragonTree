@@ -21,6 +21,7 @@ mod folding;
 mod gitflow;
 mod graph_paint;
 mod history;
+mod history_filter;
 mod history_search;
 mod ignore;
 mod image_diff;
@@ -148,11 +149,16 @@ pub struct HistoryState {
     /// Commit affiché hors de la liste (stash) avec son libellé.
     pub external: Option<(Oid, String)>,
     pub filter: String,
-    /// Mode, texte et révision des résultats dont `filtered` est le calcul (`None` : à recalculer).
+    /// Mode, texte et révision des résultats dont le filtre a été lancé (`None` : à relancer).
     pub filter_applied: Option<(history_search::SearchMode, String, u64)>,
     /// Recherche par contenu ou par chemin (voir `history_search`).
     pub search: history_search::HistorySearch,
-    pub filtered: Option<Vec<usize>>,
+    /// Lignes de la liste affichée que retient le filtre, dans l'ordre (`None` : pas de filtre), partagées avec
+    /// chaque image sans copie. Calculées en arrière-plan (voir `history_filter`) : `filter_pending` tant que le
+    /// calcul lancé n'est pas revenu, le résultat précédent restant affiché.
+    pub filtered: Option<Arc<Vec<usize>>>,
+    pub filter_pending: bool,
+    filter_cancel: Option<CancelToken>,
     pub scroll_to: Option<usize>,
     pub details: Option<(CommitInfo, Vec<FileChange>)>,
     /// Stash affiché : indice du premier fichier non suivi dans `details` et commit qui les porte (leur diff se lit
@@ -201,6 +207,8 @@ impl Default for HistoryState {
             filter_applied: None,
             search: history_search::HistorySearch::default(),
             filtered: None,
+            filter_pending: false,
+            filter_cancel: None,
             scroll_to: None,
             details: None,
             stash_untracked: None,
@@ -283,6 +291,7 @@ struct Gens {
     log: u64,
     extras: u64,
     folding: u64,
+    filter: u64,
     search: u64,
     details: u64,
     commit_diff: u64,
@@ -326,6 +335,11 @@ pub enum RepoEvent {
     Searched {
         generation: u64,
         result: Result<HashSet<Oid>, GitError>,
+    },
+    /// Lignes de la liste affichée retenues par le filtre de l'historique (voir `history_filter`).
+    Filtered {
+        generation: u64,
+        rows: Vec<usize>,
     },
     /// Liste affichée recalculée pour les fusions repliées (`follow_selection` : voir `show_list`).
     Folded {
@@ -887,6 +901,7 @@ impl RepoTab {
                 }
             }
             RepoEvent::Searched { generation, result } => self.search_done(generation, result),
+            RepoEvent::Filtered { generation, rows } => self.filter_done(generation, rows),
             RepoEvent::Folded { generation, view, follow_selection } if generation == self.gens.folding => {
                 let CollapsedLog { commits, graph, index, folded, hidden_in } = *view;
                 let list = CommitList { commits: Arc::new(commits), graph: Arc::new(graph), index: Arc::new(index) };
@@ -1133,11 +1148,7 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
     /// est active).
     pub(crate) fn scroll_to_commit(&mut self, oid: Oid) {
         if let Some(&row) = self.history.index.get(&oid) {
-            let row = match &self.history.filtered {
-                Some(f) => f.iter().position(|&i| i == row).unwrap_or(0),
-                None => row,
-            };
-            self.history.scroll_to = Some(row);
+            self.history.scroll_to = Some(self.shown_position(row).unwrap_or(0));
         }
     }
 

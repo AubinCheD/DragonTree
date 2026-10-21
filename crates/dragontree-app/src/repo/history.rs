@@ -56,45 +56,6 @@ impl RepoTab {
         egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| self.commit_table(ui, shared, p));
     }
 
-    /// Recherche dans la liste affichée (les commits des fusions repliées n'y sont pas).
-    pub(super) fn apply_filter(&mut self) {
-        let f = self.history.filter.trim().to_string();
-        let mode = self.history.search.mode;
-        let key = (mode, f.clone(), self.history.search.revision);
-        if self.history.filter_applied.as_ref() == Some(&key) {
-            return;
-        }
-        self.history.filter_applied = Some(key);
-        if f.is_empty() {
-            self.history.filtered = None;
-            return;
-        }
-        if mode != SearchMode::Text {
-            // Recherche par git : les lignes dont l'oid est trouvé ; aucune tant que le résultat n'est pas arrivé.
-            let found = self.history.search.results_for(mode, &f).cloned();
-            let rows = |set: &std::collections::HashSet<dragontree_git::Oid>| {
-                self.history.commits.iter().enumerate().filter(|(_, c)| set.contains(&c.id)).map(|(i, _)| i).collect()
-            };
-            self.history.filtered = Some(found.map_or_else(Vec::new, |set| rows(&set)));
-            return;
-        }
-        let needle = widgets::fold(&f);
-        let filtered: Vec<usize> = self
-            .history
-            .commits
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| {
-                c.id.to_hex().starts_with(&needle)
-                    || widgets::fold(&c.summary).contains(&needle)
-                    || widgets::fold(&c.author).contains(&needle)
-                    || widgets::fold(&c.author_email).contains(&needle)
-            })
-            .map(|(i, _)| i)
-            .collect();
-        self.history.filtered = Some(filtered);
-    }
-
     /// Sélecteur de ce que cherche le champ de recherche (message, contenu des modifications, chemin).
     fn search_mode_selector(&mut self, ui: &mut Ui) {
         let mode = &mut self.history.search.mode;
@@ -147,7 +108,7 @@ impl RepoTab {
             ui.set_height(30.0);
             let total = self.history.commits.len();
             let searching = self.history.search.is_searching(self.history.search.mode, self.history.filter.trim());
-            let shown = self.history.filtered.as_ref().map_or(total, Vec::len);
+            let shown = self.history.filtered.as_ref().map_or(total, |f| f.len());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(6.0);
                 let text = if self.history.filtered.is_some() {
@@ -158,7 +119,7 @@ impl RepoTab {
                     trn!(total, "{n} commit", "{n} commits")
                 };
                 ui.label(RichText::new(text).color(p.weak).size(12.0));
-                if self.history.loading || searching {
+                if self.history.loading || searching || self.history.filter_pending {
                     ui.add(egui::Spinner::new().size(12.0));
                 }
                 ui.add_space(6.0);
@@ -196,7 +157,7 @@ impl RepoTab {
         });
         self.filter_banner(ui, shared, p);
         self.drive_search(ui.ctx(), shared);
-        self.apply_filter();
+        self.apply_filter(shared);
 
         if let Some(err) = &self.history.error {
             ui.label(RichText::new(format!("{} {}", icons::WARNING, err)).color(p.removed_fg));
@@ -205,7 +166,7 @@ impl RepoTab {
         let commits = self.history.commits.clone();
         let graph = self.history.graph.clone();
         let filtered = self.history.filtered.clone();
-        let rows = filtered.as_ref().map_or(commits.len(), Vec::len);
+        let rows = filtered.as_ref().map_or(commits.len(), |f| f.len());
         if rows == 0 {
             ui.add_space(20.0);
             ui.vertical_centered(|ui| {
@@ -216,7 +177,7 @@ impl RepoTab {
                     (tr!("Chargement de l'historique…").to_string(), p.weak)
                 } else if let Some(e) = failed {
                     (format!("{} {e}", icons::WARNING), p.removed_fg)
-                } else if self.history.search.is_searching(mode, &query) {
+                } else if self.history.search.is_searching(mode, &query) || self.history.filter_pending {
                     (tr!("Recherche en cours…").to_string(), p.weak)
                 } else if filtered.is_some() {
                     (tr!("Aucun commit ne correspond à la recherche.").to_string(), p.weak)
@@ -289,13 +250,7 @@ impl RepoTab {
         // le dessin, qui utilise la liste et le graphe de cette image.
         let mut fold: Option<(dragontree_git::Oid, bool)> = None;
         // Navigation clavier (quand aucun champ n'a le focus).
-        let selected_row = self.history.selected.and_then(|oid| {
-            let i = *self.history.index.get(&oid)?;
-            match &filtered {
-                Some(f) => f.iter().position(|&x| x == i),
-                None => Some(i),
-            }
-        });
+        let selected_row = self.history.selected.and_then(|oid| self.shown_position(*self.history.index.get(&oid)?));
         if self.view == RepoView::History && ui.ctx().memory(|m| m.focused().is_none()) && self.dialog.is_none() {
             let (down, up, pgdn, pgup, home, end, left, right) = ui.ctx().input(|i| {
                 (
@@ -341,7 +296,9 @@ impl RepoTab {
 
         let head_oid = self.refs.as_ref().and_then(|r| r.head_oid);
         let head_row = head_oid.and_then(|o| self.history.index.get(&o).copied());
-        let labels = self.refs.as_ref().map(|r| r.labels.clone()).unwrap_or_default();
+        // Partagées, pas copiées : l'instantané des références (`Arc`) suffit à les lire pendant le dessin.
+        let refs = self.refs.clone();
+        let labels = |oid: &dragontree_git::Oid| refs.as_ref().and_then(|r| r.labels.get(oid));
         let visibility = LabelVisibility::of(shared, &self.path);
         let lost = self.history.lost.clone();
         let bisect = self.bisect.clone();
@@ -382,7 +339,7 @@ impl RepoTab {
                 let painter = ui.painter_at(cols.desc.intersect(rect));
                 let mut x = cols.desc.left() + 6.0;
                 let ls: Vec<&RefLabel> =
-                    labels.get(&c.id).map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect()).unwrap_or_default();
+                    labels(&c.id).map(|ls| ls.iter().filter(|l| visibility.shows(l)).collect()).unwrap_or_default();
                 let is_lost = lost.contains(&c.id);
                 let stash = self.stashes.iter().find(|s| s.oid == c.id);
                 let collapsed = (c.parents.len() > 1).then(|| self.history.folding.is_collapsed(c.id));

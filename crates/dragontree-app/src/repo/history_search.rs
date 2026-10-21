@@ -1,4 +1,4 @@
-//! Recherche de commits dans l'historique : par message, auteur ou SHA (en mémoire, voir `apply_filter`), par contenu
+//! Recherche de commits dans l'historique : par message, auteur ou SHA (en mémoire, voir `history_filter`), par contenu
 //! des modifications (`git log -G`) ou par chemin (`git log -- <motif>`). Les deux dernières lancent git en
 //! arrière-plan, après un délai de frappe, sur la portée courante du graphe (`RepoTab::log_options`) ; leur résultat
 //! est un ensemble d'oids, et la liste affichée n'en garde que les lignes.

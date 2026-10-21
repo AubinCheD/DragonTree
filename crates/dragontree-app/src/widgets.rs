@@ -175,9 +175,26 @@ pub fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
 
 /// Minuscules sans accents (comparaisons de recherche).
 pub fn fold(s: &str) -> String {
-    s.chars()
-        .flat_map(char::to_lowercase)
-        .map(|c| match c {
+    let mut out = String::with_capacity(s.len());
+    fold_into(&mut out, s);
+    out
+}
+
+/// Comme [`fold`], dans `out` (vidé d'abord) : sans allocation quand on replie beaucoup de textes à la suite.
+pub fn fold_into(out: &mut String, s: &str) {
+    out.clear();
+    if s.is_ascii() {
+        // Cas courant, bien plus rapide : ni accent ni minuscule hors ASCII.
+        out.push_str(s);
+        out.make_ascii_lowercase();
+        return;
+    }
+    for c in s.chars() {
+        if c.is_ascii() {
+            out.push(c.to_ascii_lowercase());
+            continue;
+        }
+        out.extend(c.to_lowercase().map(|c| match c {
             'à' | 'â' | 'ä' | 'á' | 'ã' => 'a',
             'é' | 'è' | 'ê' | 'ë' => 'e',
             'î' | 'ï' | 'í' => 'i',
@@ -186,8 +203,8 @@ pub fn fold(s: &str) -> String {
             'ç' => 'c',
             'ñ' => 'n',
             other => other,
-        })
-        .collect()
+        }));
+    }
 }
 
 /// Ligne cliquable pleine largeur (fond survolé/sélectionné).
@@ -226,6 +243,15 @@ mod tests {
         assert!(exact > scattered);
         assert!(fuzzy_score("depot", "Dépôt").is_some(), "insensible aux accents");
         assert_eq!(fuzzy_score("", "x"), Some(0));
+    }
+
+    #[test]
+    fn folding_drops_case_and_accents_with_or_without_ascii_only_text() {
+        assert_eq!(fold("Corrige le README"), "corrige le readme");
+        assert_eq!(fold("Émile CORRIGE le Dépôt ÇA"), "emile corrige le depot ca");
+        let mut out = String::from("reste");
+        fold_into(&mut out, "Ñandú");
+        assert_eq!(out, "nandu", "le tampon est vidé d'abord");
     }
 
     #[test]

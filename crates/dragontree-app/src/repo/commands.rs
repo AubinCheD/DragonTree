@@ -71,11 +71,10 @@ impl RepoTab {
             shared.toast(Toast::info(tr!("HEAD n'est pas dans l'historique affiché")));
             return;
         };
-        if self.history.filtered.is_some() {
-            // Même état qu'un champ de recherche vidé (voir `apply_filter`).
+        if self.history.filtered.is_some() || self.history.filter_pending {
+            // Champ de recherche vidé : le filtre disparaît sur-le-champ, son calcul en cours est abandonné.
             self.history.filter.clear();
-            self.history.filter_applied = None;
-            self.history.filtered = None;
+            self.apply_filter(shared);
         }
         self.select_commit(shared, oid, true);
     }
