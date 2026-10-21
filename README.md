@@ -25,6 +25,7 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
     (icône œil), masquer les tags ou les branches distantes.
   - **Graphe** : stashs affichés comme des commits (masquables), commits perdus du reflog (Ctrl+Maj+.), fusions
     repliables (← / →, Tout replier), révéler HEAD, tri topologique ou par date, disposition horizontale ou verticale.
+  - **Colonne du graphe** redimensionnable à la poignée de l'en-tête (largeur mémorisée ; double-clic : automatique).
   - **Glisser une branche** sur une autre pour la fusionner ou la rebaser.
   - **Glisser des fichiers** entre « Non indexés » et « Indexés » pour les indexer ou les désindexer (la sélection suit).
   - **Comparer** deux commits, deux branches, ou un commit avec les modifications locales.

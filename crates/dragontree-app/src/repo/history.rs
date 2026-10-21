@@ -220,7 +220,11 @@ impl RepoTab {
             return;
         }
         let show_graph = filtered.is_none();
-        let graph_w = if show_graph { graph_paint::graph_width(graph.max_lane) } else { 0.0 };
+        let graph_w = if show_graph {
+            graph_paint::column_width(graph.max_lane, shared.settings.graph_column_width)
+        } else {
+            0.0
+        };
 
         // En-têtes de colonnes.
         let header_rect = ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), Sense::hover()).0;
@@ -238,6 +242,34 @@ impl RepoTab {
         };
         if show_graph && graph_w >= 60.0 {
             hdr(ui, cols.graph.left(), tr!("Graphe"));
+        }
+        if show_graph {
+            // Poignée au bord droit de la colonne : glisser la redimensionne, double-clic revient à la largeur calculée.
+            let grip = Rect::from_center_size(
+                egui::pos2(cols.graph.right(), header_rect.center().y),
+                egui::vec2(8.0, header_rect.height()),
+            );
+            let resp = ui
+                .interact(grip, ui.scope_id().with(("graph-grip", self.id)), Sense::click_and_drag())
+                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            widgets::a11y(&resp, tr!("Redimensionner la colonne du graphe"), true);
+            if resp.dragged()
+                && let Some(pos) = resp.interact_pointer_pos()
+            {
+                let w =
+                    (pos.x - header_rect.left()).clamp(graph_paint::MIN_CHOSEN_WIDTH, graph_paint::MAX_CHOSEN_WIDTH);
+                shared.settings.graph_column_width = Some(w);
+            }
+            if resp.drag_stopped() {
+                shared.settings_dirty = true;
+            }
+            if resp.double_clicked() {
+                shared.settings.graph_column_width = None;
+                shared.settings_dirty = true;
+            }
+            let color = if resp.hovered() || resp.dragged() { p.weak } else { p.border };
+            let line = header_rect.shrink2(egui::vec2(0.0, 4.0)).y_range();
+            ui.painter().vline(cols.graph.right(), line, egui::Stroke::new(1.0, color));
         }
         hdr(ui, cols.desc.left(), "Description");
         hdr(ui, cols.author.left(), tr!("Auteur"));

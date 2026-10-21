@@ -116,6 +116,8 @@ pub struct Settings {
     /// Dépôts (chemin) dont l'historique est limité à la branche courante ; le filtre sur des branches choisies
     /// (V3) reste propre à la session.
     pub current_branch_only_repos: BTreeSet<String>,
+    /// Largeur choisie de la colonne du graphe (poignée de l'en-tête) ; `None` : calculée d'après les branches.
+    pub graph_column_width: Option<f32>,
     pub repo_list_width: f32,
     pub favorites: Vec<PathBuf>,
     pub hidden_repos: Vec<PathBuf>,
@@ -199,6 +201,7 @@ impl Default for Settings {
             hide_untracked_files: false,
             hidden_refs: BTreeMap::new(),
             current_branch_only_repos: BTreeSet::new(),
+            graph_column_width: None,
             repo_list_width: 280.0,
             favorites: Vec::new(),
             hidden_repos: Vec::new(),

@@ -41,6 +41,19 @@ pub fn graph_width(max_lane: u16) -> f32 {
     ((f32::from(max_lane) + 1.0) * LANE_W + 6.0).clamp(22.0, 220.0)
 }
 
+/// Largeur minimale et maximale de la colonne choisie à la poignée.
+pub const MIN_CHOSEN_WIDTH: f32 = 22.0;
+pub const MAX_CHOSEN_WIDTH: f32 = 600.0;
+
+/// Largeur de la colonne : celle choisie à la poignée si elle existe (bornée), sinon celle qui suit `max_lane`. Le
+/// repli des fusions et les filtres changent `max_lane` : la largeur choisie reste, elle, la même.
+pub fn column_width(max_lane: u16, chosen: Option<f32>) -> f32 {
+    match chosen {
+        Some(w) => w.clamp(MIN_CHOSEN_WIDTH, MAX_CHOSEN_WIDTH),
+        None => graph_width(max_lane),
+    }
+}
+
 fn link(painter: &Painter, from: Pos2, to: Pos2, stroke: Stroke) {
     if (from.x - to.x).abs() < 0.5 {
         painter.line_segment([from, to], stroke);
@@ -107,5 +120,19 @@ pub fn paint(
             painter.circle_filled(center, 4.2, color);
             painter.circle_stroke(center, 4.2, Stroke::new(1.2, p.bg));
         }
+    }
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    #[test]
+    fn the_chosen_width_overrides_the_computed_one_within_bounds() {
+        assert_eq!(column_width(3, None), graph_width(3));
+        assert_eq!(column_width(3, Some(100.0)), 100.0);
+        assert_eq!(column_width(40, Some(100.0)), 100.0, "indépendante du nombre de voies (repli, filtres)");
+        assert_eq!(column_width(3, Some(5.0)), MIN_CHOSEN_WIDTH);
+        assert_eq!(column_width(3, Some(5000.0)), MAX_CHOSEN_WIDTH);
     }
 }

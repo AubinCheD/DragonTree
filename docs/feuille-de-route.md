@@ -330,10 +330,9 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - **a. Glisser-déposer entre « Non indexés » et « Indexés »** (plan, tâche 16) (fait).
     - État : réalisé (`crates/dragontree-app/src/repo/file_drag.rs`). Un fichier se glisse d'une liste à l'autre ; toute la sélection de sa liste le suit ; conflits et fichiers ignorés ne se glissent pas. Double-clic, Espace, Entrée et menus sont inchangés.
     - Fin (atteinte) : `crates/dragontree-app/tests/ui_file_drag.rs` (glisser vers Indexés puis retour, sélection multiple, dépôt sur sa propre liste).
-  - **b. Colonne du graphe redimensionnable** (tâche 15).
-    - État : la largeur est calculée et bornée entre 22 et 220 px (`crates/dragontree-app/src/repo/graph_paint.rs:40-42`, utilisée en `crates/dragontree-app/src/repo/history.rs:130`). Il n'y a pas de poignée.
-    - À faire : ajouter une poignée et mémoriser la largeur.
-    - Fin : la largeur choisie est conservée après redémarrage.
+  - **b. Colonne du graphe redimensionnable** (tâche 15) (fait).
+    - État : réalisé. Une poignée au bord droit de la colonne, dans l'en-tête, la redimensionne (22 à 600 px) ; un double-clic revient à la largeur calculée d'après les branches (22 à 220 px, `graph_paint::graph_width`). La largeur choisie est enregistrée dans les réglages (`graph_column_width`, globale, absente par défaut) et prime sur la largeur calculée : repli des fusions et filtres ne la changent pas. La fenêtre Réglages ne l'édite pas.
+    - Fin (atteinte) : `crates/dragontree-app/tests/ui_graph_column.rs` (glisser la poignée, largeur retrouvée par une nouvelle session du même profil ; double-clic).
   - **c. Colonne « mise à jour » dans la liste de clonage** (tâche 18).
     - État : la liste montre le nom, l'espace, la description et un cadenas (`crates/dragontree-app/src/clone.rs:373-427`). `RemoteRepo::updated_at` existe et sert déjà au tri (`crates/dragontree-forges/src/model.rs:91`, `:265`), mais Azure DevOps ne le renseigne pas (`crates/dragontree-forges/src/azure.rs:252`).
     - À faire : afficher la date relative, et la chercher côté Azure DevOps (date du dernier push) si l'API la fournit.
