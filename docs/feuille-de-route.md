@@ -211,7 +211,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 | # | Point | Origine | Priorité |
 |---|---|---|---|
-| RV1 | Fluidité de l'interface sur un gros dépôt : filtre et copies par image (faits), coloration synchrone | revue finale, mineur n°6 | moyenne |
+| RV1 | Fluidité de l'interface sur un gros dépôt : filtre, copies par image, coloration synchrone (corrigé) | revue finale, mineur n°6 | moyenne |
 | RV2 | Gros diffs lus entièrement en mémoire avant la limite de 8 Mio | revue finale, mineur n°7 | moyenne |
 | RV3 | Fetch automatique dans la file des écritures ; deux files pour un même dépôt | revue finale, mineur n°16 | basse |
 | RV4 | Points non jugés : processus git à la fermeture, instances multiples, proxy, cas des forges (à vérifier) | revue finale et rapport du crate forges | basse |
@@ -476,28 +476,29 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 ### Constats de revue
 
-#### RV1 — Fluidité de l'interface sur un gros dépôt
+#### RV1 — Fluidité de l'interface sur un gros dépôt (corrigé)
 
 - **Contexte :** mineur n°6 de la revue finale. Il touche l'objectif de performance de la demande initiale.
-- **État :**
+- **État :** corrigé.
   - **filtre (corrigé) :**
     - avant : à chaque frappe, il repliait tous les commits sur le thread de l'interface (`apply_filter`, `crates/dragontree-app/src/repo/history.rs`), estimé par la revue à 50–150 ms sur 86 k commits (194 ms mesurés sur 100 000 commits synthétiques) ;
     - désormais (`crates/dragontree-app/src/repo/history_filter.rs`) : une frappe ne fait que lancer le calcul en arrière-plan, avec un numéro de génération ; le calcul précédent est annulé et un résultat périmé ignoré ; le résultat précédent reste affiché en attendant (compteur et indicateur d'activité) ;
     - les lignes désignent toujours la liste affichée : quand elle est remplacée (fusions repliées V8, journal relu), l'ancien résultat est aussitôt ramené aux commits qu'elle contient encore, puis recalculé ; la recherche git (H3) passe par le même calcul (lignes dont l'oid est trouvé) ;
     - le repli des textes ne fait plus d'allocation par commit (`widgets::fold_into`, chemin rapide ASCII) : environ 24 ms en arrière-plan pour 100 000 commits ;
   - **copies à chaque image (corrigé) :** la liste filtrée est partagée par `Arc` (`HistoryState::filtered`) et les étiquettes de refs sont lues dans l'instantané `Arc<RefsSnapshot>` au lieu d'une copie de leur table ; la position de la sélection parmi les résultats se trouve par recherche dichotomique ;
-  - **coloration syntaxique :**
-    - elle est calculée de façon synchrone (`crates/dragontree-app/src/highlight.rs:52-111`) ;
-    - son cache ne garde qu'un fichier, sous la clé (chemin, nombre de lignes, thème) (`:37`, `:54`) : les couleurs restent périmées après une modification qui ne change pas le nombre de lignes ;
-    - le plan demandait un cache LRU de 64 fichiers et un seuil de 20 000 lignes ; le seuil est de 3 000 lignes (`:19`, arbitrage de la tâche 19).
+  - **coloration syntaxique (corrigé) :**
+    - avant : elle était calculée de façon synchrone, chargement de syntect compris (`crates/dragontree-app/src/highlight.rs`), et son cache ne gardait qu'un fichier, sous la clé (chemin, nombre de lignes, thème) : les couleurs restaient périmées après une modification qui ne change pas le nombre de lignes ; le plan demandait un cache LRU de 64 fichiers et un seuil de 20 000 lignes, le seuil était de 3 000 lignes (arbitrage de la tâche 19) ;
+    - désormais : `Highlighter::prepare` ne fait que calculer l'empreinte du contenu (chemin, nature et texte de chaque ligne ; environ 0,4 ms pour 20 000 lignes) et, si elle change, reprendre les couleurs du cache ou lancer leur calcul dans une tâche de fond (copie des lignes, développement des tabulations et syntect y compris) ; le calcul devenu inutile est interrompu ; le texte s'affiche sans couleur jusqu'au résultat, qui demande une nouvelle image ; aucun calcul n'est relancé tant que le contenu, le thème et la largeur de tabulation restent les mêmes ;
+    - cache LRU partagé par les vues de diff : 64 diffs, indexés par l'empreinte du contenu, le thème et la largeur de tabulation (C6 développe les tabulations avant la coloration : les plages portent sur le texte affiché), borné aussi à 100 000 lignes colorées pour la mémoire ; plages voisines de même couleur réunies ;
+    - seuil revu : 20 000 lignes, la valeur du plan. Synchrone, 3 000 lignes de code dense figeaient déjà l'interface environ une demi-seconde ; en tâche de fond, 20 000 lignes demandent environ 3,5 s, pendant lesquelles le texte reste lisible et l'interface fluide.
 - **À faire :**
   1. Filtrer en arrière-plan avec un numéro de génération, ou après un court délai de frappe (fait : en arrière-plan, avec génération et annulation).
   2. Partager les étiquettes et la liste filtrée par `Arc` au lieu de les copier (fait).
-  3. Colorer dans une tâche de fond, avec un cache LRU indexé par le contenu.
-  4. Revoir ensuite le seuil de 3 000 lignes.
-- **Critère de fin :**
+  3. Colorer dans une tâche de fond, avec un cache LRU indexé par le contenu (fait).
+  4. Revoir ensuite le seuil de 3 000 lignes (fait : 20 000 lignes).
+- **Critère de fin (atteint) :**
   - mesure sur le gros dépôt : une frappe dans le filtre coûte moins de 16 ms au thread d'interface (atteint : test `a_keystroke_in_the_filter_costs_less_than_a_frame_on_the_interface_thread`, `crates/dragontree-app/src/repo/history_filter.rs`, sur 100 000 commits synthétiques en mémoire : environ 0,1 ms, contre 194 ms avant ; les tests voisins vérifient que le résultat est appliqué au retour du calcul, qu'un résultat périmé est ignoré et que le filtre suit la liste affichée) ;
-  - test unitaire : une ligne modifiée sans changer le nombre de lignes est recolorée.
+  - test unitaire : une ligne modifiée sans changer le nombre de lignes est recolorée (atteint : `a_line_edited_without_changing_the_line_count_is_recolored`, `crates/dragontree-app/src/highlight.rs`, vu rouge avec l'ancienne clé ; aussi `the_cache_evicts_the_least_recently_used_diff` et `no_highlighting_work_runs_on_the_interface_thread`, qui vérifie que la coloration ne tourne jamais sur le thread qui affiche).
 - **Priorité :** moyenne.
 
 #### RV2 — Gros diffs lus entièrement en mémoire

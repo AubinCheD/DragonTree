@@ -12,7 +12,7 @@ use egui::text::LayoutJob;
 use egui::{Align2, FontId, Rect, RichText, Sense, TextFormat, Ui};
 
 use crate::diff_style::{DiffStyle, copy_text, expand_tabs, lines_to_copy, whitespace_markers};
-use crate::highlight::Highlighter;
+use crate::highlight::{Highlighter, Span};
 use crate::icons;
 use crate::theme::Palette;
 
@@ -251,7 +251,7 @@ pub fn show(
     let mut action = None;
     let mut highlighter = highlighter;
     if let Some(hl) = highlighter.as_deref_mut() {
-        hl.prepare(diff, tab_width);
+        hl.prepare(ui.ctx(), diff, tab_width);
     }
 
     let interactive = mode != DiffMode::ReadOnly;
@@ -380,7 +380,7 @@ pub fn show(
                             no_w,
                             char_w,
                             style,
-                            highlighter.as_deref_mut(),
+                            highlighter.as_deref(),
                             p,
                         );
                         if interactive {
@@ -410,7 +410,7 @@ pub fn show(
                                         state,
                                         no_w,
                                         style,
-                                        highlighter.as_deref_mut(),
+                                        highlighter.as_deref(),
                                         p,
                                     );
                                     if interactive {
@@ -518,7 +518,7 @@ fn line_job(
     kind: LineKind,
     ranges: Option<&Vec<Range<usize>>>,
     font: &FontId,
-    colors: Option<Vec<(Range<usize>, egui::Color32)>>,
+    colors: Option<&[Span]>,
     marked: Option<&str>,
     p: &Palette,
 ) -> LayoutJob {
@@ -532,11 +532,9 @@ fn line_job(
             cuts.push(x.end.min(text.len()));
         }
     }
-    if let Some(c) = &colors {
-        for (r, _) in c {
-            cuts.push(r.start.min(text.len()));
-            cuts.push(r.end.min(text.len()));
-        }
+    for r in colors.into_iter().flatten().map(Span::range) {
+        cuts.push(r.start.min(text.len()));
+        cuts.push(r.end.min(text.len()));
     }
     cuts.sort_unstable();
     cuts.dedup();
@@ -547,8 +545,7 @@ fn line_job(
         }
         let highlighted = ranges.is_some_and(|r| r.iter().any(|x| x.start <= a && b <= x.end));
         let color = colors
-            .as_ref()
-            .and_then(|c| c.iter().find(|(r, _)| r.start <= a && b <= r.end).map(|(_, col)| *col))
+            .and_then(|c| c.iter().find(|s| s.start as usize <= a && b <= s.end as usize).map(|s| s.color))
             .unwrap_or(p.text);
         // Espaces visibles : mêmes colonnes que le texte, les coupures ci-dessus restent valables.
         let piece: std::borrow::Cow<str> = match marked {
@@ -580,7 +577,7 @@ fn paint_unified_line(
     no_w: f32,
     char_w: f32,
     style: &DiffStyle,
-    highlighter: Option<&mut Highlighter>,
+    highlighter: Option<&Highlighter>,
     p: &Palette,
 ) {
     let font = &style.font_id();
@@ -620,7 +617,7 @@ fn paint_unified_line(
     );
     let text = expand_tabs(&line.text, style.tab_width);
     let marked = style.show_whitespace.then(|| whitespace_markers(&line.text, style.tab_width));
-    let colors = highlighter.and_then(|hl| hl.colors(diff, h, l, &text, p.dark));
+    let colors = highlighter.and_then(|hl| hl.colors(h, l));
     let job = line_job(&text, line.kind, cache.highlights.get(&(h, l)), font, colors, marked.as_deref(), p);
     let galley = painter.layout_job(job);
     painter.galley(
@@ -651,7 +648,7 @@ fn paint_split_line(
     state: &DiffViewState,
     no_w: f32,
     style: &DiffStyle,
-    highlighter: Option<&mut Highlighter>,
+    highlighter: Option<&Highlighter>,
     p: &Palette,
 ) {
     let font = &style.font_id();
@@ -672,7 +669,7 @@ fn paint_split_line(
     );
     let text = expand_tabs(&line.text, style.tab_width);
     let marked = style.show_whitespace.then(|| whitespace_markers(&line.text, style.tab_width));
-    let colors = highlighter.and_then(|hl| hl.colors(diff, h, l, &text, p.dark));
+    let colors = highlighter.and_then(|hl| hl.colors(h, l));
     let job = line_job(&text, line.kind, cache.highlights.get(&(h, l)), font, colors, marked.as_deref(), p);
     let galley = painter.layout_job(job);
     painter.galley(egui::pos2(rect.left() + no_w + 6.0, rect.center().y - galley.size().y / 2.0), galley, p.text);
