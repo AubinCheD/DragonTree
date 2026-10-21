@@ -1,8 +1,10 @@
-//! Remotes : modifier l'URL (et l'URL de push distincte), tester la connexion (`ls-remote --heads`).
+//! Remotes : modifier l'URL (et l'URL de push distincte), tester la connexion (`ls-remote --heads`), lire les URL sur
+//! disque sans git (`discovery::remote_urls`).
 
 mod common;
 
 use common::TestRepo;
+use dragontree_git::discovery::remote_urls;
 use dragontree_git::{GitError, NetOptions, Repo};
 
 /// Remote bare contenant `main` et `fonction`.
@@ -81,4 +83,31 @@ fn ls_remote_fails_with_git_s_message_when_the_path_is_missing() {
     let err = repo.ls_remote_heads("origin", &NetOptions::default()).unwrap_err();
     assert!(matches!(err, GitError::Failed { .. }), "{err:?}");
     assert!(err.to_string().contains("n-existe-pas"), "le message de git est conservé : {err}");
+}
+
+#[test]
+fn remote_urls_read_on_disk_match_those_git_reports_for_a_repository_and_its_worktree() {
+    let (t, repo) = repo_with_origin("https://github.com/contoso/northwind.git");
+    repo.set_remote_urls(
+        "origin",
+        "https://github.com/contoso/northwind.git",
+        Some("git@github.com:contoso/northwind.git"),
+    )
+    .unwrap();
+    t.run(&["remote", "add", "amont", "https://gitlab.contoso.test/fabrikam/outils.git"]);
+    t.write("a.txt", "1\n");
+    t.commit_all("init");
+    let worktree = tempfile::tempdir().unwrap();
+    let wt_path = worktree.path().join("wt");
+    t.run(&["worktree", "add", "-q", "-b", "wt", &wt_path.display().to_string()]);
+
+    let mut expected: Vec<String> =
+        repo.remotes().unwrap().into_iter().flat_map(|r| [r.fetch_url, r.push_url]).collect();
+    expected.sort();
+    expected.dedup();
+    for path in [t.path(), wt_path.as_path()] {
+        let mut on_disk = remote_urls(path);
+        on_disk.sort();
+        assert_eq!(on_disk, expected, "{}", path.display());
+    }
 }

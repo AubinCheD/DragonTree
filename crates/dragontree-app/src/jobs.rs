@@ -57,7 +57,7 @@ pub fn guarded<T>(f: impl FnOnce() -> Result<T, GitError>) -> Result<T, GitError
         .unwrap_or_else(|payload| Err(GitError::Internal(panic_message(payload.as_ref()))))
 }
 
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     match (payload.downcast_ref::<&str>(), payload.downcast_ref::<String>()) {
         (Some(s), _) => s.to_string(),
         (_, Some(s)) => s.clone(),

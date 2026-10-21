@@ -20,6 +20,7 @@ pub mod highlight;
 pub mod icons;
 pub mod jobs;
 pub mod menu_bar;
+pub mod pull_requests;
 pub mod quick_open;
 pub mod repo;
 pub mod repo_list;

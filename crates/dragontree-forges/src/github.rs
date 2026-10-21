@@ -41,16 +41,30 @@ pub(crate) fn list_repos(host: &str, token: &str, account_id: &str) -> Result<Ve
     Ok(into_remotes(raw, account_id))
 }
 
+/// En-têtes d'authentification et de version de l'API (REST et GraphQL).
+pub(crate) fn auth_headers(token: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("Authorization", format!("Bearer {token}")),
+        ("Accept", "application/vnd.github+json".to_string()),
+        ("X-GitHub-Api-Version", "2022-11-28".to_string()),
+    ]
+}
+
+/// Point d'entrée GraphQL pour un hôte normalisé (GitHub Enterprise Server : `/api/graphql`, pas sous `/api/v3`).
+pub(crate) fn graphql_url(host: &str) -> String {
+    if host == "github.com" {
+        "https://api.github.com/graphql".to_string()
+    } else if host.ends_with(".ghe.com") {
+        format!("https://api.{host}/graphql")
+    } else {
+        format!("https://{host}/api/graphql")
+    }
+}
+
 fn get(url: &str, token: &str) -> Result<http::Response, ForgeError> {
-    let authorization = format!("Bearer {token}");
-    http::get(
-        url,
-        &[
-            ("Authorization", &authorization),
-            ("Accept", "application/vnd.github+json"),
-            ("X-GitHub-Api-Version", "2022-11-28"),
-        ],
-    )
+    let headers = auth_headers(token);
+    let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    http::get(url, &refs)
 }
 
 /// Réponse de `GET /user/orgs` : un 403 (jeton sans `read:org`, SSO) donne une liste vide.
@@ -161,6 +175,13 @@ mod tests {
         assert_eq!(api_base("github.example.com"), "https://github.example.com/api/v3");
         assert_eq!(api_base("github.example.com:8443"), "https://github.example.com:8443/api/v3");
         assert_eq!(api_base("fabrikam.ghe.com"), "https://api.fabrikam.ghe.com");
+    }
+
+    #[test]
+    fn github_graphql_endpoint_for_dotcom_enterprise_and_ghe_com() {
+        assert_eq!(graphql_url("github.com"), "https://api.github.com/graphql");
+        assert_eq!(graphql_url("github.example.com:8443"), "https://github.example.com:8443/api/graphql");
+        assert_eq!(graphql_url("fabrikam.ghe.com"), "https://api.fabrikam.ghe.com/graphql");
     }
 
     #[test]

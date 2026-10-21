@@ -83,6 +83,13 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   et la réponse revient sur stdout ; l'IA n'exécute ni ne modifie rien.
 - **Comptes GitHub, GitLab et Azure DevOps**, plusieurs à la fois (GitHub Enterprise, GitLab auto-hébergé et
   Azure DevOps Server compris) ; **clonage** depuis la liste agrégée de vos dépôts (avec leur date de mise à jour, sauf Azure DevOps) ou depuis une URL.
+- **Pull requests de tous les comptes** (Fichier › Pull requests…, aussi dans la palette) : celles qui vous concernent
+  sur GitHub (auteur, assigné, mentionné ou relecteur demandé), GitLab (créées par vous, assignées, à relire) et
+  Azure DevOps (créées par vous ou à relire, dans chaque organisation du compte), dans une seule liste de la plus
+  récemment mise à jour à la plus ancienne, avec branches, brouillon et relecture demandée. Filtres : créées par moi,
+  à relire, par compte et texte. Le titre ouvre la pull request dans le navigateur ; « Ouvrir le dépôt » ouvre le clone
+  local qui a ce dépôt en remote (dépôts récents et liste de droite). Relecture à l'ouverture, toutes les 5 minutes tant
+  que la fenêtre est ouverte et par Actualiser ; l'erreur d'un compte s'affiche à sa place sans bloquer les autres.
 - Surveillance du dossier (rafraîchissement automatique), fetch automatique silencieux, palette **Ctrl+P**
   (dépôts, branches, commandes), journal des commandes git, thèmes clair/sombre.
 - **Interface en français ou en anglais** (Réglages › Apparence › Langue), changement immédiat sans redémarrer.
@@ -218,11 +225,13 @@ cargo test --workspace
 temporaires (y compris remotes locaux), API des forges sur des réponses JSON représentatives, et parcours
 d'interface de bout en bout (egui_kittest : indexer puis commiter, indexer un hunk, ouvrir un dépôt depuis la
 liste, créer une branche, résoudre un conflit, rebase interactif, stash/pop, annulation, menus, worktrees, bisect,
-Git Flow, LFS, commandes personnalisées).
+Git Flow, LFS, commandes personnalisées, pull requests de tous les comptes).
 Tests réels facultatifs (ignorés par défaut) : `cargo test -- --ignored` avec les variables décrites en tête
 des fichiers `tests/live*.rs`.
 
 ## Limites connues et suite
 
-- **À venir** : vue centralisée des pull requests de tous les comptes (l'architecture des forges est prête).
+- Vue des pull requests : Azure DevOps ne donne pas de date de mise à jour (la date affichée est celle de création) ;
+  500 résultats au plus par recherche GitHub et 1 000 par liste GitLab ou Azure DevOps ; les remotes des clones locaux
+  sont lus dans `.git/config` sans suivre `include.path` ni `url.<base>.insteadOf`.
 - Dépôts SHA-256 non pris en charge.

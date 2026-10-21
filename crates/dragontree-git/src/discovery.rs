@@ -170,17 +170,78 @@ fn read_gitdir_file(dotgit: &Path) -> Option<String> {
     content.lines().find_map(|l| l.strip_prefix("gitdir:")).map(|g| g.trim().to_string())
 }
 
-/// État de HEAD d'un dépôt trouvé, lu directement sur disque (suit un fichier `.git` `gitdir:`).
-pub fn repo_head(repo_path: &Path) -> Option<HeadState> {
+/// Dossier git d'une copie de travail : `.git`, ou celui que désigne un fichier `.git` `gitdir:` (worktree,
+/// sous-module).
+fn git_dir_of(repo_path: &Path) -> Option<PathBuf> {
     let dotgit = repo_path.join(".git");
     let meta = std::fs::symlink_metadata(&dotgit).ok()?;
-    let git_dir = if meta.is_dir() {
-        dotgit
-    } else {
-        let gd = PathBuf::from(read_gitdir_file(&dotgit)?);
-        if gd.is_absolute() { gd } else { repo_path.join(gd) }
+    if meta.is_dir() {
+        return Some(dotgit);
+    }
+    let gd = PathBuf::from(read_gitdir_file(&dotgit)?);
+    Some(if gd.is_absolute() { gd } else { repo_path.join(gd) })
+}
+
+/// État de HEAD d'un dépôt trouvé, lu directement sur disque (suit un fichier `.git` `gitdir:`).
+pub fn repo_head(repo_path: &Path) -> Option<HeadState> {
+    read_head(&git_dir_of(repo_path)?).ok()
+}
+
+/// URL des remotes d'un dépôt trouvé (`url` et `pushurl` des sections `[remote "…"]`), lues directement dans sa
+/// configuration, sans lancer git : celle du dépôt principal pour un worktree (fichier `commondir`). Les inclusions
+/// (`include.path`) et les réécritures (`url.<base>.insteadOf`) ne sont pas suivies. Vide si rien n'est lisible.
+pub fn remote_urls(repo_path: &Path) -> Vec<String> {
+    let Some(git_dir) = git_dir_of(repo_path) else { return Vec::new() };
+    let common_dir = match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(common) => {
+            let common = PathBuf::from(common.trim());
+            if common.is_absolute() { common } else { git_dir.join(common) }
+        }
+        Err(_) => git_dir,
     };
-    read_head(&git_dir).ok()
+    std::fs::read_to_string(common_dir.join("config")).map(|config| parse_remote_urls(&config)).unwrap_or_default()
+}
+
+/// `url` et `pushurl` des sections `[remote "…"]` d'un fichier de configuration git (noms de section et de clé sans
+/// casse, valeurs entre guillemets ou suivies d'un commentaire `#` / `;`).
+fn parse_remote_urls(config: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut in_remote = false;
+    for line in config.lines() {
+        let line = line.trim();
+        if let Some(header) = line.strip_prefix('[') {
+            // `[remote "origin"]`, ou l'ancienne forme `[remote.origin]`.
+            let section = header.split(|c: char| c.is_whitespace() || matches!(c, '.' | '"' | ']')).next();
+            in_remote = section.is_some_and(|s| s.eq_ignore_ascii_case("remote"));
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let key = key.trim();
+        if in_remote && (key.eq_ignore_ascii_case("url") || key.eq_ignore_ascii_case("pushurl")) {
+            let value = config_value(value);
+            if !value.is_empty() {
+                urls.push(value);
+            }
+        }
+    }
+    urls
+}
+
+/// Valeur d'une clé de configuration : parties entre guillemets (échappements `\"` et `\\`) et texte hors guillemets
+/// jusqu'à un commentaire.
+fn config_value(raw: &str) -> String {
+    let mut value = String::new();
+    let mut quoted = false;
+    let mut chars = raw.trim().chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => quoted = !quoted,
+            '\\' => value.extend(chars.next()),
+            '#' | ';' if !quoted => break,
+            c => value.push(c),
+        }
+    }
+    value.trim().to_string()
 }
 
 #[cfg(test)]
@@ -239,6 +300,49 @@ mod tests {
         mkrepo(d.path(), "Front/node_modules/lib");
         mkrepo(d.path(), "Back/BIN/x");
         assert_eq!(names(&run(d.path(), &ScanOptions::default())), vec!["app"]);
+    }
+
+    #[test]
+    fn remote_urls_are_read_from_the_remote_sections_only() {
+        let config = "[core]\n\turl = https://non.example/pas-un-remote\n\
+                      [remote \"origin\"]\n\turl = https://github.com/contoso/northwind.git\n\
+                      \tfetch = +refs/heads/*:refs/remotes/origin/*\n\
+                      \tpushurl = \"git@github.com:contoso/northwind.git\" ; push par SSH\n\
+                      [Remote \"amont\"]\n\tURL = https://gitlab.contoso.test/fabrikam/outils.git # commentaire\n\
+                      [url \"https://github.com/\"]\n\tinsteadOf = gh:\n\
+                      [remote.ancien]\n\turl=https://dev.azure.com/fabrikam/P/_git/api\n\
+                      [branch \"main\"]\n\tremote = origin\n";
+        assert_eq!(
+            parse_remote_urls(config),
+            [
+                "https://github.com/contoso/northwind.git",
+                "git@github.com:contoso/northwind.git",
+                "https://gitlab.contoso.test/fabrikam/outils.git",
+                "https://dev.azure.com/fabrikam/P/_git/api",
+            ]
+        );
+        assert_eq!(config_value(r#" "C:\\dépôts\\a \"b\"" "#), r#"C:\dépôts\a "b""#);
+        assert!(parse_remote_urls("[remote \"vide\"]\n\turl =\n").is_empty());
+    }
+
+    #[test]
+    fn remote_urls_of_a_worktree_come_from_the_main_repository() {
+        let d = tempfile::tempdir().unwrap();
+        let main = mkrepo(d.path(), "main");
+        std::fs::write(
+            main.join(".git/config"),
+            "[remote \"origin\"]\n\turl = https://github.com/contoso/northwind.git\n",
+        )
+        .unwrap();
+        // Worktree : `.git` désigne `main/.git/worktrees/wt`, dont `commondir` remonte au dépôt principal.
+        let wt_git = main.join(".git/worktrees/wt");
+        std::fs::create_dir_all(&wt_git).unwrap();
+        std::fs::write(wt_git.join("commondir"), "../..\n").unwrap();
+        let wt = mkdotgit_file(d.path(), "wt", "../main/.git/worktrees/wt");
+        assert_eq!(remote_urls(&main), ["https://github.com/contoso/northwind.git"]);
+        assert_eq!(remote_urls(&wt), ["https://github.com/contoso/northwind.git"]);
+        assert!(remote_urls(&d.path().join("absent")).is_empty());
+        assert!(remote_urls(&mkrepo(d.path(), "sans-config")).is_empty());
     }
 
     #[test]

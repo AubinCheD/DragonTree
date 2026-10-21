@@ -91,14 +91,6 @@ fn post(request: &JsonRequest, headers: &[(&str, &str)]) -> Result<http::Respons
 
 // --- GitHub -------------------------------------------------------------------------------------
 
-fn github_headers(token: &str) -> Vec<(&'static str, String)> {
-    vec![
-        ("Authorization", format!("Bearer {token}")),
-        ("Accept", "application/vnd.github+json".to_string()),
-        ("X-GitHub-Api-Version", "2022-11-28".to_string()),
-    ]
-}
-
 /// `POST /repos/{owner}/{repo}/pulls`.
 fn github_pull_request(host: &str, owner: &str, repo: &str, draft: &PullRequestDraft) -> JsonRequest {
     JsonRequest {
@@ -166,7 +158,7 @@ fn create_github(
     repo: &str,
     draft: &PullRequestDraft,
 ) -> Result<CreatedPullRequest, ForgeError> {
-    let headers = github_headers(token);
+    let headers = github::auth_headers(token);
     let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let created =
         parse_github_pull(&github_check(post(&github_pull_request(host, owner, repo, draft), &headers)?)?.body)?;
@@ -277,11 +269,6 @@ fn create_gitlab(
 
 // --- Azure DevOps -------------------------------------------------------------------------------
 
-/// Version de l'API : Azure DevOps Server 2019 plafonne à la 5.0.
-fn azure_api_version(host: &str) -> &'static str {
-    if azure::is_services_host(host) { "7.1" } else { "5.0" }
-}
-
 /// `POST {org}/{projet}/_apis/git/repositories/{dépôt}/pullrequests`.
 fn azure_pull_request(host: &str, org: &str, project: &str, repo: &str, draft: &PullRequestDraft) -> JsonRequest {
     let mut body = json!({
@@ -299,7 +286,7 @@ fn azure_pull_request(host: &str, org: &str, project: &str, repo: &str, draft: &
             org_base(host, org),
             encode_path(project),
             encode_path(repo),
-            azure_api_version(host)
+            azure::api_version(host)
         ),
         body,
     }
@@ -317,7 +304,7 @@ fn parse_azure_pull_request(body: &str) -> Result<u64, ForgeError> {
 }
 
 /// Page web d'une pull request d'Azure DevOps.
-fn azure_web_url(host: &str, org: &str, project: &str, repo: &str, number: u64) -> String {
+pub(crate) fn azure_web_url(host: &str, org: &str, project: &str, repo: &str, number: u64) -> String {
     format!("{}/{}/_git/{}/pullrequest/{number}", org_base(host, org), encode_path(project), encode_path(repo))
 }
 

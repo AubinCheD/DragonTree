@@ -203,7 +203,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 | # | Point | Origine | Priorité |
 |---|---|---|---|
-| N1 | Vue centralisée des pull requests de tous les comptes | demande initiale, « pour plus tard » | moyenne |
+| N1 | Vue centralisée des pull requests de tous les comptes (fait) | demande initiale, « pour plus tard » | moyenne |
 | N2 | Options de Fork : F2–F4, V3–V12, R2–R20, C2–C8, H1–H4 (fait, tout est ✅ dans les tableaux ci-dessus) | demande du 2026-10-17 | terminé |
 | N3 | Icône intégrée à l'exécutable (fait) | limite connue | basse |
 
@@ -363,26 +363,31 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 ### À implémenter
 
-#### N1 — Vue centralisée des pull requests
+#### N1 — Vue centralisée des pull requests (fait)
 
-- **Contexte :** cette vue fait partie de la demande initiale (« à noter pour plus tard ») : centraliser les PR de tous les comptes au même endroit. Le README l'annonce « à venir ».
-- **État :**
-  - le crate des forges sait vérifier un compte et lister les dépôts (`crates/dragontree-forges/src/lib.rs:36`), rien de plus ;
-  - aucune API de pull request n'est appelée et aucune vue n'existe ;
-  - les comptes multiples, les jetons et l'agent HTTP sont prêts.
+- **Contexte :** cette vue fait partie de la demande initiale (« à noter pour plus tard ») : centraliser les PR de tous les comptes au même endroit. Le README l'annonçait « à venir ». Décision du plan : vue en lecture, la création existant déjà (R18).
+- **État :** réalisé.
+  - Avant : le crate des forges savait vérifier un compte, lister les dépôts et créer une pull request (R18) ; aucune liste de pull requests n'était lue et aucune vue n'existait.
+  - Modèle `PullRequest` (`crates/dragontree-forges/src/open_pulls.rs`) : compte, dépôt (`RepoLocation`, d'où la forge, le nom affiché et la page web), numéro, titre, auteur, brouillon, relecteurs, « créée par moi », « relecture demandée », URL, date de mise à jour, branches source et cible. Seules les pull requests ouvertes sont lues : leur état se réduit au brouillon. `list_pull_requests(compte, jeton)` fusionne les recherches (une entrée par URL, indicateurs cumulés) et trie par date de mise à jour décroissante.
+  - GitHub : recherche GraphQL (`/graphql`, `/api/graphql` pour GitHub Enterprise Server, `api.<hôte>/graphql` pour `*.ghe.com`) `is:pr is:open archived:false involves:<login>` puis `review-requested:<login>` (que `involves:` ne couvre pas), triée par mise à jour, curseur suivi sur 10 pages de 50 : branches, brouillon et relecteurs viennent avec la recherche (la recherche REST demanderait un appel de plus par pull request). Des erreurs sans résultat (limite de débit) sont renvoyées avec leur message ; avec des résultats (organisation protégée par SSO), ignorées.
+  - GitLab : `merge_requests?scope=created_by_me`, `scope=assigned_to_me` et `scope=all&reviewer_username=<login>` (`state=opened`, triées par mise à jour). `scope=all` seul listerait toutes les merge requests visibles de l'instance : il n'est jamais demandé sans filtre, et les réponses du filtre de relecteur ne sont gardées que si l'utilisateur est relecteur (une instance qui ignorerait le paramètre ne fait donc rien apparaître de plus). Brouillon : `draft`, ou `work_in_progress` avant GitLab 14 ; projet lu dans `references.full`, sinon dans l'adresse de la page.
+  - Azure DevOps : dans chaque organisation du compte, identité de l'utilisateur par `connectionData`, puis `_apis/git/pullrequests?searchCriteria.status=active` avec `creatorId` et avec `reviewerId` (API 5.0 pour Azure DevOps Server). À relire : l'utilisateur n'a pas encore voté, ou une de ses équipes est relectrice. Une organisation qui échoue est ignorée si une autre répond, comme pour la liste des dépôts. L'API ne donne pas de date de mise à jour : la date de création en tient lieu.
+  - Fenêtre Fichier › **Pull requests…** (registre `Command::PullRequests`, aussi dans la palette ; `--window pullrequests`) : `crates/dragontree-app/src/pull_requests.rs`. Liste unique de tous les comptes, de la plus récemment mise à jour à la plus ancienne : titre (clic : la pull request dans le navigateur), marques « Brouillon » et « Relecture demandée », date ; dépôt (clic : sa page), numéro, auteur, branches. Filtres « Toutes / Créées par moi / À relire », par compte et texte (titre, dépôt, auteur, branche, numéro ; sans casse ni accents).
+  - Lien vers le dépôt local : les remotes des dépôts récents puis de ceux de la liste de droite sont lus sur disque en tâche de fond (`discovery::remote_urls` : `.git/config`, celui du dépôt principal pour un worktree), à chaque rafraîchissement et à la fin d'un scan ; « Ouvrir le dépôt » apparaît quand l'un d'eux désigne le dépôt de la pull request (`RepoLocation::same_repo` : même forge, hôte et noms sans la casse, formes HTTPS, SSH et `visualstudio.com` comprises).
+  - Rafraîchissement en arrière-plan : à l'ouverture, toutes les 5 minutes tant que la fenêtre est ouverte, pour un compte ajouté entre-temps, et par **Actualiser** (grisé pendant une lecture). Une tâche par compte, numéro de génération (une réponse d'un rafraîchissement précédent est ignorée) ; l'erreur d'un compte s'affiche à sa place sans empêcher les autres, une panique devient son erreur. Les jetons ne sont lus que dans ces tâches et ne figurent dans aucune erreur.
 - **À faire :**
-  1. Modèle `PullRequest` : forge, dépôt, titre, auteur, état, relecteurs, brouillon, URL, date.
-  2. Appels par forge :
-     - GitHub : recherche des PR ouvertes qui concernent l'utilisateur ;
-     - GitLab : `merge_requests?scope=all&state=opened` ;
-     - Azure DevOps : `_apis/git/pullrequests?searchCriteria.status=active` par organisation.
-  3. Vue agrégée avec des filtres (créées par moi, à relire, par compte), l'ouverture dans le navigateur et le lien vers le dépôt local s'il est cloné.
-  4. Rafraîchissement en arrière-plan.
-  5. La création de PR (R18) vient ensuite.
-- **Critère de fin :**
-  - tests d'analyse sur des réponses JSON représentatives de chaque forge, dans `crates/dragontree-forges/tests/fixtures/` ;
-  - test réel ignoré par défaut, comme `tests/live.rs` ;
-  - test d'interface de la liste.
+  1. Modèle `PullRequest` : forge, dépôt, titre, auteur, état, relecteurs, brouillon, URL, date (fait ; état : ouvertes seulement, brouillon ou non).
+  2. Appels par forge (fait) :
+     - GitHub : recherche des PR ouvertes qui concernent l'utilisateur (GraphQL, `involves:` et `review-requested:`) ;
+     - GitLab : `merge_requests?state=opened`, créées par l'utilisateur, assignées et à relire (`scope=all` filtré par relecteur) ;
+     - Azure DevOps : `_apis/git/pullrequests?searchCriteria.status=active` par organisation, créateur et relecteur.
+  3. Vue agrégée avec des filtres (créées par moi, à relire, par compte), l'ouverture dans le navigateur et le lien vers le dépôt local s'il est cloné (fait).
+  4. Rafraîchissement en arrière-plan (fait).
+  5. La création de PR (R18) vient ensuite (déjà faite).
+- **Critère de fin (atteint) :**
+  - tests d'analyse sur des réponses JSON représentatives de chaque forge, dans `crates/dragontree-forges/tests/fixtures/` (`github_pull_requests_search.json`, `gitlab_merge_requests.json`, `azure_pull_requests.json`) : tests de `crates/dragontree-forges/src/open_pulls.rs` (analyse, adresses des requêtes, pagination et curseur, fusion des recherches, filtre du relecteur GitLab, votes et équipes Azure DevOps, organisations en échec) ; `same_repo` et `web_url` dans `location.rs` ; `remote_urls` dans le moteur (`discovery.rs` et `crates/dragontree-git/tests/remote_urls.rs`, comparé à `git remote -v` pour un dépôt et son worktree) ;
+  - tests réels ignorés par défaut dans `crates/dragontree-forges/tests/live.rs` : `live_pull_requests_with_an_invalid_token_are_unauthorized` et `live_list_open_pull_requests` (variables `DRAGONTREE_LIVE_PRS_*`, n'affiche que des nombres) ;
+  - test d'interface de la liste : `crates/dragontree-app/tests/ui_pull_requests.rs` (comptes fictifs, réponses injectées par `StartOptions::pull_request_source`, sans réseau ni Gestionnaire d'identifiants : tri, erreur d'un compte, filtres, ouverture dans le navigateur, ouverture du clone local ; sans compte, la palette ouvre la fenêtre qui propose d'en ajouter).
 - **Priorité :** moyenne (reportée par l'utilisateur lui-même).
 
 #### N2 — Options de Fork à développer (fait)

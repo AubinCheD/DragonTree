@@ -1,0 +1,41 @@
+[
+  {
+    "id": 8841,
+    "iid": 7,
+    "project_id": 3,
+    "title": "Ajoute l'export CSV",
+    "description": "Export des factures",
+    "state": "opened",
+    "created_at": "2026-10-15T09:00:00.000Z",
+    "updated_at": "2026-10-19T14:30:00.123Z",
+    "target_branch": "main",
+    "source_branch": "feature/export-csv",
+    "author": { "id": 1, "username": "jsmith", "name": "Jean Smith" },
+    "assignees": [],
+    "reviewers": [
+      { "id": 2, "username": "asmith", "name": "Alice Smith" }
+    ],
+    "draft": false,
+    "work_in_progress": false,
+    "web_url": "https://gitlab.contoso.test/fabrikam/outils/cli/-/merge_requests/7",
+    "references": { "short": "!7", "relative": "!7", "full": "fabrikam/outils/cli!7" }
+  },
+  {
+    "id": 9120,
+    "iid": 12,
+    "project_id": 5,
+    "title": "Draft: Migre vers la nouvelle API",
+    "state": "opened",
+    "created_at": "2026-10-10T08:00:00.000Z",
+    "updated_at": "2026-10-20T07:05:00.000Z",
+    "target_branch": "develop",
+    "source_branch": "migration-api",
+    "author": { "id": 2, "username": "asmith", "name": "Alice Smith" },
+    "assignees": [],
+    "reviewers": [
+      { "id": 1, "username": "JSmith", "name": "Jean Smith" }
+    ],
+    "work_in_progress": true,
+    "web_url": "https://gitlab.contoso.test/northwind/api/-/merge_requests/12"
+  }
+]

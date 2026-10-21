@@ -14,6 +14,7 @@ use crate::clone::{CloneEvent, CloneWindow};
 use crate::closed_tabs::ClosedTabs;
 use crate::commands::{self, Command, CommandContext, Scope};
 use crate::jobs::Jobs;
+use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsWindow};
 use crate::repo::{RepoEvent, RepoTab};
 use crate::repo_list::{RepoListState, ScanEvent};
 use crate::settings::{Settings, SettingsFile, ThemeChoice, path_key};
@@ -47,6 +48,8 @@ pub enum AppEvent {
     AiChecked(Result<String, String>),
     /// Version de git lue pour « À propos » (numéro de la demande, version ou message d'erreur).
     GitVersion(u64, Result<String, String>),
+    /// Fenêtre « Pull requests » : pull requests d'un compte, copies locales.
+    PullRequests(PullRequestEvent),
 }
 
 /// Test de la CLI Claude Code lancé depuis les réglages.
@@ -67,6 +70,7 @@ pub enum AppAction {
     InitRepo,
     ShowClone,
     ShowAccounts,
+    ShowPullRequests,
     ShowSshKeys,
     ShowGitIdentity,
     ShowSettings,
@@ -196,6 +200,9 @@ pub struct StartOptions {
     pub window: Option<String>,
     /// Dossier `.ssh` de la fenêtre « Clés SSH » : réservé aux tests (et à `--profile`) ; `~/.ssh` par défaut.
     pub ssh_dir: Option<PathBuf>,
+    /// Lecture des pull requests d'un compte (fenêtre « Pull requests ») : réservée aux tests, qui répondent sans
+    /// réseau ni Gestionnaire d'identifiants ; `pull_requests::fetch_from_forge` par défaut.
+    pub pull_request_source: Option<PullRequestSource>,
 }
 
 pub enum TabKind {
@@ -221,6 +228,7 @@ pub struct DragonTreeApp {
     shortcuts_window: crate::help::ShortcutsWindow,
     about_window: crate::help::AboutWindow,
     clone: Option<CloneWindow>,
+    pull_requests: PullRequestsWindow,
     settings_window: Option<SettingsWindow>,
     log_open: bool,
     quick_open: Option<crate::quick_open::QuickOpen>,
@@ -312,6 +320,9 @@ impl DragonTreeApp {
             shortcuts_window: Default::default(),
             about_window: Default::default(),
             clone: None,
+            pull_requests: PullRequestsWindow::new(
+                start.pull_request_source.unwrap_or(crate::pull_requests::fetch_from_forge),
+            ),
             settings_window: None,
             log_open: false,
             quick_open: None,
@@ -356,6 +367,7 @@ impl DragonTreeApp {
             Some("ssh") => app.ssh_keys.show(),
             Some("settings") => app.settings_window = Some(SettingsWindow::new(&app.shared.settings)),
             Some("clone") => app.clone = Some(CloneWindow::new(&app.shared)),
+            Some("pullrequests") => app.pull_requests.show(),
             Some("log") => app.log_open = true,
             Some("quick") => app.quick_open = Some(crate::quick_open::QuickOpen::default()),
             _ => {}
@@ -565,7 +577,15 @@ impl DragonTreeApp {
                         }
                     }
                 }
-                AppEvent::Scan(ev) => self.repo_list.handle(ev, &mut self.shared),
+                AppEvent::Scan(ev) => {
+                    let finished = matches!(ev, ScanEvent::Finished(_));
+                    self.repo_list.handle(ev, &mut self.shared);
+                    // Nouvelle liste des dépôts : la fenêtre des pull requests relit leurs remotes.
+                    if finished {
+                        self.pull_requests.index_local_clones(&self.shared, &self.repo_list.repos);
+                    }
+                }
+                AppEvent::PullRequests(ev) => self.pull_requests.handle(ev, &self.shared.settings.accounts),
                 AppEvent::Forge(ev) => self.accounts.handle(ev, &mut self.shared),
                 AppEvent::Ssh(ev) => self.ssh_keys.handle(ev, &mut self.shared),
                 AppEvent::GitIdentity(ev) => self.git_identity.handle(ev, &mut self.shared),
@@ -671,6 +691,7 @@ impl DragonTreeApp {
                 }
             }
             AppAction::ShowAccounts => self.accounts.open = true,
+            AppAction::ShowPullRequests => self.pull_requests.show(),
             AppAction::ShowSshKeys => self.ssh_keys.show(),
             AppAction::ShowGitIdentity => self.git_identity.show(&self.shared),
             AppAction::ShowSettings => {
@@ -806,6 +827,7 @@ impl DragonTreeApp {
             Command::InitRepo => self.shared.actions.push(AppAction::InitRepo),
             Command::QuickOpen => self.shared.actions.push(AppAction::QuickOpen),
             Command::Accounts => self.shared.actions.push(AppAction::ShowAccounts),
+            Command::PullRequests => self.shared.actions.push(AppAction::ShowPullRequests),
             Command::SshKeys => self.shared.actions.push(AppAction::ShowSshKeys),
             Command::GitIdentity => self.shared.actions.push(AppAction::ShowGitIdentity),
             Command::KeyboardShortcuts => self.shortcuts_window.show(),
@@ -1167,6 +1189,7 @@ impl eframe::App for DragonTreeApp {
         {
             self.clone = None;
         }
+        self.pull_requests.ui(&ctx, &mut self.shared, &self.repo_list.repos, &p);
         if let Some(w) = &mut self.settings_window
             && !w.ui(&ctx, &mut self.shared, &p)
         {

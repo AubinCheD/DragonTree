@@ -36,6 +36,8 @@ pub enum Command {
     CloseTab,
     ReopenClosedTab,
     QuickOpen,
+    /// Fenêtre des pull requests ouvertes de tous les comptes (créées par l'utilisateur ou à relire).
+    PullRequests,
     Accounts,
     SshKeys,
     /// Identité git globale (nom et e-mail des commits).
@@ -218,6 +220,7 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             ),
             Separator,
             Cmd(Command::QuickOpen),
+            Cmd(Command::PullRequests),
             Cmd(Command::Accounts),
             Cmd(Command::SshKeys),
             Separator,
@@ -387,6 +390,7 @@ impl Command {
         Command::CloseTab,
         Command::ReopenClosedTab,
         Command::QuickOpen,
+        Command::PullRequests,
         Command::Accounts,
         Command::SshKeys,
         Command::GitIdentity,
@@ -480,6 +484,7 @@ impl Command {
             Command::CloseTab => tr!("Fermer l'onglet"),
             Command::ReopenClosedTab => tr!("Rouvrir l'onglet fermé"),
             Command::QuickOpen => tr!("Palette de commandes"),
+            Command::PullRequests => tr!("Pull requests…"),
             Command::Accounts => tr!("Comptes…"),
             Command::SshKeys => tr!("Clés SSH…"),
             Command::GitIdentity => tr!("Identité git…"),
@@ -601,6 +606,7 @@ impl Command {
             Command::CloseTab => icons::X,
             Command::ReopenClosedTab => icons::ARROW_COUNTER_CLOCKWISE,
             Command::QuickOpen => icons::MAGNIFYING_GLASS,
+            Command::PullRequests => icons::GIT_PULL_REQUEST,
             Command::Accounts => icons::USER_CIRCLE,
             Command::SshKeys => icons::KEY,
             Command::GitIdentity => icons::USER,
@@ -689,6 +695,7 @@ impl Command {
             | Command::CloseTab
             | Command::ReopenClosedTab
             | Command::QuickOpen
+            | Command::PullRequests
             | Command::Accounts
             | Command::SshKeys
             | Command::GitIdentity

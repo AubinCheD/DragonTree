@@ -89,6 +89,40 @@ impl RepoLocation {
         }
     }
 
+    /// Même dépôt de la même forge : hôte et noms comparés sans tenir compte de la casse, que les forges ignorent
+    /// (`Contoso/Northwind` et `contoso/northwind` désignent le même dépôt).
+    pub fn same_repo(&self, other: &RepoLocation) -> bool {
+        let eq = |a: &str, b: &str| a == b || a.to_lowercase() == b.to_lowercase();
+        match (self, other) {
+            (
+                RepoLocation::GitHub { host, owner, repo },
+                RepoLocation::GitHub { host: other_host, owner: other_owner, repo: other_repo },
+            ) => eq(host, other_host) && eq(owner, other_owner) && eq(repo, other_repo),
+            (
+                RepoLocation::GitLab { host, project },
+                RepoLocation::GitLab { host: other_host, project: other_project },
+            ) => eq(host, other_host) && eq(project, other_project),
+            (
+                RepoLocation::Azure { host, org, project, repo },
+                RepoLocation::Azure { host: other_host, org: other_org, project: other_project, repo: other_repo },
+            ) => eq(host, other_host) && eq(org, other_org) && eq(project, other_project) && eq(repo, other_repo),
+            _ => false,
+        }
+    }
+
+    /// Page web du dépôt.
+    pub fn web_url(&self) -> String {
+        match self {
+            RepoLocation::GitHub { host, owner, repo } => {
+                format!("https://{host}/{}/{}", encode_path(owner), encode_path(repo))
+            }
+            RepoLocation::GitLab { host, project } => format!("https://{host}/{}", encode_path(project)),
+            RepoLocation::Azure { host, org, project, repo } => {
+                format!("{}/{}/_git/{}", org_base(host, org), encode_path(project), encode_path(repo))
+            }
+        }
+    }
+
     /// Page web qui ouvre le formulaire de création d'une pull request (merge request) de `source` vers `target`.
     pub fn web_create_url(&self, source: &str, target: &str) -> String {
         match self {
@@ -349,6 +383,39 @@ mod tests {
         assert_eq!(
             azure("dev.azure.com", "fabrikam", "Mon Projet", "api").web_create_url("feature/x", "main"),
             "https://dev.azure.com/fabrikam/Mon%20Projet/_git/api/pullrequestcreate?sourceRef=feature%2Fx&targetRef=main"
+        );
+    }
+
+    #[test]
+    fn the_same_repository_is_recognised_whatever_the_case_and_the_remote_form() {
+        let pr = github("github.com", "contoso", "northwind");
+        for url in ["https://github.com/Contoso/Northwind.git", "git@github.com:contoso/NORTHWIND.git"] {
+            assert!(parse(url).unwrap().same_repo(&pr), "{url}");
+        }
+        assert!(!parse("https://github.com/contoso/northwind-api.git").unwrap().same_repo(&pr));
+        assert!(!parse("https://github.com/fabrikam/northwind.git").unwrap().same_repo(&pr));
+        // Même nom sur une autre forge ou un autre hôte : un autre dépôt.
+        assert!(!gitlab("gitlab.com", "contoso/northwind").same_repo(&pr));
+        assert!(!github("github.contoso.test", "contoso", "northwind").same_repo(&pr));
+
+        let azure_pr = azure("dev.azure.com", "fabrikam", "Mon Projet", "api");
+        assert!(parse("https://fabrikam.visualstudio.com/mon%20projet/_git/API").unwrap().same_repo(&azure_pr));
+        assert!(parse("git@ssh.dev.azure.com:v3/fabrikam/Mon%20Projet/api").unwrap().same_repo(&azure_pr));
+        assert!(!azure("dev.azure.com", "fabrikam", "Autre", "api").same_repo(&azure_pr));
+        assert!(
+            parse("git@gitlab.com:Fabrikam/Outils/CLI.git")
+                .unwrap()
+                .same_repo(&gitlab("gitlab.com", "fabrikam/outils/cli"))
+        );
+    }
+
+    #[test]
+    fn repository_web_pages() {
+        assert_eq!(github("github.com", "contoso", "northwind").web_url(), "https://github.com/contoso/northwind");
+        assert_eq!(gitlab("gitlab.contoso.test", "a/b c").web_url(), "https://gitlab.contoso.test/a/b%20c");
+        assert_eq!(
+            azure("dev.azure.com", "fabrikam", "Mon Projet", "api").web_url(),
+            "https://dev.azure.com/fabrikam/Mon%20Projet/_git/api"
         );
     }
 

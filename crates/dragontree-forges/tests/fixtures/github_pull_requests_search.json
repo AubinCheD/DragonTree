@@ -1,0 +1,58 @@
+{
+  "data": {
+    "search": {
+      "pageInfo": {
+        "hasNextPage": true,
+        "endCursor": "Y3Vyc29yOjQ="
+      },
+      "nodes": [
+        {
+          "number": 1347,
+          "title": "Ajoute la page d'accueil",
+          "url": "https://github.com/contoso/northwind/pull/1347",
+          "isDraft": false,
+          "updatedAt": "2026-10-20T08:15:00Z",
+          "headRefName": "feature/accueil",
+          "baseRefName": "main",
+          "author": { "login": "JSmith" },
+          "repository": { "name": "northwind", "owner": { "login": "contoso" } },
+          "reviewRequests": {
+            "nodes": [
+              { "requestedReviewer": { "login": "asmith" } },
+              { "requestedReviewer": { "name": "Relecteurs" } }
+            ]
+          }
+        },
+        {
+          "number": 42,
+          "title": "Corrige le calcul des remises",
+          "url": "https://github.com/fabrikam-labs/billing/pull/42",
+          "isDraft": true,
+          "updatedAt": "2026-10-18T16:40:12Z",
+          "headRefName": "fix/remises",
+          "baseRefName": "develop",
+          "author": { "login": "asmith" },
+          "repository": { "name": "billing", "owner": { "login": "fabrikam-labs" } },
+          "reviewRequests": {
+            "nodes": [
+              { "requestedReviewer": { "login": "jsmith" } }
+            ]
+          }
+        },
+        {},
+        {
+          "number": 7,
+          "title": "Met à jour les dépendances",
+          "url": "https://github.com/contoso/outils/pull/7",
+          "isDraft": false,
+          "updatedAt": "2026-09-01T12:00:00Z",
+          "headRefName": "deps",
+          "baseRefName": "main",
+          "author": null,
+          "repository": { "name": "outils", "owner": { "login": "contoso" } },
+          "reviewRequests": { "nodes": [] }
+        }
+      ]
+    }
+  }
+}

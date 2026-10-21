@@ -89,19 +89,19 @@ fn first_success<T>(attempts: impl IntoIterator<Item = Result<T, ForgeError>>) -
     Err(first_error.unwrap_or_else(|| ForgeError::InvalidInput(tr!("aucune organisation indiquée").into())))
 }
 
-/// Dépôts de toutes les organisations : les échecs sont ignorés si au moins une
+/// Résultats (dépôts, pull requests) de toutes les organisations : les échecs sont ignorés si au moins une
 /// organisation répond ; si toutes échouent, la première erreur est renvoyée.
-fn merge_org_results(
-    results: impl IntoIterator<Item = Result<Vec<RemoteRepo>, ForgeError>>,
-) -> Result<Vec<RemoteRepo>, ForgeError> {
-    let mut repos = Vec::new();
+pub(crate) fn merge_org_results<T>(
+    results: impl IntoIterator<Item = Result<Vec<T>, ForgeError>>,
+) -> Result<Vec<T>, ForgeError> {
+    let mut all = Vec::new();
     let mut first_error = None;
     let mut any_ok = false;
     for result in results {
         match result {
             Ok(found) => {
                 any_ok = true;
-                repos.extend(found);
+                all.extend(found);
             }
             Err(e) => {
                 first_error.get_or_insert(e);
@@ -110,12 +110,12 @@ fn merge_org_results(
     }
     match first_error {
         Some(e) if !any_ok => Err(e),
-        _ => Ok(repos),
+        _ => Ok(all),
     }
 }
 
 /// GET authentifié ; renvoie le corps JSON.
-fn get(url: &str, token: &str) -> Result<String, ForgeError> {
+pub(crate) fn get(url: &str, token: &str) -> Result<String, ForgeError> {
     let authorization = basic_auth_value("", token);
     let response = http::get(
         url,
@@ -146,17 +146,25 @@ pub(crate) fn check_response(status: u16, body: &str) -> Result<(), ForgeError> 
 
 /// `https://dev.azure.com/<org>` (Services) ou `https://<hôte>/<collection>` (Server).
 pub(crate) fn org_base(host: &str, org: &str) -> String {
-    let host = if is_services_host(host) { SERVICES_HOST } else { host };
-    format!("https://{host}/{}", encode_path(org))
+    format!("https://{}/{}", web_host(host), encode_path(org))
+}
+
+/// Version de l'API : Azure DevOps Server 2019 plafonne à la 5.0.
+pub(crate) fn api_version(host: &str) -> &'static str {
+    if is_services_host(host) { "7.1" } else { "5.0" }
+}
+
+/// Hôte web canonique : `dev.azure.com` pour Azure DevOps Services (`<org>.visualstudio.com` compris), l'hôte du
+/// serveur sinon.
+pub(crate) fn web_host(host: &str) -> &str {
+    if is_services_host(host) { SERVICES_HOST } else { host }
 }
 
 fn repositories_url(host: &str, org: &str) -> String {
-    // Azure DevOps Server 2019 plafonne à l'API 5.0.
-    let version = if is_services_host(host) { "7.1" } else { "5.0" };
-    format!("{}/_apis/git/repositories?api-version={version}", org_base(host, org))
+    format!("{}/_apis/git/repositories?api-version={}", org_base(host, org), api_version(host))
 }
 
-fn clean_orgs(orgs: &[String]) -> Vec<&str> {
+pub(crate) fn clean_orgs(orgs: &[String]) -> Vec<&str> {
     orgs.iter().map(|o| o.trim().trim_matches('/')).filter(|o| !o.is_empty()).collect()
 }
 
@@ -279,16 +287,28 @@ fn parse_accounts(body: &str) -> Result<Vec<String>, ForgeError> {
     Ok(list.value.into_iter().filter_map(|a| a.account_name).filter(|n| !n.trim().is_empty()).collect())
 }
 
-fn parse_connection_data(body: &str) -> Result<VerifiedUser, ForgeError> {
+/// Utilisateur authentifié de `connectionData` ; un appel anonyme (jeton refusé en silence) est `Unauthorized`.
+fn authenticated_user(body: &str) -> Result<AzIdentity, ForgeError> {
     let data: AzConnectionData = serde_json::from_str(body).map_err(parse_error)?;
     let user = data
         .authenticated_user
         .ok_or_else(|| ForgeError::Parse(tr!("connectionData sans authenticatedUser").into()))?;
     let anonymous = user.id.as_deref() == Some(ANONYMOUS_ID)
         || user.descriptor.as_deref().is_some_and(|d| d.starts_with("System:PublicAccess"));
-    if anonymous {
-        return Err(ForgeError::Unauthorized);
-    }
+    if anonymous { Err(ForgeError::Unauthorized) } else { Ok(user) }
+}
+
+/// Identité (GUID) de l'utilisateur du jeton dans une organisation, d'après `connectionData` : celle des critères
+/// `creatorId` et `reviewerId` des pull requests.
+pub(crate) fn authenticated_user_id(body: &str) -> Result<String, ForgeError> {
+    authenticated_user(body)?
+        .id
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| ForgeError::Parse(tr!("connectionData sans identifiant d'utilisateur").into()))
+}
+
+fn parse_connection_data(body: &str) -> Result<VerifiedUser, ForgeError> {
+    let user = authenticated_user(body)?;
     let display_name = user.provider_display_name.unwrap_or_default();
     let email = user
         .properties
@@ -350,7 +370,7 @@ mod tests {
 
     #[test]
     fn merge_org_results_returns_first_error_when_all_fail() {
-        let all_failed =
+        let all_failed: Result<Vec<RemoteRepo>, _> =
             merge_org_results([Err(ForgeError::Network("délai dépassé".into())), Err(ForgeError::Unauthorized)]);
         assert!(matches!(all_failed, Err(ForgeError::Network(_))));
         let none: Vec<Result<Vec<RemoteRepo>, ForgeError>> = Vec::new();
@@ -448,6 +468,14 @@ mod tests {
             "providerDisplayName":"Anonymous","isActive":true,"properties":{},
             "resourceVersion":2,"metaTypeId":255},"deploymentType":"hosted"}"#;
         assert!(matches!(parse_connection_data(anonymous), Err(ForgeError::Unauthorized)));
+        assert!(matches!(authenticated_user_id(anonymous), Err(ForgeError::Unauthorized)));
+    }
+
+    #[test]
+    fn azure_connection_data_gives_the_identity_of_the_token_user() {
+        assert_eq!(authenticated_user_id(CONNECTION_DATA).unwrap(), "5d1c7a2e-3b4f-4c6d-8e9f-0a1b2c3d4e5f");
+        let without_id = r#"{"authenticatedUser":{"providerDisplayName":"Camille Martin"}}"#;
+        assert!(matches!(authenticated_user_id(without_id), Err(ForgeError::Parse(_))));
     }
 
     #[test]
