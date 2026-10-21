@@ -6,7 +6,7 @@
 
 **Objectif :** traiter tous les points encore ouverts des sections B, T, N, RV et P de `docs/feuille-de-route.md`
 (« Reste à faire » et « Détail des points restants ») : B2, B3, B4, B7, T3, T4, T5 (a à d), T6, N1, N3, RV1 à RV5,
-P1 à P4. Les pistes L1 à L6 ne font pas partie de la demande.
+P1 à P4, et les pistes L1 à L6 (ajoutées à la demande de l'utilisateur le 2026-10-21).
 
 **Spécification :** `docs/feuille-de-route.md`, section **Détail des points restants** : pour chaque point, les
 paragraphes « État », « À faire » et « Critère de fin » sont les exigences. En cas de conflit, la feuille de route
@@ -199,7 +199,31 @@ Spécification : feuille de route, P3 (20 passages sur 20 ; corriger les attente
 Spécification : feuille de route, P4 (`AttachConsole(ATTACH_PARENT_PROCESS)` en build release avant d'écrire ;
 tester ce qui est testable : construction, appel sans console). **Commit :** `P4 — …`
 
-### Task 29: Synthèse de la documentation
-README (fonctionnalités, limites, nombre de tests) et feuille de route (« Reste à faire » : seuls L1 à L6 et ce qui
-aurait été écarté restent ouverts ; paragraphe daté de la branche `points-restants`). **Commit :** `Met à jour le
+### Task 29: L1 — Dépôts SHA-256
+Spécification : feuille de route, L1. Au minimum le critère de fin (erreur explicite à l'ouverture d'un dépôt
+`--object-format=sha256`, sans panique, test d'intégration) ; la prise en charge des identifiants de 32 octets
+seulement si elle reste raisonnable (sinon la documenter comme limite). **Commit :** `L1 — …`
+
+### Task 30: L2 — Éditeur de conflits pour les fichiers Windows-1252
+Spécification : feuille de route, L2. **Commit :** `L2 — …`
+
+### Task 31: L3 — Réglages illisibles au démarrage
+Spécification : feuille de route, L3 (retenter la lecture plus tard ; prévenir à chaque modification non
+enregistrée ; ne jamais écraser un fichier non relu). **Commit :** `L3 — …`
+
+### Task 32: L4 — Échec d'authentification du fetch automatique visible en permanence
+Spécification : feuille de route, L4 (indicateur persistant dans l'onglet, effacé au prochain succès).
+**Commit :** `L4 — …`
+
+### Task 33: L5 — Amend d'un commit déjà poussé avec « Pousser après »
+Spécification : feuille de route, L5 (dialogue de confirmation proposant un push forcé `--force-with-lease`).
+**Commit :** `L5 — …`
+
+### Task 34: L6 — Indexation partielle avec l'option « Espaces »
+Spécification : feuille de route, L6 (le diff affiché ignore les espaces, le patch d'indexation est construit sur le
+diff complet). **Commit :** `L6 — …`
+
+### Task 35: Synthèse de la documentation
+README (fonctionnalités, limites, nombre de tests) et feuille de route (« Reste à faire » : seul ce qui aurait été
+écarté ou documenté comme limite reste ouvert ; paragraphe daté de la branche `points-restants`). **Commit :** `Met à jour le
 README et la feuille de route après les points restants`
