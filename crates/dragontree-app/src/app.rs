@@ -271,6 +271,8 @@ pub struct DragonTreeApp {
     closed_tabs: ClosedTabs,
     workspace_dialog: crate::workspace_dialog::WorkspaceDialog,
     closing: Closing,
+    /// Première instance du profil (RV4b, posée par `main`) : reçoit les dépôts des instances lancées ensuite.
+    instance: Option<crate::single_instance::PrimaryInstance>,
 }
 
 impl DragonTreeApp {
@@ -364,6 +366,7 @@ impl DragonTreeApp {
             closed_tabs: ClosedTabs::default(),
             workspace_dialog: Default::default(),
             closing: Closing::No,
+            instance: None,
         };
 
         // Onglets : ceux de la ligne de commande, sinon ceux de la dernière session.
@@ -400,6 +403,31 @@ impl DragonTreeApp {
         }
         app.repo_list.start_scan(&app.shared);
         app
+    }
+
+    /// Instance unique du profil (RV4b) : gardée jusqu'à la fin de l'application (son mutex désigne la première
+    /// instance) ; ses messages sont lus à chaque image. Posée par `main`, jamais par `new` : les tests d'interface
+    /// créent plusieurs applications sur leurs profils.
+    pub fn set_instance(&mut self, instance: crate::single_instance::PrimaryInstance) {
+        instance.wake(self.shared.ctx.clone());
+        self.instance = Some(instance);
+    }
+
+    /// Dépôts transmis par les instances lancées ensuite sur le même profil : ouverts dans des onglets (ou l'onglet
+    /// existant activé), et la fenêtre passe au premier plan, rendue si elle était réduite. Appelée par `logic`, qui
+    /// tourne aussi fenêtre réduite.
+    fn receive_forwarded(&mut self, ctx: &egui::Context) {
+        let Some(instance) = &self.instance else { return };
+        let messages = instance.take_messages();
+        if messages.is_empty() {
+            return;
+        }
+        let paths = messages.into_iter().flat_map(|m| m.open);
+        self.shared.actions.extend(paths.map(AppAction::OpenRepo));
+        if ctx.input(|i| i.viewport().minimized == Some(true)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
 
     fn alloc_tab_id(&mut self) -> TabId {
@@ -1235,6 +1263,7 @@ impl eframe::App for DragonTreeApp {
     /// Appelée à chaque image, avant `ui`, et seule quand la fenêtre est réduite.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.intercept_close(ctx);
+        self.receive_forwarded(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

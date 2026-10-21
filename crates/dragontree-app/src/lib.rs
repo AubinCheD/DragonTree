@@ -27,6 +27,7 @@ pub mod repo;
 pub mod repo_list;
 pub mod settings;
 pub mod settings_ui;
+pub mod single_instance;
 pub mod ssh_keys;
 pub mod tabbar;
 pub mod terminal;

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dragontree_app::settings::ThemeChoice;
+use dragontree_app::single_instance::{self, Forwarded, PrimaryInstance, Startup};
 use dragontree_app::{DragonTreeApp, StartOptions};
 use dragontree_i18n::{Lang, tr};
 
@@ -66,6 +67,28 @@ fn parse_args() -> Result<StartOptions, String> {
     Ok(o)
 }
 
+/// Instance unique par profil (RV4b, voir `single_instance`) : si une instance tourne déjà sur ce profil (celui de
+/// `--profile`, sinon `%APPDATA%\DragonTree`), elle reçoit les dépôts de la ligne de commande et passe au premier
+/// plan, et ce processus s'arrête. Une capture d'écran (`--screenshot`) est toujours une instance à part. `None` :
+/// démarrer sans instance unique (capture d'écran, ou échec, signalé sur la sortie d'erreur).
+fn claim_instance(start: &StartOptions) -> Option<PrimaryInstance> {
+    if start.screenshot.is_some() {
+        return None;
+    }
+    let profile = start.profile_dir.clone().unwrap_or_else(dragontree_app::settings::config_dir);
+    let key = single_instance::profile_key(&profile);
+    // Chemins absolus : le dossier courant de l'instance déjà ouverte n'est pas celui-ci.
+    let open = start.open.iter().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone())).collect();
+    match single_instance::start(&key, &Forwarded { open }, Duration::from_secs(10)) {
+        Startup::Primary(instance) => Some(instance),
+        Startup::Forwarded => std::process::exit(0),
+        Startup::Alone(e) => {
+            eprintln!("DragonTree : instance unique impossible ({e}), démarrage sans");
+            None
+        }
+    }
+}
+
 fn main() -> eframe::Result {
     // Messages de la ligne de commande dans la langue de Windows (les réglages ne sont pas encore lus).
     dragontree_i18n::set_lang(Lang::system());
@@ -76,6 +99,7 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+    let instance = claim_instance(&start);
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("DragonTree")
         .with_inner_size([1440.0, 900.0])
@@ -93,5 +117,15 @@ fn main() -> eframe::Result {
         persistence_path: start.profile_dir.as_ref().map(|d| d.join("window.ron")),
         ..Default::default()
     };
-    eframe::run_native("DragonTree", options, Box::new(move |cc| Ok(Box::new(DragonTreeApp::new(cc, start)))))
+    eframe::run_native(
+        "DragonTree",
+        options,
+        Box::new(move |cc| {
+            let mut app = DragonTreeApp::new(cc, start);
+            if let Some(instance) = instance {
+                app.set_instance(instance);
+            }
+            Ok(Box::new(app))
+        }),
+    )
 }
