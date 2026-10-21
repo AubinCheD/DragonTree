@@ -108,13 +108,13 @@ pub struct CloneWindow {
     done: bool,
 }
 
-/// Nom de dossier déduit d'une URL (`…/repo.git` → `repo`).
 /// Date de mise à jour d'un dépôt pour la liste : relative si récente, absolue sinon ; `None` si la forge n'en donne
 /// pas (Azure DevOps).
 fn updated_label(r: &RemoteRepo, now: i64) -> Option<String> {
     r.updated_timestamp().map(|ts| widgets::format_time(ts, now))
 }
 
+/// Nom de dossier déduit d'une URL (`…/repo.git` → `repo`).
 pub fn folder_from_url(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
     let last = trimmed.rsplit(['/', ':']).next().unwrap_or("");
@@ -399,23 +399,28 @@ impl CloneWindow {
                             p.weak,
                         );
                     }
-                    painter.text(
-                        rect.left_top() + egui::vec2(32.0, 11.0),
-                        egui::Align2::LEFT_CENTER,
-                        &r.name,
-                        egui::FontId::new(13.5, crate::theme::bold_family()),
-                        p.text,
-                    );
-                    // Date de mise à jour, à droite de la première ligne (à gauche du cadenas).
+                    // Date de mise à jour, à droite de la première ligne (à gauche du cadenas) ; le nom, rogné, ne la
+                    // recouvre jamais.
+                    let mut name_right = rect.right() - 34.0;
                     if let Some(when) = updated_label(r, now) {
-                        painter.text(
+                        let date_rect = painter.text(
                             rect.right_top() + egui::vec2(-34.0, 11.0),
                             egui::Align2::RIGHT_CENTER,
                             when,
                             egui::FontId::proportional(11.5),
                             p.weak,
                         );
+                        name_right = date_rect.left() - 8.0;
                     }
+                    let name_clip =
+                        egui::Rect::from_min_max(rect.min, egui::pos2(name_right.max(rect.left()), rect.max.y));
+                    painter.with_clip_rect(name_clip).text(
+                        rect.left_top() + egui::vec2(32.0, 11.0),
+                        egui::Align2::LEFT_CENTER,
+                        &r.name,
+                        egui::FontId::new(13.5, crate::theme::bold_family()),
+                        p.text,
+                    );
                     let mut sub = r.namespace.clone();
                     if let Some(d) = r.description.as_ref().filter(|d| !d.is_empty()) {
                         sub.push_str(&format!(" — {d}"));
@@ -589,7 +594,7 @@ mod tests {
         assert_eq!(updated_label(&repo(Some("2011-01-26T19:06:43Z")), now).as_deref(), Some("il y a 3 h"));
         assert_eq!(updated_label(&repo(Some("2011-01-26T19:06:43.841Z")), now).as_deref(), Some("il y a 3 h"));
         let old = updated_label(&repo(Some("2011-01-26T19:06:43Z")), now + 30 * 86_400).unwrap();
-        assert!(old.contains("2011") || old.contains("26"), "date absolue : {old}");
+        assert!(old.contains("2011"), "date absolue : {old}");
         assert_eq!(updated_label(&repo(None), now), None, "Azure DevOps : pas de date");
     }
 

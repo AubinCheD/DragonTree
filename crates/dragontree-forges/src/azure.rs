@@ -469,7 +469,6 @@ mod tests {
         assert_eq!(fiber.description, None);
         // Pas de date par dépôt : le `lastUpdateTime` de la fixture est celui du projet, on ne l'utilise pas.
         assert_eq!(fiber.updated_at, None);
-        assert_eq!(fiber.updated_at, None);
 
         let docs = &repos[1];
         assert_eq!(docs.namespace, "fabrikam/OpenDocs");
