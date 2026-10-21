@@ -27,9 +27,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
     repliables (← / →, Tout replier), révéler HEAD, tri topologique ou par date, disposition horizontale ou verticale.
   - **Colonne du graphe** redimensionnable à la poignée de l'en-tête (largeur mémorisée ; double-clic : automatique).
   - **Glisser une branche** sur une autre pour la fusionner ou la rebaser.
-  - **Glisser des fichiers** entre « Non indexés » et « Indexés » pour les indexer ou les désindexer (la sélection suit).
   - **Comparer** deux commits, deux branches, ou un commit avec les modifications locales.
-- **Changements locaux** : fichiers non indexés / indexés / en conflit, indexation par fichier, par **hunk** ou
+- **Changements locaux** : fichiers non indexés / indexés / en conflit, indexation par fichier (aussi en glissant les fichiers, sélection comprise, entre « Non indexés » et « Indexés »), par **hunk** ou
   par **ligne** (y compris fichiers non suivis et CRLF), annulation de modifications, « Ignorer » dans le
   `.gitignore`, dialogue « Ignorer… » (motif libre ou proposé, `.gitignore` racine ou de dossier ou `.git/info/exclude`,
   aperçu des fichiers concernés), zone de commit (Amend, pousser après le commit, Ctrl+Entrée) avec indicateur de

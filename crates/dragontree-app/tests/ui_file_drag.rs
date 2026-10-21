@@ -119,7 +119,16 @@ fn dropping_a_file_back_on_its_own_list_changes_nothing() {
     let mut h = open(tmp.path(), &repo);
 
     let (from, to) = (row_center(&h, "a.txt"), row_center(&h, "c.txt"));
-    drag(&mut h, from, to);
-    h.run_steps(5);
-    assert!(staged(&repo).is_empty());
+    // Le glisser a bien lieu (le fantôme suit le pointeur) mais le dépôt sur sa propre liste ne fait rien.
+    pointer_at(&mut h, from, Some(true));
+    for i in 1..=4 {
+        pointer_at(&mut h, from + (to - from) * (i as f32 / 4.0), None);
+    }
+    assert!(h.query_by_label_contains("1 fichier").is_some(), "le fantôme du glisser est affiché");
+    pointer_at(&mut h, to, Some(false));
+    h.remove_cursor();
+    assert!(
+        !becomes_true(&mut h, std::time::Duration::from_secs(2), || !staged(&repo).is_empty()),
+        "rien ne doit être indexé"
+    );
 }
