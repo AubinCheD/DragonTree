@@ -117,7 +117,10 @@ cargo build --release
 Avec Visual Studio Build Tools (« Développement Desktop en C++ ») et `rustup default stable-msvc`, le script est
 inutile : supprimez `.cargo\config.toml` puis `cargo build --release`.
 
-L'exécutable est `target\release\dragontree.exe` (environ 16 Mo, aucune dépendance à installer).
+L'exécutable est `target\release\dragontree.exe` (environ 16 Mo, aucune dépendance à installer). Il porte l'icône
+`assets/dragontree.ico`, intégrée par `crates/dragontree-app/build.rs` sans compilateur de ressources (même chose
+avec les deux toolchains). Elle est dessinée en code (`crates/dragontree-app/src/app_icon.rs`) ; après un changement
+du dessin, `cargo run -p dragontree-app --example app_icon` régénère le fichier.
 
 ## Utilisation
 
@@ -222,5 +225,4 @@ des fichiers `tests/live*.rs`.
 ## Limites connues et suite
 
 - **À venir** : vue centralisée des pull requests de tous les comptes (l'architecture des forges est prête).
-- Non gérés pour l'instant : icône intégrée à l'exécutable.
 - Dépôts SHA-256 non pris en charge.

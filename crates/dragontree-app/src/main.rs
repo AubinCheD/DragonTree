@@ -66,41 +66,6 @@ fn parse_args() -> Result<StartOptions, String> {
     Ok(o)
 }
 
-/// Icône de fenêtre dessinée en code : trois nœuds reliés sur un disque bleu.
-fn window_icon() -> egui::IconData {
-    const N: usize = 64;
-    let mut rgba = vec![0u8; N * N * 4];
-    let blend = |px: &mut [u8], c: [u8; 3], a: f32| {
-        let a = a.clamp(0.0, 1.0);
-        for k in 0..3 {
-            px[k] = (px[k] as f32 * (1.0 - a) + c[k] as f32 * a) as u8;
-        }
-        px[3] = (px[3] as f32 + (255.0 - px[3] as f32) * a) as u8;
-    };
-    let seg_dist = |p: (f32, f32), a: (f32, f32), b: (f32, f32)| {
-        let (vx, vy) = (b.0 - a.0, b.1 - a.1);
-        let t = (((p.0 - a.0) * vx + (p.1 - a.1) * vy) / (vx * vx + vy * vy)).clamp(0.0, 1.0);
-        ((p.0 - a.0 - t * vx).powi(2) + (p.1 - a.1 - t * vy).powi(2)).sqrt()
-    };
-    let (bottom, left, right, mid) = ((32.0, 50.0), (20.0, 14.0), (44.0, 14.0), (32.0, 34.0));
-    for y in 0..N {
-        for x in 0..N {
-            let p = (x as f32 + 0.5, y as f32 + 0.5);
-            let i = (y * N + x) * 4;
-            let px = &mut rgba[i..i + 4];
-            let d = ((p.0 - 32.0).powi(2) + (p.1 - 32.0).powi(2)).sqrt();
-            blend(px, [0x1F, 0x6F, 0xEB], 31.5 - d);
-            let line = seg_dist(p, bottom, mid).min(seg_dist(p, mid, left)).min(seg_dist(p, mid, right));
-            blend(px, [255, 255, 255], 3.2 - line);
-            for c in [bottom, left, right] {
-                let dc = ((p.0 - c.0).powi(2) + (p.1 - c.1).powi(2)).sqrt();
-                blend(px, [255, 255, 255], 6.5 - dc);
-            }
-        }
-    }
-    egui::IconData { rgba, width: N as u32, height: N as u32 }
-}
-
 fn main() -> eframe::Result {
     // Messages de la ligne de commande dans la langue de Windows (les réglages ne sont pas encore lus).
     dragontree_i18n::set_lang(Lang::system());
@@ -115,7 +80,8 @@ fn main() -> eframe::Result {
         .with_title("DragonTree")
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([820.0, 520.0])
-        .with_icon(Arc::new(window_icon()));
+        // Même dessin que l'icône de l'exécutable (`assets/dragontree.ico`, intégrée par build.rs).
+        .with_icon(Arc::new(dragontree_app::app_icon::window_icon()));
     if start.screenshot.is_some() {
         // Taille fixe pour des captures comparables.
         viewport = viewport.with_inner_size([1440.0, 900.0]);

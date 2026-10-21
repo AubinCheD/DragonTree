@@ -205,7 +205,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 |---|---|---|---|
 | N1 | Vue centralisée des pull requests de tous les comptes | demande initiale, « pour plus tard » | moyenne |
 | N2 | Options de Fork : F2–F4, V3–V12, R2–R20, C2–C8, H1–H4 (fait, tout est ✅ dans les tableaux ci-dessus) | demande du 2026-10-17 | terminé |
-| N3 | Icône intégrée à l'exécutable | limite connue | basse |
+| N3 | Icône intégrée à l'exécutable (fait) | limite connue | basse |
 
 ### Constats de revue
 
@@ -395,17 +395,19 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin :** les tests de l'option passent, et l'option passe à ✅ dans les tableaux.
 - **Priorité :** terminé.
 
-#### N3 — Icône intégrée à l'exécutable
+#### N3 — Icône intégrée à l'exécutable (fait)
 
 - **Contexte :** limite citée dans le README et dans le bilan du 2026-10-16.
-- **État :**
-  - seule l'icône de fenêtre existe, dessinée en code (`crates/dragontree-app/src/main.rs:69-102`) ;
-  - `dragontree.exe` n'a pas de ressource d'icône ;
-  - `scripts/setup-toolchain.ps1` n'extrait que `as.exe` et `dlltool.exe` des binutils MSYS2.
+- **État :** réalisé.
+  - Avant : seule l'icône de fenêtre existait, dessinée en code dans `main.rs`, et `dragontree.exe` n'avait pas de ressource d'icône.
+  - Le dessin est dans `crates/dragontree-app/src/app_icon.rs` : à toute taille (grille de 64 unités, bords lissés sur un pixel, composition sans frange sombre), pour l'icône de fenêtre (64 px) et pour `assets/dragontree.ico` (16, 24, 32, 48 et 64 px en bitmaps 32 bits, 256 px en PNG), versionné. `cargo run -p dragontree-app --example app_icon` le régénère ; un test vérifie qu'il correspond au dessin.
+  - `crates/dragontree-app/build.rs` intègre le `.ico` sans outil externe ni nouvelle dépendance : il écrit l'objet COFF qu'aurait produit `cvtres` (`.rsrc$01` : répertoire des ressources RT_ICON et RT_GROUP_ICON, `.rsrc$02` : les images, adresses relogées en ADDR32NB) et le passe à l'éditeur de liens du binaire (`cargo:rustc-link-arg-bins`). Le même objet convient à ld (GNU) et à link.exe (MSVC) ; `scripts/setup-toolchain.ps1` reste inchangé (pas de `windres.exe`).
 - **À faire :**
-  1. Ajouter un `.ico` dans `assets/`.
-  2. Ajouter un `build.rs` qui intègre la ressource. Avec la toolchain GNU, il faut aussi extraire `windres.exe`, ou utiliser une crate qui n'a besoin d'aucun outil externe.
-- **Critère de fin :** l'Explorateur affiche l'icône de `target\release\dragontree.exe`, avec les toolchains GNU et MSVC.
+  1. Ajouter un `.ico` dans `assets/` (fait).
+  2. Ajouter un `build.rs` qui intègre la ressource. Avec la toolchain GNU, il faut aussi extraire `windres.exe`, ou utiliser une crate qui n'a besoin d'aucun outil externe (fait : objet écrit par `build.rs`, sans outil).
+- **Critère de fin (atteint) :** l'Explorateur affiche l'icône de `target\release\dragontree.exe`, avec les toolchains GNU et MSVC.
+  - Test `the_executable_carries_the_application_icon_at_every_size` (`crates/dragontree-app/tests/exe_icon.rs`) : il lit les ressources PE de l'exécutable construit (groupe d'icônes, six images identiques à celles du `.ico`), quelle que soit la toolchain qui lance les tests.
+  - Vérifié le 2026-10-21 avec la toolchain GNU (ld 2.44) : icône extraite par le shell Windows (`ExtractAssociatedIcon`) en debug et en release. Côté MSVC, l'objet a été lié par `rust-lld -flavor link` (éditeur de liens compatible link.exe) : ressources identiques ; la toolchain MSVC elle-même n'est pas installée sur le poste de développement.
 - **Priorité :** basse.
 
 ### Bugs à corriger
@@ -565,7 +567,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   1. Ajouter `LICENSE`.
   2. Vérifier le nom (domaines, marques, winget, Scoop).
   3. (fait le 2026-10-20) Nombre de tests du README à jour.
-  4. Ajouter l'icône (N3).
+  4. Ajouter l'icône (N3, fait).
 - **Critère de fin :** fichier `LICENSE` présent ; résultat des vérifications du nom consigné.
 - **Priorité :** moyenne.
 
