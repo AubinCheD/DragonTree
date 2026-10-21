@@ -174,7 +174,7 @@ Activation et licence, mises à jour automatiques, modèle « Lean Branching » 
 
 ## Reste à faire
 
-Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2 et B3 (branche `points-restants`).
+Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2, B3 et B4 (branche `points-restants`).
 
 ### Bugs à corriger
 
@@ -183,7 +183,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | B1 | Ctrl+1 (« Modifications locales ») jamais atteint (corrigé : Affichage › Modifications locales) | revue finale, mineur n°19 | basse |
 | B2 | Dossier `.git/dragontree-rebase` laissé après un rebase arrêté puis terminé (corrigé) | revue finale, mineur n°20 | basse |
 | B3 | Décocher « Amend » trop vite écrase le message restauré (corrigé) | revue finale, mineur n°13 | basse |
-| B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié | revue finale, mineur n°10 | basse |
+| B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié (corrigé) | revue finale, mineur n°10 | basse |
 | B5 | La fenêtre Réglages écrase des changements faits ailleurs (corrigé) | revue finale, mineur n°8 | basse |
 | B6 | `wt.exe -d` coupe un chemin contenant « ; » (corrigé) | revue finale, annexe de I8 | basse |
 | B7 | Menu contextuel d'onglet lié à la position de l'onglet | arbitrage de la revue (M14) | basse |
@@ -434,15 +434,12 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin :** atteint (tests unitaires `a_last_message_arriving_after_amend_was_unchecked_keeps_the_typed_message` et `a_last_message_from_an_earlier_check_is_ignored_after_checking_again`, `crates/dragontree-app/src/repo/changes.rs`).
 - **Priorité :** basse.
 
-#### B4 — Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié
+#### B4 — Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié (fait)
 
 - **Contexte :** mineur n°10 de la revue finale.
-- **État :**
-  - la vérification part avec le type, l'hôte et le jeton lus au clic (`crates/dragontree-app/src/accounts.rs:156-170`) ;
-  - à son retour, l'enregistrement relit le formulaire (`crates/dragontree-app/src/accounts.rs:113-131`) ;
-  - si le champ a été modifié entre-temps, un jeton non vérifié est stocké.
-- **À faire :** transporter les valeurs vérifiées dans `ForgeEvent::Verified`, ou figer le formulaire pendant la vérification.
-- **Critère de fin :** test : modifier le jeton pendant la vérification ; le jeton enregistré est celui qui a été vérifié.
+- **État :** corrigé. Avant : la vérification partait avec le type, l'hôte et le jeton lus au clic, mais l'enregistrement relisait le formulaire à son retour ; un champ modifié entre-temps faisait stocker un jeton non vérifié.
+- **Réalisé :** `ForgeEvent::Verified` transporte les valeurs envoyées (`Submitted` : type, hôte, jeton) et `AccountsWindow::on_verified` (`crates/dragontree-app/src/accounts.rs`) crée le compte et enregistre le jeton avec elles, sans relire le formulaire.
+- **Critère de fin :** atteint (test unitaire `the_account_is_saved_with_the_verified_values_not_the_edited_form` : jeton et hôte modifiés pendant la vérification, le jeton enregistré et l'hôte du compte sont ceux qui ont été vérifiés ; le stockage est injecté, aucun accès au Gestionnaire d'identifiants).
 - **Priorité :** basse.
 
 #### B5 — La fenêtre Réglages écrase des changements faits ailleurs (fait)

@@ -17,9 +17,18 @@ use crate::toasts::Toast;
 
 pub enum ForgeEvent {
     /// Vérification d'un nouveau compte (formulaire).
-    Verified { req: u64, result: Result<VerifiedUser, ForgeError> },
+    Verified { req: u64, sent: Submitted, result: Result<VerifiedUser, ForgeError> },
     /// Revérification d'un compte existant.
     Rechecked { account_id: String, result: Result<VerifiedUser, ForgeError> },
+}
+
+/// Valeurs du formulaire envoyées à la vérification : le compte est enregistré avec celles-ci, pas avec ce que le
+/// formulaire contient à l'arrivée de la réponse (le champ a pu être modifié entre-temps).
+#[derive(Clone)]
+pub struct Submitted {
+    kind: ForgeKind,
+    host: String,
+    token: String,
 }
 
 #[derive(Clone)]
@@ -103,35 +112,8 @@ fn azure_org_from_url(url: &str) -> Option<String> {
 impl AccountsWindow {
     pub fn handle(&mut self, ev: ForgeEvent, shared: &mut Shared) {
         match ev {
-            ForgeEvent::Verified { req, result } => {
-                let Some(form) = &mut self.form else { return };
-                if form.verifying != Some(req) {
-                    return;
-                }
-                form.verifying = None;
-                match result {
-                    Ok(user) => {
-                        let account = Account {
-                            id: dragontree_forges::new_account_id(),
-                            kind: form.kind,
-                            host: form.host.trim().to_string(),
-                            username: user.username.clone(),
-                            display_name: user.display_name.clone(),
-                            orgs: user.orgs.clone(),
-                            avatar_url: user.avatar_url.clone(),
-                        };
-                        if let Err(e) = secrets::store_token(&account.id, form.token.trim()) {
-                            form.error = Some(tr!("Impossible d'enregistrer le jeton : {e}", e));
-                            return;
-                        }
-                        shared.toast(Toast::success(tr!("Compte ajouté : {account}", account = account.title())));
-                        self.status.insert(account.id.clone(), AccountStatus::Ok);
-                        shared.settings.accounts.push(account);
-                        shared.save_settings();
-                        self.form = None;
-                    }
-                    Err(e) => form.error = Some(explain_error(&e, form.kind)),
-                }
+            ForgeEvent::Verified { req, sent, result } => {
+                self.on_verified(req, sent, result, shared, secrets::store_token);
             }
             ForgeEvent::Rechecked { account_id, result } => {
                 let status = match result {
@@ -153,19 +135,58 @@ impl AccountsWindow {
         }
     }
 
+    /// Réponse de la vérification : le compte est créé avec les valeurs envoyées (`sent`), jamais avec le formulaire
+    /// relu ; `store` enregistre le jeton (le Gestionnaire d'identifiants hors des tests).
+    fn on_verified(
+        &mut self,
+        req: u64,
+        sent: Submitted,
+        result: Result<VerifiedUser, ForgeError>,
+        shared: &mut Shared,
+        store: impl FnOnce(&str, &str) -> Result<(), ForgeError>,
+    ) {
+        let Some(form) = &mut self.form else { return };
+        if form.verifying != Some(req) {
+            return;
+        }
+        form.verifying = None;
+        match result {
+            Ok(user) => {
+                let account = Account {
+                    id: dragontree_forges::new_account_id(),
+                    kind: sent.kind,
+                    host: sent.host,
+                    username: user.username.clone(),
+                    display_name: user.display_name.clone(),
+                    orgs: user.orgs.clone(),
+                    avatar_url: user.avatar_url.clone(),
+                };
+                if let Err(e) = store(&account.id, &sent.token) {
+                    form.error = Some(tr!("Impossible d'enregistrer le jeton : {e}", e));
+                    return;
+                }
+                shared.toast(Toast::success(tr!("Compte ajouté : {account}", account = account.title())));
+                self.status.insert(account.id.clone(), AccountStatus::Ok);
+                shared.settings.accounts.push(account);
+                shared.save_settings();
+                self.form = None;
+            }
+            Err(e) => form.error = Some(explain_error(&e, sent.kind)),
+        }
+    }
+
     fn start_verify(&mut self, shared: &Shared) {
         let Some(form) = &mut self.form else { return };
         self.next_req += 1;
         let req = self.next_req;
         form.verifying = Some(req);
         form.error = None;
-        let (kind, host, token, orgs) =
-            (form.kind, form.host.trim().to_string(), form.token.trim().to_string(), form.org_list());
+        let sent =
+            Submitted { kind: form.kind, host: form.host.trim().to_string(), token: form.token.trim().to_string() };
+        let orgs = form.org_list();
         shared.jobs.spawn("verify", move || {
-            Some(AppEvent::Forge(ForgeEvent::Verified {
-                req,
-                result: dragontree_forges::verify(kind, &host, &token, &orgs),
-            }))
+            let result = dragontree_forges::verify(sent.kind, &sent.host, &sent.token, &orgs);
+            Some(AppEvent::Forge(ForgeEvent::Verified { req, sent, result }))
         });
     }
 
@@ -335,7 +356,8 @@ fn explain_error(e: &ForgeError, kind: ForgeKind) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::azure_org_from_url;
+    use super::*;
+    use crate::settings::SettingsFile;
 
     #[test]
     fn azure_orgs_from_remote_urls() {
@@ -346,5 +368,51 @@ mod tests {
         assert_eq!(azure_org_from_url("https://moi@dev.azure.com/acme/Projet/_git/repo").as_deref(), Some("acme"));
         assert_eq!(azure_org_from_url("https://github.com/acme/repo.git"), None);
         assert_eq!(azure_org_from_url("git@ssh.dev.azure.com:v3/acme/p/r"), None);
+    }
+
+    fn window_with_form(shared_dir: &std::path::Path) -> (AccountsWindow, Shared) {
+        let (store, settings, _) = SettingsFile::load(&shared_dir.join("settings.json"));
+        let (shared, _events) = Shared::new(egui::Context::default(), settings, store, None, None);
+        let mut window = AccountsWindow::default();
+        let mut form = AccountForm::new(ForgeKind::GitHub, &[]);
+        form.verifying = Some(1);
+        window.form = Some(form);
+        (window, shared)
+    }
+
+    fn verified_user() -> VerifiedUser {
+        VerifiedUser { username: "ada".into(), display_name: "Ada".into(), avatar_url: None, orgs: Vec::new() }
+    }
+
+    #[test]
+    fn the_account_is_saved_with_the_verified_values_not_the_edited_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut window, mut shared) = window_with_form(dir.path());
+        let sent =
+            Submitted { kind: ForgeKind::GitHub, host: "github.contoso.test".into(), token: "jeton-verifie".into() };
+        // Le formulaire est modifié pendant la vérification.
+        let form = window.form.as_mut().unwrap();
+        form.token = "jeton-non-verifie".into();
+        form.host = "autre.fabrikam.test".into();
+        let mut stored = None;
+        window.on_verified(1, sent, Ok(verified_user()), &mut shared, |id, token| {
+            stored = Some((id.to_string(), token.to_string()));
+            Ok(())
+        });
+        let (id, token) = stored.expect("le jeton est enregistré");
+        assert_eq!(token, "jeton-verifie");
+        let account = &shared.settings.accounts[0];
+        assert_eq!((account.id.as_str(), account.host.as_str()), (id.as_str(), "github.contoso.test"));
+        assert!(window.form.is_none());
+    }
+
+    #[test]
+    fn a_verification_answer_for_an_older_request_stores_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut window, mut shared) = window_with_form(dir.path());
+        let sent = Submitted { kind: ForgeKind::GitHub, host: "github.contoso.test".into(), token: "jeton".into() };
+        window.on_verified(2, sent, Ok(verified_user()), &mut shared, |_, _| panic!("rien à enregistrer"));
+        assert!(shared.settings.accounts.is_empty());
+        assert!(window.form.is_some());
     }
 }
