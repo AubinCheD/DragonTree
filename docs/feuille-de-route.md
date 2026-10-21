@@ -212,7 +212,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | # | Point | Origine | Priorité |
 |---|---|---|---|
 | RV1 | Fluidité de l'interface sur un gros dépôt : filtre, copies par image, coloration synchrone (corrigé) | revue finale, mineur n°6 | moyenne |
-| RV2 | Gros diffs lus entièrement en mémoire avant la limite de 8 Mio | revue finale, mineur n°7 | moyenne |
+| RV2 | Gros diffs lus entièrement en mémoire avant la limite de 8 Mio (corrigé) | revue finale, mineur n°7 | moyenne |
 | RV3 | Fetch automatique dans la file des écritures ; deux files pour un même dépôt | revue finale, mineur n°16 | basse |
 | RV4 | Points non jugés : processus git à la fermeture, instances multiples, proxy, cas des forges (à vérifier) | revue finale et rapport du crate forges | basse |
 | RV5 | Résidus de la relecture de la traduction : `--lang` enregistré, bouton Push occupé, textes figés | relecture de la traduction | basse |
@@ -501,15 +501,17 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - test unitaire : une ligne modifiée sans changer le nombre de lignes est recolorée (atteint : `a_line_edited_without_changing_the_line_count_is_recolored`, `crates/dragontree-app/src/highlight.rs`, vu rouge avec l'ancienne clé ; aussi `the_cache_evicts_the_least_recently_used_diff` et `no_highlighting_work_runs_on_the_interface_thread`, qui vérifie que la coloration ne tourne jamais sur le thread qui affiche).
 - **Priorité :** moyenne.
 
-#### RV2 — Gros diffs lus entièrement en mémoire
+#### RV2 — Gros diffs lus entièrement en mémoire (corrigé)
 
 - **Contexte :** mineur n°7 de la revue finale. Il touche l'objectif de moins de 150 Mo de mémoire.
-- **État :**
-  - `diff_commit_file` et `diff_worktree_file` lisent toute la sortie de git (`crates/dragontree-git/src/repo.rs:256`, `:285`) ;
-  - la limite de 8 Mio n'est appliquée qu'ensuite (`crates/dragontree-git/src/repo.rs:399-407`) ;
-  - seul le fichier non suivi est contrôlé avant la lecture (`:269-278`).
-- **À faire :** arrêter la lecture, et le processus, dès que la limite est dépassée, ou contrôler la taille avant de lancer le diff.
-- **Critère de fin :** test d'intégration : le diff d'un fichier de 50 Mio rend un résultat tronqué sans jamais garder plus de 8 Mio en mémoire.
+- **État :** corrigé.
+  - Avant : `diff_commit_file` et `diff_worktree_file` lisaient toute la sortie de git, et la limite de 8 Mio n'était appliquée qu'ensuite ; seul le fichier non suivi était contrôlé avant la lecture. Un diff de 50 Mio faisait monter la mémoire de près de 100 Mio.
+  - Désormais, l'exécution des commandes git a un mode de sortie bornée (`GitCommand::stdout_limit`, `crates/dragontree-git/src/runner.rs`) : dès que la sortie standard dépasse la limite, la lecture s'arrête, git est arrêté avec ses sous-processus (Job Object, comme l'annulation) et la commande réussit avec `Output::stdout_truncated` ; le tampon ne grandit jamais au-delà de la limite (capacité comprise). Les morceaux lus dans les tubes passent par une file bornée (8 morceaux de 64 Kio au plus en attente) : un tube plus rapide que la lecture attend au lieu d'accumuler. Le journal git note une commande ainsi arrêtée comme une annulation, avec la limite.
+  - Les diffs de fichier (`diff_commit_file`, `diff_worktree_file`, `compare_file_diff`, `crates/dragontree-git/src/repo.rs`) lisent la sortie de git avec la limite `MAX_DIFF_BYTES` (8 Mio) : au-delà, le diff est `truncated`, sans hunks, comme avant. Le fichier non suivi trop gros reste écarté avant même de lancer git.
+- **À faire :** arrêter la lecture, et le processus, dès que la limite est dépassée, ou contrôler la taille avant de lancer le diff (fait : lecture et processus arrêtés à la limite).
+- **Critère de fin (atteint) :**
+  - test d'intégration `the_diff_of_a_50_mib_file_is_truncated_without_holding_more_than_the_limit` (`crates/dragontree-git/tests/large_diff.rs`) : diff d'un commit qui ajoute un fichier de 50 Mio, de sa modification non indexée puis indexée et d'une comparaison de révisions ; chaque résultat est tronqué, et un allocateur qui compte les octets alloués mesure le pic de mémoire pendant le diff : environ 8,2 Mio (la limite de 8 Mio et quelques tampons de 64 Kio ; le test accepte 9 Mio), contre près de 100 Mio avant (vu rouge) ;
+  - test `a_bounded_output_stops_reading_and_stops_git_at_the_limit` (`crates/dragontree-git/tests/runner.rs`) : une sortie sans fin (`yes`, lancé par `sh`) est coupée exactement à la limite et la commande se termine, ce qui n'est possible que si git et son sous-processus sont arrêtés ; une sortie de la taille exacte de la limite n'est pas coupée.
 - **Priorité :** moyenne.
 
 #### RV3 — Fetch automatique dans la file des écritures

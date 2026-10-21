@@ -55,7 +55,7 @@ pub fn run_shell(
     };
     let mut on_stdout = |bytes: &[u8]| append(bytes);
     let mut on_stderr_line = |line: &str| append(format!("{line}\n").as_bytes());
-    let run = Supervised { stdin: None, cancel: Some(cancel), detach_after_exit: true };
+    let run = Supervised { stdin: None, cancel: Some(cancel), detach_after_exit: true, stdout_limit: None };
     let done = run.run(command, |e| GitError::Spawn(e.to_string()), Some(&mut on_stdout), Some(&mut on_stderr_line))?;
     let output = output.into_inner();
     Ok(ShellOutput { code: done.code, output: String::from_utf8_lossy(&output).into_owned() })

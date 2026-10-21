@@ -1093,6 +1093,7 @@
   "Sombre": "Dark",
   "Sortie dans le worktree {path}": "Checked out in the worktree {path}",
   "sortie de git inattendue : {e}": "unexpected git output: {e}",
+  "sortie de plus de {limit} octets : lecture arrêtée et git arrêté": "output over {limit} bytes: reading stopped and git stopped",
   "Sortie de « {name} »": "Output of “{name}”",
   "Source : {name}": "Source: {name}",
   "Sous-module déplacé : {old} → {new}": "Submodule moved: {old} → {new}",

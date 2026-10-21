@@ -82,6 +82,33 @@ fn runner_cancel_kills_process_tree() {
 }
 
 #[test]
+fn a_bounded_output_stops_reading_and_stops_git_at_the_limit() {
+    const LIMIT: usize = 1024 * 1024;
+    let dir = tempfile::tempdir().unwrap();
+    // `yes` écrit sans fin (lancé par `sh`, un petit-enfant) : la commande ne se termine que si la lecture s'arrête et
+    // que les processus sont arrêtés avec elle.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cwd = dir.path().to_path_buf();
+    std::thread::spawn(move || {
+        let run = git().cmd(&cwd).args(["-c", "alias.endless=!yes dragontree", "endless"]).stdout_limit(LIMIT).run();
+        let _ = tx.send(run);
+    });
+    let out = rx.recv_timeout(Duration::from_secs(60)).expect("sortie sans fin jamais arrêtée").unwrap();
+    assert!(out.stdout_truncated, "sortie coupée");
+    assert_eq!(out.stdout.len(), LIMIT, "jamais plus que la limite");
+    assert!(out.stdout.starts_with(b"dragontree\ndragontree\n"));
+
+    // Sous la limite : sortie entière, rien de coupé.
+    let out = git().cmd(dir.path()).arg("--version").stdout_limit(LIMIT).run().unwrap();
+    assert!(!out.stdout_truncated && out.stdout_str().starts_with("git version"));
+    let exact = git().cmd(dir.path()).arg("--version").run().unwrap().stdout.len();
+    let out = git().cmd(dir.path()).arg("--version").stdout_limit(exact).run().unwrap();
+    assert!(!out.stdout_truncated, "exactement la limite : rien de coupé");
+    let out = git().cmd(dir.path()).arg("--version").stdout_limit(exact - 1).run().unwrap();
+    assert!(out.stdout_truncated && out.stdout.len() == exact - 1, "un octet de trop");
+}
+
+#[test]
 fn display_quotes_args_with_spaces() {
     let dir = tempfile::tempdir().unwrap();
     let cmd = git().cmd(dir.path()).args(["log", "--grep", "two words"]);

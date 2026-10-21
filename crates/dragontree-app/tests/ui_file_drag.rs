@@ -31,8 +31,10 @@ fn open(base: &Path, repo: &Path) -> Harness<'static, DragonTreeApp> {
     h
 }
 
-fn staged(repo: &Path) -> Vec<String> {
-    git(repo, &["diff", "--cached", "--name-only"]).lines().map(str::to_string).collect()
+/// Fichiers indexés ; `None` si la lecture échoue (sous Windows, l'index est illisible un instant pendant que
+/// l'application le remplace) : les attentes relisent alors à l'image suivante.
+fn staged(repo: &Path) -> Option<Vec<String>> {
+    try_git(repo, &["diff", "--cached", "--name-only"]).map(|out| out.lines().map(str::to_string).collect())
 }
 
 /// Centre de la ligne de liste d'un fichier (l'élément le plus à gauche de ce libellé : le titre du diff est à droite).
@@ -81,7 +83,7 @@ fn dragging_a_file_to_the_staged_list_stages_it_and_back_unstages_it() {
 
     let (from, to) = (row_center(&h, "a.txt"), label_center(&h, "Aucun fichier indexé"));
     drag(&mut h, from, to);
-    wait_git(&mut h, "a.txt indexé", || staged(&repo) == ["a.txt"]);
+    wait_git(&mut h, "a.txt indexé", || staged(&repo).is_some_and(|s| s == ["a.txt"]));
 
     // Retour : de « Indexés » vers « Non indexés ».
     wait_until(&mut h, "a.txt dans les indexés", |h| h.query_all_by_label("Aucun fichier indexé").count() == 0);
@@ -89,7 +91,7 @@ fn dragging_a_file_to_the_staged_list_stages_it_and_back_unstages_it() {
     let (from, to) = (row_center(&h, "a.txt"), label_center(&h, "Non indexés"));
     assert!(from.y > to.y, "a.txt est dans la liste du bas");
     drag(&mut h, from, to);
-    wait_git(&mut h, "a.txt désindexé", || staged(&repo).is_empty());
+    wait_git(&mut h, "a.txt désindexé", || staged(&repo).is_some_and(|s| s.is_empty()));
 }
 
 #[test]
@@ -108,8 +110,8 @@ fn dragging_a_selected_file_drags_the_whole_selection() {
 
     let (from, to) = (row_center(&h, "b.txt"), label_center(&h, "Aucun fichier indexé"));
     drag(&mut h, from, to);
-    wait_git(&mut h, "a.txt et b.txt indexés", || staged(&repo) == ["a.txt", "b.txt"]);
-    assert_eq!(staged(&repo), ["a.txt", "b.txt"], "c.txt reste non indexé");
+    wait_git(&mut h, "a.txt et b.txt indexés", || staged(&repo).is_some_and(|s| s == ["a.txt", "b.txt"]));
+    assert_eq!(staged(&repo).unwrap(), ["a.txt", "b.txt"], "c.txt reste non indexé");
 }
 
 #[test]
@@ -128,7 +130,7 @@ fn dropping_a_file_back_on_its_own_list_changes_nothing() {
     pointer_at(&mut h, to, Some(false));
     h.remove_cursor();
     assert!(
-        !becomes_true(&mut h, std::time::Duration::from_secs(2), || !staged(&repo).is_empty()),
+        !becomes_true(&mut h, std::time::Duration::from_secs(2), || staged(&repo).is_some_and(|s| !s.is_empty())),
         "rien ne doit être indexé"
     );
 }

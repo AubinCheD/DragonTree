@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
+use dragontree_i18n::tr;
+
 use crate::error::GitError;
 
 /// Jeton d'annulation partagé entre l'interface et une commande en cours.
@@ -26,12 +28,16 @@ impl CancelToken {
     }
 }
 
-/// Résultat d'une commande git terminée avec un code accepté.
+/// Résultat d'une commande git terminée avec un code accepté, ou arrêtée à la limite de sa sortie.
 #[derive(Debug, Clone)]
 pub struct Output {
     pub stdout: Vec<u8>,
     pub stderr: String,
+    /// Code de sortie ; sans signification quand `stdout_truncated` est vrai (git a été arrêté).
     pub code: i32,
+    /// La sortie standard dépassait la limite de [`GitCommand::stdout_limit`] : `stdout` en contient le début (la
+    /// limite exactement), la lecture s'est arrêtée là et git a été arrêté avec ses sous-processus.
+    pub stdout_truncated: bool,
 }
 
 impl Output {
@@ -100,6 +106,7 @@ impl Git {
             stdin: None,
             cancel: None,
             ok_codes: vec![0],
+            stdout_limit: None,
         }
     }
 }
@@ -114,6 +121,7 @@ pub struct GitCommand {
     stdin: Option<Vec<u8>>,
     cancel: Option<CancelToken>,
     ok_codes: Vec<i32>,
+    stdout_limit: Option<usize>,
 }
 
 impl GitCommand {
@@ -173,6 +181,15 @@ impl GitCommand {
         self
     }
 
+    /// Garde au plus `limit` octets de la sortie standard : dès qu'elle dépasse, la lecture s'arrête, git est arrêté
+    /// avec ses sous-processus et la commande réussit avec [`Output::stdout_truncated`] (quel que soit le code de
+    /// sortie). La mémoire tenue ne dépasse donc pas `limit`, quelle que soit la taille de la sortie (diff d'un très
+    /// gros fichier). Sans effet sur [`GitCommand::run_streaming`], qui ne garde pas la sortie.
+    pub fn stdout_limit(mut self, limit: usize) -> Self {
+        self.stdout_limit = Some(limit);
+        self
+    }
+
     /// Ligne de commande lisible pour le journal (`git log --all …`).
     pub fn display(&self) -> String {
         let mut s = String::from("git");
@@ -213,9 +230,14 @@ impl GitCommand {
             return self.execute_inner(on_stdout, on_stderr_line);
         };
         let read_only = self.env.iter().any(|(k, v)| k == "GIT_OPTIONAL_LOCKS" && v == "0");
-        let (cwd, display, start) = (self.cwd.clone(), self.display(), Instant::now());
+        let (cwd, display, start, limit) = (self.cwd.clone(), self.display(), Instant::now(), self.stdout_limit);
         let result = self.execute_inner(on_stdout, on_stderr_line);
         let (code, stderr, cancelled) = match &result {
+            // Arrêtée par DragonTree, comme une annulation : le code du processus arrêté ne dit rien.
+            Ok(o) if o.stdout_truncated => {
+                let limit = limit.unwrap_or_default();
+                (None, tr!("sortie de plus de {limit} octets : lecture arrêtée et git arrêté", limit), true)
+            }
             Ok(o) => (Some(o.code), o.stderr.clone(), false),
             Err(GitError::Failed { code, stderr, .. }) => (Some(*code), stderr.clone(), false),
             Err(GitError::Cancelled) => (None, String::new(), true),
@@ -246,11 +268,16 @@ impl GitCommand {
             std::io::ErrorKind::NotFound => GitError::NotFound,
             _ => GitError::Spawn(e.to_string()),
         };
-        let run = Supervised { stdin: self.stdin, cancel: self.cancel.as_ref(), detach_after_exit: false };
+        let run = Supervised {
+            stdin: self.stdin,
+            cancel: self.cancel.as_ref(),
+            detach_after_exit: false,
+            stdout_limit: self.stdout_limit,
+        };
         let done = run.run(command, spawn_error, on_stdout, on_stderr_line)?;
         let stderr = String::from_utf8_lossy(&done.stderr).into_owned();
-        if self.ok_codes.contains(&done.code) {
-            Ok(Output { stdout: done.stdout, stderr, code: done.code })
+        if done.stdout_truncated || self.ok_codes.contains(&done.code) {
+            Ok(Output { stdout: done.stdout, stderr, code: done.code, stdout_truncated: done.stdout_truncated })
         } else {
             Err(GitError::from_failure(display, done.code, stderr))
         }
@@ -262,6 +289,8 @@ pub(crate) struct Finished {
     pub code: i32,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+    /// Processus arrêté parce que sa sortie standard dépassait `Supervised::stdout_limit`.
+    pub stdout_truncated: bool,
 }
 
 /// Exécution surveillée d'un processus : sans fenêtre, rattaché à un Job Object (l'annulation tue aussi ses
@@ -272,6 +301,9 @@ pub(crate) struct Supervised<'a> {
     /// Ne pas attendre la fermeture des tubes de sortie une fois le processus terminé et silencieux : un programme
     /// qu'il a lancé en arrière-plan (`start` de cmd) les garde ouverts tant qu'il tourne.
     pub detach_after_exit: bool,
+    /// Taille maximale gardée de la sortie standard (quand elle n'est pas transmise au fil de l'eau) : au-delà, la
+    /// lecture s'arrête et le processus est arrêté avec ses sous-processus.
+    pub stdout_limit: Option<usize>,
 }
 
 impl Supervised<'_> {
@@ -307,7 +339,8 @@ impl Supervised<'_> {
             });
         }
 
-        let (tx, rx) = mpsc::channel::<Chunk>();
+        // File bornée : un tube qui produit plus vite que la boucle ne lit attend, au lieu d'accumuler ses morceaux.
+        let (tx, rx) = mpsc::sync_channel::<Chunk>(CHUNKS_IN_FLIGHT);
         spawn_reader(child.stdout.take(), tx.clone(), Chunk::Out, Chunk::OutEof);
         spawn_reader(child.stderr.take(), tx, Chunk::Err, Chunk::ErrEof);
 
@@ -342,7 +375,19 @@ impl Supervised<'_> {
                     last_chunk = Instant::now();
                     match on_stdout.as_mut() {
                         Some(cb) => cb(&bytes),
-                        None => stdout_buf.extend_from_slice(&bytes),
+                        None => {
+                            let limit = self.stdout_limit.unwrap_or(usize::MAX);
+                            if !push_bounded(&mut stdout_buf, &bytes, limit) {
+                                // Sortie trop grande : la suite ne serait pas gardée, inutile que git la produise.
+                                kill(&mut child);
+                                return Ok(Finished {
+                                    code: -1,
+                                    stdout: stdout_buf,
+                                    stderr: stderr_buf,
+                                    stdout_truncated: true,
+                                });
+                            }
+                        }
                     }
                 }
                 Ok(Chunk::Err(bytes)) => {
@@ -389,8 +434,25 @@ impl Supervised<'_> {
                 None => std::thread::sleep(Duration::from_millis(5)),
             }
         };
-        Ok(Finished { code: status.code().unwrap_or(-1), stdout: stdout_buf, stderr: stderr_buf })
+        Ok(Finished {
+            code: status.code().unwrap_or(-1),
+            stdout: stdout_buf,
+            stderr: stderr_buf,
+            stdout_truncated: false,
+        })
     }
+}
+
+/// Ajoute `bytes` à `buf` sans dépasser `limit` octets, capacité comprise (la croissance par doublement d'un `Vec`
+/// pourrait réserver jusqu'au double de la limite). Renvoie `false` si tout n'a pas tenu.
+fn push_bounded(buf: &mut Vec<u8>, bytes: &[u8], limit: usize) -> bool {
+    let take = bytes.len().min(limit.saturating_sub(buf.len()));
+    if buf.len() + take > buf.capacity() {
+        let wanted = buf.capacity().saturating_mul(2).max(buf.len() + take).min(limit);
+        buf.reserve_exact(wanted - buf.len());
+    }
+    buf.extend_from_slice(&bytes[..take]);
+    take == bytes.len()
 }
 
 /// Trace d'une commande git terminée (pour le journal de l'interface).
@@ -400,10 +462,11 @@ pub struct CommandRecord {
     pub display: String,
     /// Commande de lecture (`GIT_OPTIONAL_LOCKS=0`).
     pub read_only: bool,
-    /// Code de sortie ; `None` si git n'a pas pu être lancé ou a été annulé.
+    /// Code de sortie ; `None` si git n'a pas pu être lancé, a été annulé ou arrêté à la limite de sa sortie.
     pub code: Option<i32>,
     pub duration: Duration,
     pub stderr: String,
+    /// Annulée, ou arrêtée parce que sa sortie dépassait `GitCommand::stdout_limit` (`stderr` le dit alors).
     pub cancelled: bool,
 }
 
@@ -422,6 +485,11 @@ pub(crate) type StderrSink<'a> = &'a mut dyn FnMut(&str);
 /// Taille maximale conservée du stderr (on garde la fin, où se trouvent les erreurs).
 const MAX_STDERR: usize = 256 * 1024;
 
+/// Morceaux (64 Kio au plus chacun) lus dans les tubes et pas encore traités : au-delà, les threads de lecture
+/// attendent. La mémoire d'une sortie limitée (`Supervised::stdout_limit`) reste ainsi bornée même si la boucle de
+/// lecture prend du retard.
+const CHUNKS_IN_FLIGHT: usize = 8;
+
 /// Silence, après la fin du processus, au-delà duquel `Supervised::detach_after_exit` cesse de lire ses tubes.
 const DETACH_QUIET: Duration = Duration::from_millis(300);
 
@@ -434,7 +502,7 @@ enum Chunk {
 
 fn spawn_reader<R: Read + Send + 'static>(
     pipe: Option<R>,
-    tx: mpsc::Sender<Chunk>,
+    tx: mpsc::SyncSender<Chunk>,
     wrap: fn(Vec<u8>) -> Chunk,
     eof: Chunk,
 ) {

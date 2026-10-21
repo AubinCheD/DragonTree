@@ -13,7 +13,7 @@ use crate::log::{
 };
 use crate::oid::Oid;
 use crate::refs::{FOR_EACH_REF_FORMAT, RefsSnapshot, parse_refs, read_head};
-use crate::runner::{CancelToken, Git, GitCommand};
+use crate::runner::{CancelToken, Git, GitCommand, Output};
 use crate::stash::{STASH_FORMAT, StashEntry, parse_stash_list};
 use crate::status::{STATUS_ARGS, STATUS_IGNORED_ARG, StatusSnapshot, parse_status_v2};
 
@@ -322,6 +322,9 @@ impl Repo {
         Ok(parse_name_status_z(&cmd.run()?.stdout))
     }
 
+    /// Diff d'un fichier de `id` par rapport à `parent` (arbre vide pour une racine). Comme pour les autres diffs de
+    /// fichier, la sortie de git n'est lue que jusqu'à [`MAX_DIFF_BYTES`] : au-delà, la lecture s'arrête, git est
+    /// arrêté et le diff est `truncated`, sans hunks.
     pub fn diff_commit_file(
         &self,
         id: Oid,
@@ -335,8 +338,8 @@ impl Repo {
             cmd = cmd.arg(old);
         }
         cmd = cmd.arg(&change.path);
-        let out = cmd.run()?;
-        Ok(pick_diff(&out.stdout, change.old_path.as_deref(), &change.path))
+        let out = cmd.stdout_limit(MAX_DIFF_BYTES).run()?;
+        Ok(pick_diff(&out, change.old_path.as_deref(), &change.path))
     }
 
     /// Fichiers qui diffèrent entre la révision `a` et la révision `b`, ou la copie de travail (fichiers suivis)
@@ -366,8 +369,8 @@ impl Repo {
         if let Some(old) = &change.old_path {
             cmd = cmd.arg(old);
         }
-        let out = cmd.arg(&change.path).run()?;
-        Ok(pick_diff(&out.stdout, change.old_path.as_deref(), &change.path))
+        let out = cmd.arg(&change.path).stdout_limit(MAX_DIFF_BYTES).run()?;
+        Ok(pick_diff(&out, change.old_path.as_deref(), &change.path))
     }
 
     /// Diff d'un fichier de la copie de travail : indexé (`staged`), non indexé, ou non suivi.
@@ -395,8 +398,8 @@ impl Repo {
         } else {
             cmd = cmd.args(["--", path]);
         }
-        let out = cmd.run()?;
-        let mut d = pick_diff(&out.stdout, None, path);
+        let out = cmd.stdout_limit(MAX_DIFF_BYTES).run()?;
+        let mut d = pick_diff(&out, None, path);
         if untracked {
             d.is_new = true;
             d.old_path = None;
@@ -526,9 +529,11 @@ fn diff_base_args(o: &DiffOptions) -> Vec<String> {
     args
 }
 
-/// Choisit le diff du fichier demandé dans la sortie (et gère la taille maximale).
-fn pick_diff(stdout: &[u8], old_path: Option<&str>, path: &str) -> FileDiff {
-    if stdout.len() > MAX_DIFF_BYTES {
+/// Choisit le diff du fichier demandé dans la sortie, lue avec la limite [`MAX_DIFF_BYTES`] : une sortie coupée donne un
+/// diff `truncated`, sans hunks.
+fn pick_diff(out: &Output, old_path: Option<&str>, path: &str) -> FileDiff {
+    let stdout = &out.stdout;
+    if out.stdout_truncated || stdout.len() > MAX_DIFF_BYTES {
         return FileDiff {
             old_path: old_path.map(str::to_string),
             new_path: Some(path.to_string()),

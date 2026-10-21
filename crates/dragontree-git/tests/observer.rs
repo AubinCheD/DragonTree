@@ -12,8 +12,15 @@ fn observer_receives_every_command() {
     let git = Git::discover().unwrap();
     git.cmd(dir.path()).args(["init", "-q"]).run().unwrap();
     let _ = git.cmd(dir.path()).read_only().args(["rev-parse", "--verify", "nope"]).run();
+    let cut = git.cmd(dir.path()).read_only().arg("--version").stdout_limit(4).run().unwrap();
+    assert!(cut.stdout_truncated);
 
     let seen = SEEN.lock().unwrap();
+    // Arrêtée à la limite de sa sortie : notée comme une annulation, avec la raison.
+    // (`Git::discover` lance aussi `git --version` : la dernière est la nôtre.)
+    let stopped = seen.iter().rfind(|r| r.display == "git --version").expect("commande coupée enregistrée");
+    assert!(stopped.cancelled && stopped.code.is_none());
+    assert!(stopped.stderr.contains("4 octets"), "{}", stopped.stderr);
     let init = seen.iter().find(|r| r.display == "git init -q").expect("init enregistré");
     assert_eq!(init.code, Some(0));
     assert!(!init.read_only);
