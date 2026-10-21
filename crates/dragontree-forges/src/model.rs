@@ -65,6 +65,12 @@ impl Account {
             format!("{} · {} ({})", self.kind.label(), who, host)
         }
     }
+
+    /// Compte Azure DevOps sans organisation utilisable (vides ou faites d'espaces et de `/`) : ni ses dépôts ni ses
+    /// pull requests ne peuvent être lus.
+    pub fn lacks_azure_orgs(&self) -> bool {
+        self.kind == ForgeKind::AzureDevOps && crate::azure::clean_orgs(&self.orgs).is_empty()
+    }
 }
 
 /// Identité renvoyée par la vérification d'un jeton.
@@ -306,6 +312,17 @@ mod tests {
             default_branch: None,
             updated_at: updated_at.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn an_azure_account_without_usable_organisation_is_detected() {
+        let mut azure = account(ForgeKind::AzureDevOps, "dev.azure.com", "camille@example.com", "Camille");
+        assert!(azure.lacks_azure_orgs());
+        azure.orgs = vec![" ".into(), "/".into()];
+        assert!(azure.lacks_azure_orgs(), "organisations vides");
+        azure.orgs.push("fabrikam".into());
+        assert!(!azure.lacks_azure_orgs());
+        assert!(!account(ForgeKind::GitHub, "github.com", "camille", "").lacks_azure_orgs(), "sans objet hors Azure");
     }
 
     #[test]

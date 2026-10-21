@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use common::*;
 use dragontree_app::settings::{Settings, path_key};
 use dragontree_app::{DragonTreeApp, StartOptions};
-use dragontree_forges::{Account, ForgeError, ForgeKind, PullRequest, RepoLocation};
+use dragontree_forges::{Account, ForgeError, ForgeKind, PullRequest, PullRequestList, RepoLocation};
 use egui::Key;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -60,8 +60,8 @@ fn pull_request(title: &str, repo: RepoLocation, number: u64, url: &str, updated
 }
 
 /// Réponses des forges : deux pull requests GitHub (l'une créée par l'utilisateur, l'autre à relire), un jeton refusé
-/// par GitLab, une pull request Azure DevOps à relire.
-fn fake_forges(account: &Account) -> Result<Vec<PullRequest>, ForgeError> {
+/// par GitLab, une pull request Azure DevOps à relire (l'organisation contoso n'a pas répondu).
+fn fake_forges(account: &Account) -> Result<PullRequestList, ForgeError> {
     let github = |owner: &str, repo: &str| RepoLocation::GitHub {
         host: "github.com".into(),
         owner: owner.into(),
@@ -107,7 +107,9 @@ fn fake_forges(account: &Account) -> Result<Vec<PullRequest>, ForgeError> {
     for pr in &mut prs {
         pr.account_id = account.id.clone();
     }
-    Ok(prs)
+    let failed_orgs =
+        if account.id == "compte-azure" { vec![("contoso".into(), ForgeError::Unauthorized)] } else { vec![] };
+    Ok(PullRequestList { prs, failed_orgs })
 }
 
 fn settings_path(base: &Path) -> PathBuf {
@@ -165,6 +167,9 @@ fn the_pull_requests_of_every_account_are_listed_together_with_filters() {
     // Le jeton refusé par GitLab est signalé à la place du compte, sans empêcher les autres.
     let error = "GitLab · jsmith (gitlab.contoso.test) : Accès refusé";
     assert!(h.query_by_label_contains(error).is_some(), "erreur du compte GitLab affichée");
+    // L'organisation Azure DevOps qui n'a pas répondu est signalée, sans cacher celle qui a répondu.
+    let warning = "Azure DevOps · Camille Martin : l'organisation contoso n'a pas répondu";
+    assert!(h.query_by_label_contains(warning).is_some(), "organisation en échec signalée");
     assert!(h.query_by_label("Brouillon").is_some());
 
     // Filtres : créées par moi, à relire, par compte, texte.
@@ -176,7 +181,11 @@ fn the_pull_requests_of_every_account_are_listed_together_with_filters() {
     wait_until(&mut h, "toutes", |h| shown(h).len() == 3);
     h.get_by_role(egui::accesskit::Role::ComboBox).click();
     h.run_steps(3);
-    click_label_containing(&mut h, "Azure DevOps · Camille Martin");
+    // L'entrée de la liste des comptes (l'avertissement de l'organisation porte aussi le titre du compte).
+    click_by(&mut h, "compte Azure DevOps dans la liste", egui::PointerButton::Primary, |n| {
+        n.role() == egui::accesskit::Role::Button
+            && text_of(n).is_some_and(|l| l.ends_with("Azure DevOps · Camille Martin"))
+    });
     wait_until(&mut h, "compte Azure DevOps seulement", |h| shown(h) == [RELEASE]);
     assert!(h.query_by_label_contains(error).is_none(), "l'erreur d'un autre compte n'est plus affichée");
     h.get_by_role(egui::accesskit::Role::ComboBox).click();
@@ -205,6 +214,22 @@ fn the_pull_requests_of_every_account_are_listed_together_with_filters() {
     wait_until(&mut h, "onglet du dépôt ouvert", |_| {
         Settings::load_from(&settings_path(tmp.path())).open_tabs.iter().any(|p| path_key(p) == path_key(&clone))
     });
+}
+
+#[test]
+fn accounts_that_could_not_be_read_do_not_show_an_empty_list() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Un jeton refusé (GitLab) et un compte Azure DevOps sans organisation, jamais lu (`fake_forges` paniquerait).
+    let mut no_orgs = account("compte-sans-org", ForgeKind::AzureDevOps, "dev.azure.com", "camille@example.com", "");
+    no_orgs.orgs.clear();
+    seed(tmp.path(), vec![three_accounts().swap_remove(1), no_orgs]);
+    let mut h = harness(StartOptions { pull_request_source: Some(fake_forges), ..start(tmp.path()) });
+    open_window(&mut h);
+    wait_until(&mut h, "erreur du compte GitLab", |h| h.query_by_label_contains("Accès refusé").is_some());
+    let explanation = "Azure DevOps · camille@example.com : aucune organisation connue pour ce compte.";
+    assert!(h.query_by_label_contains(explanation).is_some(), "compte sans organisation expliqué");
+    assert!(h.query_by_label("Aucune pull request ouverte.").is_none(), "aucun compte n'a répondu");
+    assert!(h.query_by_label("0 pull request").is_some());
 }
 
 #[test]

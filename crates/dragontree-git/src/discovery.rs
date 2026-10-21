@@ -204,6 +204,14 @@ pub fn remote_urls(repo_path: &Path) -> Vec<String> {
 
 /// `url` et `pushurl` des sections `[remote "…"]` d'un fichier de configuration git (noms de section et de clé sans
 /// casse, valeurs entre guillemets ou suivies d'un commentaire `#` / `;`).
+///
+/// Lecture simplifiée, suffisante pour les configurations écrites par git ; limites connues :
+/// - une valeur continuée sur la ligne suivante (`\` en fin de ligne) est coupée à la fin de sa première ligne ;
+/// - une clé écrite sur la ligne de la section (`[remote "origin"] url = …`) n'est pas lue ;
+/// - seuls les échappements `\"` et `\\` sont compris : `\n`, `\t` ou `\b` donnent la lettre seule ;
+/// - un fichier qui n'est pas en UTF-8 n'est pas lu du tout ([`remote_urls`] renvoie une liste vide) ;
+/// - l'URL est rendue telle quelle : un alias d'hôte SSH (`git@alias:groupe/projet.git`, défini dans `~/.ssh/config`)
+///   n'est pas résolu, donc un tel remote n'est jamais relié au dépôt de sa forge.
 fn parse_remote_urls(config: &str) -> Vec<String> {
     let mut urls = Vec::new();
     let mut in_remote = false;

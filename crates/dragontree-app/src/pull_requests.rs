@@ -1,8 +1,10 @@
 //! Fenêtre « Pull requests » (Fichier › Pull requests…) : les pull requests ouvertes qui concernent l'utilisateur, sur
 //! tous ses comptes, de la plus récemment mise à jour à la plus ancienne. Lecture en tâche de fond à l'ouverture, toutes
 //! les [`REFRESH_EVERY`] tant que la fenêtre reste ouverte et sur demande ; l'erreur d'un compte s'affiche à sa place
-//! sans empêcher les autres. Filtres : créées par moi, à relire, par compte, texte. Une pull request s'ouvre dans le
-//! navigateur, et son dépôt dans un onglet quand une copie locale le désigne (remotes lus sur disque, en tâche de fond).
+//! sans empêcher les autres, comme une organisation Azure DevOps qui n'a pas répondu alors qu'une autre l'a fait, et un
+//! compte Azure DevOps sans organisation est expliqué au lieu d'être lu. Filtres : créées par moi, à relire, par compte,
+//! texte. Une pull request s'ouvre dans le navigateur, et son dépôt dans un onglet quand une copie locale le désigne
+//! (remotes lus sur disque, en tâche de fond).
 //!
 //! Les jetons ne sont lus que dans les tâches de fond (Gestionnaire d'identifiants) et n'apparaissent jamais dans les
 //! erreurs affichées.
@@ -11,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use dragontree_forges::{Account, ForgeError, PullRequest, RepoLocation, secrets};
+use dragontree_forges::{Account, ForgeError, PullRequest, PullRequestList, RepoLocation, secrets};
 use dragontree_git::GitError;
 use dragontree_git::discovery::{FoundRepo, RepoKind, remote_urls};
 use dragontree_i18n::{tr, trn};
@@ -27,12 +29,16 @@ use crate::widgets;
 /// Intervalle du rafraîchissement automatique, tant que la fenêtre est ouverte.
 pub const REFRESH_EVERY: Duration = Duration::from_secs(5 * 60);
 
+/// Délai minimal avant l'image suivante demandée par la fenêtre : quand [`REFRESH_EVERY`] est écoulé pendant une
+/// lecture encore en cours, le délai restant serait nul à chaque image.
+const MIN_REPAINT_DELAY: Duration = Duration::from_secs(1);
+
 /// Lecture des pull requests d'un compte, sur un thread de fond. Les tests d'interface en passent une qui répond sans
 /// réseau ni Gestionnaire d'identifiants (`StartOptions::pull_request_source`).
-pub type PullRequestSource = fn(&Account) -> Result<Vec<PullRequest>, ForgeError>;
+pub type PullRequestSource = fn(&Account) -> Result<PullRequestList, ForgeError>;
 
 /// Lecture réelle : jeton du compte dans le Gestionnaire d'identifiants, puis l'API de sa forge.
-pub fn fetch_from_forge(account: &Account) -> Result<Vec<PullRequest>, ForgeError> {
+pub fn fetch_from_forge(account: &Account) -> Result<PullRequestList, ForgeError> {
     match secrets::load_token(&account.id) {
         Ok(Some(token)) => dragontree_forges::list_pull_requests(account, &token),
         Ok(None) => Err(ForgeError::Secret(tr!("jeton absent du Gestionnaire d'identifiants").into())),
@@ -42,7 +48,7 @@ pub fn fetch_from_forge(account: &Account) -> Result<Vec<PullRequest>, ForgeErro
 
 pub enum PullRequestEvent {
     /// Pull requests d'un compte (ou l'erreur affichée), pour le rafraîchissement `generation`.
-    Loaded { generation: u64, account_id: String, result: Result<Vec<PullRequest>, String> },
+    Loaded { generation: u64, account_id: String, result: Result<PullRequestList, String> },
     /// Copies locales et URL de leurs remotes, pour l'indexation `generation`.
     LocalClones { generation: u64, clones: Vec<LocalClone> },
 }
@@ -60,6 +66,8 @@ struct AccountLoad {
     loading: bool,
     prs: Vec<PullRequest>,
     error: Option<String>,
+    /// Lecture partielle : organisations Azure DevOps en échec (nom, erreur affichée) alors qu'une autre a répondu.
+    failed_orgs: Vec<(String, String)>,
     /// Copie locale du dépôt de chaque pull request (même ordre que `prs`).
     local: Vec<Option<PathBuf>>,
 }
@@ -130,7 +138,16 @@ impl PullRequestsWindow {
         never_read || stale
     }
 
-    /// Relit les pull requests de chaque compte (une tâche par compte) et les copies locales.
+    /// Délai avant l'image suivante : le prochain rafraîchissement automatique, au moins [`MIN_REPAINT_DELAY`] (une
+    /// lecture plus longue que [`REFRESH_EVERY`] ne fait pas redessiner la fenêtre à chaque image ; sa réponse
+    /// demande elle-même une image). `None` avant la première lecture.
+    fn repaint_delay(&self, now: Instant) -> Option<Duration> {
+        let last = self.last_refresh?;
+        Some(REFRESH_EVERY.saturating_sub(now.saturating_duration_since(last)).max(MIN_REPAINT_DELAY))
+    }
+
+    /// Relit les pull requests de chaque compte (une tâche par compte) et les copies locales. Un compte Azure DevOps
+    /// sans organisation n'est pas lu : l'explication tient lieu d'erreur.
     fn refresh(&mut self, shared: &Shared, repos: &[FoundRepo]) {
         self.generation += 1;
         self.last_refresh = Some(Instant::now());
@@ -138,7 +155,12 @@ impl PullRequestsWindow {
         let accounts = &shared.settings.accounts;
         self.loads.retain(|id, _| accounts.iter().any(|a| &a.id == id));
         for account in accounts {
-            self.loads.entry(account.id.clone()).or_default().loading = true;
+            let load = self.loads.entry(account.id.clone()).or_default();
+            if account.lacks_azure_orgs() {
+                *load = AccountLoad { error: Some(no_azure_orgs_explanation()), ..AccountLoad::default() };
+                continue;
+            }
+            load.loading = true;
             let (account, source, generation) = (account.clone(), self.source, self.generation);
             shared.jobs.spawn("pull-requests", move || {
                 // Une panique devient l'erreur du compte : sans réponse, il resterait « en cours » et Actualiser grisé.
@@ -181,12 +203,14 @@ impl PullRequestsWindow {
                 let Some(load) = self.loads.get_mut(&account_id) else { return };
                 load.loading = false;
                 match result {
-                    Ok(prs) => {
-                        load.prs = prs;
+                    Ok(list) => {
+                        load.prs = list.prs;
+                        load.failed_orgs = list.failed_orgs.into_iter().map(|(org, e)| (org, e.to_string())).collect();
                         load.error = None;
                     }
                     Err(e) => {
                         load.prs.clear();
+                        load.failed_orgs.clear();
                         load.error = Some(e);
                     }
                 }
@@ -223,6 +247,24 @@ impl PullRequestsWindow {
         rows
     }
 
+    /// Message de la liste vide : aucun pendant une lecture, ni quand chaque compte affiché est en erreur (les erreurs,
+    /// affichées au-dessus, disent déjà pourquoi la liste est vide).
+    fn empty_message(&self, accounts: &[Account]) -> Option<&'static str> {
+        if self.loading() {
+            return None;
+        }
+        let mut shown = accounts.iter().filter(|a| self.account_filter.as_ref().is_none_or(|id| id == &a.id));
+        if shown.all(|a| self.loads.get(&a.id).is_none_or(|load| load.error.is_some())) {
+            return None;
+        }
+        let filtered = self.filter != PrFilter::All || !self.text.trim().is_empty();
+        Some(if filtered {
+            tr!("Aucune pull request ne correspond aux filtres.")
+        } else {
+            tr!("Aucune pull request ouverte.")
+        })
+    }
+
     pub fn ui(&mut self, ctx: &egui::Context, shared: &mut Shared, repos: &[FoundRepo], p: &Palette) {
         if !self.open {
             return;
@@ -231,8 +273,8 @@ impl PullRequestsWindow {
         if self.refresh_due(&shared.settings.accounts, now) {
             self.refresh(shared, repos);
         }
-        if let Some(last) = self.last_refresh {
-            ctx.request_repaint_after(REFRESH_EVERY.saturating_sub(now.saturating_duration_since(last)));
+        if let Some(delay) = self.repaint_delay(now) {
+            ctx.request_repaint_after(delay);
         }
         let mut open = true;
         let mut refresh = false;
@@ -303,9 +345,19 @@ impl PullRequestsWindow {
         ui.add_space(2.0);
         widgets::search_field(ui, &mut self.text, tr!("Filtrer par titre, dépôt, auteur ou branche"), "pr-filter");
 
-        // État de chaque compte : lecture en cours (avant toute réponse) ou erreur, à sa place.
+        // État de chaque compte : lecture en cours (avant toute réponse), erreur ou organisations en échec, à sa place.
         for account in accounts.iter().filter(|a| self.account_filter.as_ref().is_none_or(|id| id == &a.id)) {
             let Some(load) = self.loads.get(&account.id) else { continue };
+            for (org, error) in &load.failed_orgs {
+                let text = tr!(
+                    "{account} : l'organisation {org} n'a pas répondu, ses pull requests manquent : {error}",
+                    account = account.title(),
+                    org,
+                    error
+                );
+                let text = format!("{} {text}", icons::WARNING);
+                ui.add(egui::Label::new(RichText::new(text).color(p.modified_fg)).wrap());
+            }
             if let Some(error) = &load.error {
                 let text =
                     format!("{} {}", icons::WARNING, tr!("{account} : {error}", account = account.title(), error));
@@ -321,17 +373,9 @@ impl PullRequestsWindow {
 
         let rows = self.rows(&accounts);
         ui.label(RichText::new(trn!(rows.len(), "{n} pull request", "{n} pull requests")).color(p.weak).size(12.0));
-        if rows.is_empty() && !self.loading() {
+        if let Some(text) = rows.is_empty().then(|| self.empty_message(&accounts)).flatten() {
             ui.add_space(16.0);
-            ui.vertical_centered(|ui| {
-                let filtered = self.filter != PrFilter::All || !self.text.trim().is_empty();
-                let text = if filtered {
-                    tr!("Aucune pull request ne correspond aux filtres.")
-                } else {
-                    tr!("Aucune pull request ouverte.")
-                };
-                ui.label(RichText::new(text).color(p.weak));
-            });
+            ui.vertical_centered(|ui| ui.label(RichText::new(text).color(p.weak)));
         }
         let now = widgets::now_ts();
         let mut actions = Vec::new();
@@ -420,6 +464,13 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, now: i64, p: &Palette, actions: &mut Vec
         });
     });
     ui.separator();
+}
+
+/// Explication affichée à la place des pull requests d'un compte Azure DevOps sans organisation.
+fn no_azure_orgs_explanation() -> String {
+    tr!("aucune organisation connue pour ce compte. « Vérifier » (Fichier › Comptes…) les retrouve si le jeton le \
+         permet ; sinon, supprimez le compte et ajoutez-le de nouveau en indiquant ses organisations.")
+    .to_string()
 }
 
 /// Marque encadrée (brouillon, relecture demandée).
@@ -612,7 +663,7 @@ mod tests {
     }
 
     fn window_with(loads: Vec<(&str, Vec<PullRequest>)>) -> PullRequestsWindow {
-        let mut w = PullRequestsWindow::new(|_| Ok(Vec::new()));
+        let mut w = PullRequestsWindow::new(|_| Ok(PullRequestList::default()));
         for (id, prs) in loads {
             w.loads.insert(id.into(), AccountLoad { prs, ..AccountLoad::default() });
         }
@@ -642,7 +693,10 @@ mod tests {
         let answer = |generation, title: &str| PullRequestEvent::Loaded {
             generation,
             account_id: "gh".into(),
-            result: Ok(vec![pr(title, github("contoso", "a"), "2026-10-01T00:00:00Z")]),
+            result: Ok(PullRequestList {
+                prs: vec![pr(title, github("contoso", "a"), "2026-10-01T00:00:00Z")],
+                failed_orgs: vec![],
+            }),
         };
         w.handle(answer(1, "périmée"), &accounts);
         assert!(w.loads["gh"].prs.is_empty() && w.loading(), "réponse d'un rafraîchissement précédent ignorée");
@@ -693,5 +747,76 @@ mod tests {
         assert!(w.refresh_due(&two, start + Duration::from_secs(1)), "compte ajouté depuis la dernière lecture");
         w.show();
         assert!(w.open && w.last_refresh.is_none(), "rouverte : relue à la prochaine image");
+    }
+
+    #[test]
+    fn the_repaint_delay_stays_at_least_a_second_while_a_read_outlasts_the_interval() {
+        let start = Instant::now();
+        let mut w = window_with(vec![("gh", vec![])]);
+        assert_eq!(w.repaint_delay(start), None, "jamais rafraîchie");
+        w.last_refresh = Some(start);
+        assert_eq!(w.repaint_delay(start + Duration::from_secs(60)), Some(REFRESH_EVERY - Duration::from_secs(60)));
+        // Lecture plus longue que l'intervalle : pas de nouvelle lecture, et pas une image après l'autre.
+        w.loads.get_mut("gh").unwrap().loading = true;
+        let late = start + REFRESH_EVERY + Duration::from_secs(30);
+        assert!(!w.refresh_due(&[account("gh", ForgeKind::GitHub, "github.com")], late));
+        assert_eq!(w.repaint_delay(late), Some(MIN_REPAINT_DELAY));
+        assert_eq!(MIN_REPAINT_DELAY, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn an_azure_organisation_that_failed_while_another_answered_is_kept_as_a_warning() {
+        let accounts = [account("az", ForgeKind::AzureDevOps, "dev.azure.com")];
+        let mut w = window_with(vec![("az", vec![])]);
+        w.generation = 1;
+        let partial = PullRequestList {
+            prs: vec![pr("à relire", github("contoso", "a"), "2026-10-01T00:00:00Z")],
+            failed_orgs: vec![("contoso".into(), ForgeError::Unauthorized)],
+        };
+        w.handle(PullRequestEvent::Loaded { generation: 1, account_id: "az".into(), result: Ok(partial) }, &accounts);
+        let load = &w.loads["az"];
+        assert_eq!(load.prs.len(), 1);
+        assert!(load.error.is_none());
+        assert_eq!(load.failed_orgs, [("contoso".to_string(), ForgeError::Unauthorized.to_string())]);
+        // La lecture suivante remplace les avertissements, une erreur aussi.
+        w.handle(
+            PullRequestEvent::Loaded { generation: 1, account_id: "az".into(), result: Err("refusé".into()) },
+            &accounts,
+        );
+        assert!(w.loads["az"].failed_orgs.is_empty());
+    }
+
+    #[test]
+    fn an_azure_account_without_organisation_is_explained_instead_of_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, mut settings, _) = crate::settings::SettingsFile::load(&dir.path().join("settings.json"));
+        let mut azure = account("az", ForgeKind::AzureDevOps, "dev.azure.com");
+        azure.orgs = vec![" ".into()];
+        settings.accounts = vec![azure];
+        let (shared, _events) = Shared::new(egui::Context::default(), settings, store, None, None);
+        let mut w = PullRequestsWindow::new(|_| panic!("un compte sans organisation n'est pas lu"));
+        w.refresh(&shared, &[]);
+        assert!(!w.loading(), "aucune lecture lancée");
+        assert_eq!(w.loads["az"].error.as_deref(), Some(no_azure_orgs_explanation().as_str()));
+        assert_eq!(w.empty_message(&shared.settings.accounts), None, "l'explication, pas « Aucune pull request »");
+    }
+
+    #[test]
+    fn the_empty_message_is_not_shown_when_every_shown_account_failed() {
+        let accounts = [account("gh", ForgeKind::GitHub, "github.com"), account("gl", ForgeKind::GitLab, "gitlab.com")];
+        let mut w = window_with(vec![("gh", vec![]), ("gl", vec![])]);
+        for id in ["gh", "gl"] {
+            w.loads.get_mut(id).unwrap().error = Some("refusé".into());
+        }
+        assert_eq!(w.empty_message(&accounts), None, "tous les comptes en erreur");
+        w.loads.get_mut("gl").unwrap().error = None;
+        assert_eq!(w.empty_message(&accounts), Some("Aucune pull request ouverte."), "un compte a répondu, sans rien");
+        w.text = "remises".into();
+        assert_eq!(w.empty_message(&accounts), Some("Aucune pull request ne correspond aux filtres."));
+        w.account_filter = Some("gh".into());
+        assert_eq!(w.empty_message(&accounts), None, "le seul compte affiché est en erreur");
+        w.account_filter = None;
+        w.loads.get_mut("gl").unwrap().loading = true;
+        assert_eq!(w.empty_message(&accounts), None, "lecture en cours");
     }
 }

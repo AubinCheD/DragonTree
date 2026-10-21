@@ -89,7 +89,7 @@ fn first_success<T>(attempts: impl IntoIterator<Item = Result<T, ForgeError>>) -
     Err(first_error.unwrap_or_else(|| ForgeError::InvalidInput(tr!("aucune organisation indiquée").into())))
 }
 
-/// Résultats (dépôts, pull requests) de toutes les organisations : les échecs sont ignorés si au moins une
+/// Dépôts de toutes les organisations : les échecs sont ignorés si au moins une
 /// organisation répond ; si toutes échouent, la première erreur est renvoyée.
 pub(crate) fn merge_org_results<T>(
     results: impl IntoIterator<Item = Result<Vec<T>, ForgeError>>,

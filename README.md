@@ -89,7 +89,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   récemment mise à jour à la plus ancienne, avec branches, brouillon et relecture demandée. Filtres : créées par moi,
   à relire, par compte et texte. Le titre ouvre la pull request dans le navigateur ; « Ouvrir le dépôt » ouvre le clone
   local qui a ce dépôt en remote (dépôts récents et liste de droite). Relecture à l'ouverture, toutes les 5 minutes tant
-  que la fenêtre est ouverte et par Actualiser ; l'erreur d'un compte s'affiche à sa place sans bloquer les autres.
+  que la fenêtre est ouverte et par Actualiser ; l'erreur d'un compte s'affiche à sa place sans bloquer les autres,
+  comme une organisation Azure DevOps qui n'a pas répondu, et un compte Azure DevOps sans organisation est expliqué.
 - Surveillance du dossier (rafraîchissement automatique), fetch automatique silencieux, palette **Ctrl+P**
   (dépôts, branches, commandes), journal des commandes git, thèmes clair/sombre.
 - **Interface en français ou en anglais** (Réglages › Apparence › Langue), changement immédiat sans redémarrer.
@@ -232,6 +233,10 @@ des fichiers `tests/live*.rs`.
 ## Limites connues et suite
 
 - Vue des pull requests : Azure DevOps ne donne pas de date de mise à jour (la date affichée est celle de création) ;
-  500 résultats au plus par recherche GitHub et 1 000 par liste GitLab ou Azure DevOps ; les remotes des clones locaux
-  sont lus dans `.git/config` sans suivre `include.path` ni `url.<base>.insteadOf`.
+  500 résultats au plus par recherche GitHub et 1 000 par liste GitLab ou Azure DevOps ; sur GitLab, « À relire » et
+  « Relecture demandée » veulent dire « relecteur désigné » : GitLab garde les relecteurs après leur relecture et sa
+  liste ne donne pas l'état de chaque relecture, donc une merge request déjà relue y reste. Les remotes des clones
+  locaux sont lus dans `.git/config` sans suivre `include.path` ni `url.<base>.insteadOf`, ni les valeurs continuées
+  sur plusieurs lignes ou un fichier qui n'est pas en UTF-8 ; un remote qui passe par un alias d'hôte SSH
+  (`~/.ssh/config`) n'est jamais relié à sa pull request.
 - Dépôts SHA-256 non pris en charge.

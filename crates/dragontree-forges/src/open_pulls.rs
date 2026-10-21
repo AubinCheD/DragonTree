@@ -35,6 +35,10 @@ pub struct PullRequest {
     pub created_by_me: bool,
     /// Relecture attendue de l'utilisateur du compte (demandée directement ou à une de ses équipes, sans vote
     /// encore sur Azure DevOps).
+    ///
+    /// GitLab : l'utilisateur est un relecteur désigné. GitLab garde les relecteurs après leur relecture et sa liste
+    /// de merge requests ne donne pas l'état de chaque relecture : une merge request déjà relue reste « à relire »
+    /// tant qu'elle est ouverte et que l'utilisateur figure parmi ses relecteurs.
     pub review_requested: bool,
     /// Page web de la pull request.
     pub url: String,
@@ -63,6 +67,15 @@ impl PullRequest {
     }
 }
 
+/// Pull requests lues pour un compte.
+#[derive(Debug, Clone, Default)]
+pub struct PullRequestList {
+    pub prs: Vec<PullRequest>,
+    /// Organisations Azure DevOps qui n'ont pas répondu (nom, erreur) alors qu'une autre l'a fait : leurs pull requests
+    /// manquent à la liste. Toujours vide sur GitHub et GitLab.
+    pub failed_orgs: Vec<(String, ForgeError)>,
+}
+
 /// Même identifiant, sans tenir compte de la casse (logins GitHub et GitLab, GUID d'Azure DevOps).
 fn same_user(a: &str, b: &str) -> bool {
     !a.trim().is_empty() && a.trim().eq_ignore_ascii_case(b.trim())
@@ -78,26 +91,31 @@ fn refs<'a>(headers: &'a [(&'static str, String)]) -> Vec<(&'static str, &'a str
 ///   recherche (la recherche REST demanderait un appel de plus par pull request) ;
 /// - GitLab : créées par lui, assignées à lui, et celles dont il est relecteur ;
 /// - Azure DevOps : créées par lui et celles dont il est relecteur, dans chaque organisation du compte (une
-///   organisation qui échoue est ignorée si une autre répond, comme pour la liste des dépôts).
-pub fn list_pull_requests(account: &Account, token: &str) -> Result<Vec<PullRequest>, ForgeError> {
+///   organisation qui échoue est renvoyée dans [`PullRequestList::failed_orgs`] si une autre répond ; si toutes
+///   échouent, la première erreur). Sans organisation, la liste est vide.
+pub fn list_pull_requests(account: &Account, token: &str) -> Result<PullRequestList, ForgeError> {
     let token = crate::clean_token(token)?;
     let host = normalize_host(&account.host, account.kind);
-    let prs = match account.kind {
+    let mut list = match account.kind {
         ForgeKind::GitHub => {
             let headers = github::auth_headers(token);
             let headers = refs(&headers);
-            github_list(&host, &account.username, |request| {
+            let prs = github_list(&host, &account.username, |request| {
                 http::post_json(&request.url, &headers, &request.body.to_string())
-            })?
+            })?;
+            PullRequestList { prs, failed_orgs: Vec::new() }
         }
         ForgeKind::GitLab => {
             let headers = gitlab::auth_headers(token);
             let headers = refs(&headers);
-            gitlab_list(&host, &account.username, |url| Ok(http::check_status(http::get(url, &headers)?)?.body))?
+            let prs =
+                gitlab_list(&host, &account.username, |url| Ok(http::check_status(http::get(url, &headers)?)?.body))?;
+            PullRequestList { prs, failed_orgs: Vec::new() }
         }
         ForgeKind::AzureDevOps => azure_list(&host, &account.orgs, |url| azure::get(url, token))?,
     };
-    Ok(finalize(prs, &account.id))
+    list.prs = finalize(std::mem::take(&mut list.prs), &account.id);
+    Ok(list)
 }
 
 // --- GitHub -------------------------------------------------------------------------------------
@@ -556,13 +574,28 @@ fn azure_org_pull_requests(
     Ok(prs)
 }
 
+/// Pull requests de chaque organisation : celles qui échouent sont signalées (`failed_orgs`) si une autre répond ; si
+/// toutes échouent, la première erreur est renvoyée.
 fn azure_list(
     host: &str,
     orgs: &[String],
     mut get: impl FnMut(&str) -> Result<String, ForgeError>,
-) -> Result<Vec<PullRequest>, ForgeError> {
-    let orgs = azure::clean_orgs(orgs);
-    azure::merge_org_results(orgs.into_iter().map(|org| azure_org_pull_requests(host, org, &mut get)))
+) -> Result<PullRequestList, ForgeError> {
+    let mut list = PullRequestList::default();
+    let mut answered = false;
+    for org in azure::clean_orgs(orgs) {
+        match azure_org_pull_requests(host, org, &mut get) {
+            Ok(prs) => {
+                answered = true;
+                list.prs.extend(prs);
+            }
+            Err(e) => list.failed_orgs.push((org.to_string(), e)),
+        }
+    }
+    if !answered && !list.failed_orgs.is_empty() {
+        return Err(list.failed_orgs.swap_remove(0).1);
+    }
+    Ok(list)
 }
 
 // --- Commun -------------------------------------------------------------------------------------
@@ -854,7 +887,7 @@ mod tests {
     #[test]
     fn azure_pull_requests_fixture_parses() {
         let orgs = ["fabrikam".to_string()];
-        let prs = finalize(azure_list("dev.azure.com", &orgs, azure_answers).unwrap(), "acc-3");
+        let prs = finalize(azure_list("dev.azure.com", &orgs, azure_answers).unwrap().prs, "acc-3");
         assert_eq!(titles(&prs), ["Prépare la version 2", "Ajoute la recherche"]);
 
         let search = &prs[1];
@@ -895,7 +928,8 @@ mod tests {
         let prs = azure_list("dev.azure.com", &orgs, |url| {
             if url.contains("reviewerId") { Ok(voted.clone()) } else { azure_answers(url) }
         })
-        .unwrap();
+        .unwrap()
+        .prs;
         let search = prs.iter().find(|pr| pr.number == 12).unwrap();
         assert!(!search.review_requested, "l'utilisateur a déjà voté");
     }
@@ -909,7 +943,8 @@ mod tests {
         let found_as_reviewer = azure_list("dev.azure.com", &orgs, |url| {
             if url.contains("reviewerId") { Ok(team_only.clone()) } else { azure_answers(url) }
         })
-        .unwrap();
+        .unwrap()
+        .prs;
         assert!(found_as_reviewer.iter().any(|pr| pr.number == 12 && pr.review_requested));
         // Trouvée comme auteur, sans y figurer comme relecteur : rien à relire.
         let found_as_author = azure_list("dev.azure.com", &orgs, |url| {
@@ -921,25 +956,38 @@ mod tests {
                 azure_answers(url)
             }
         })
-        .unwrap();
+        .unwrap()
+        .prs;
         assert!(found_as_author.iter().all(|pr| !pr.review_requested), "{found_as_author:?}");
     }
 
     #[test]
-    fn azure_failing_organisations_are_ignored_when_another_answers() {
-        let orgs = ["contoso".to_string(), "fabrikam".to_string()];
-        let prs = azure_list("dev.azure.com", &orgs, |url| {
+    fn azure_failing_organisations_are_reported_when_another_answers() {
+        let orgs = ["contoso".to_string(), "fabrikam".to_string(), "northwind".to_string()];
+        let list = azure_list("dev.azure.com", &orgs, |url| {
             if url.starts_with("https://dev.azure.com/contoso/") {
                 Err(ForgeError::Unauthorized)
+            } else if url.starts_with("https://dev.azure.com/northwind/") {
+                Err(ForgeError::Network("délai dépassé".into()))
             } else {
                 azure_answers(url)
             }
         })
         .unwrap();
-        assert_eq!(prs.len(), 2);
+        assert_eq!(list.prs.len(), 2, "les pull requests de l'organisation qui répond");
+        let failed: Vec<(&str, String)> =
+            list.failed_orgs.iter().map(|(org, e)| (org.as_str(), e.to_string())).collect();
+        assert_eq!(failed.len(), 2, "{failed:?}");
+        assert_eq!(failed[0].0, "contoso");
+        assert!(matches!(list.failed_orgs[0].1, ForgeError::Unauthorized));
+        assert_eq!(failed[1].0, "northwind");
+        assert!(failed[1].1.contains("délai dépassé"), "{failed:?}");
+        // Toutes en échec : la première erreur, sans liste.
         let failed = azure_list("dev.azure.com", &orgs[..1], |_| Err(ForgeError::Unauthorized));
         assert!(matches!(failed, Err(ForgeError::Unauthorized)));
-        assert!(azure_list("dev.azure.com", &[], |_| panic!("aucune requête sans organisation")).unwrap().is_empty());
+        let none =
+            azure_list("dev.azure.com", &[" / ".into()], |_| panic!("aucune requête sans organisation")).unwrap();
+        assert!(none.prs.is_empty() && none.failed_orgs.is_empty());
     }
 
     #[test]

@@ -20,7 +20,7 @@ use dragontree_i18n::tr;
 pub use auth::{account_matches_url, git_auth_env, recommended_scopes, token_creation_url};
 pub use location::RepoLocation;
 pub use model::{Account, ForgeError, ForgeKind, RemoteRepo, VerifiedUser, new_account_id};
-pub use open_pulls::{PullRequest, list_pull_requests};
+pub use open_pulls::{PullRequest, PullRequestList, list_pull_requests};
 pub use pullrequest::{CreatedPullRequest, PullRequestDraft, create_pull_request, supports_reviewers};
 
 /// Vérifie un jeton et renvoie l'identité associée. `orgs_hint` : organisations saisies

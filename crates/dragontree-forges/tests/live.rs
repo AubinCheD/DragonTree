@@ -224,8 +224,10 @@ fn live_list_open_pull_requests() {
         avatar_url: user.avatar_url,
     };
     let started = std::time::Instant::now();
-    let prs = list_pull_requests(&account, &token).unwrap_or_else(|e| panic!("list_pull_requests : {e}"));
+    let list = list_pull_requests(&account, &token).unwrap_or_else(|e| panic!("list_pull_requests : {e}"));
+    let prs = &list.prs;
     println!("pull requests ouvertes : {}", prs.len());
+    println!("organisations en échec : {}", list.failed_orgs.len());
     println!("créées par l'utilisateur : {}", prs.iter().filter(|pr| pr.created_by_me).count());
     println!("relecture demandée : {}", prs.iter().filter(|pr| pr.review_requested).count());
     println!("brouillons : {}", prs.iter().filter(|pr| pr.draft).count());
