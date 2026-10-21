@@ -162,7 +162,8 @@ impl RepoTab {
     }
 
     /// Ajoute `pattern` au filtre de l'historique, ou l'en retire ; un filtre non vide désactive « branche
-    /// courante seulement » ; relit le journal.
+    /// courante seulement » (pour la session) ;
+    /// retirer le dernier revient au choix mémorisé ; relit le journal.
     pub(super) fn toggle_filter_ref(&mut self, shared: &Shared, pattern: &str) {
         match self.history.filter_refs.iter().position(|p| p == pattern) {
             Some(i) => {
@@ -172,13 +173,17 @@ impl RepoTab {
         }
         if !self.history.filter_refs.is_empty() {
             self.history.current_branch_only = false;
+        } else {
+            self.history.current_branch_only = shared.settings.current_branch_only_of(&self.path);
         }
         self.load_log(shared);
     }
 
-    /// Retire tout le filtre sur des branches choisies (« Tout afficher ») ; relit le journal.
+    /// Retire tout le filtre sur des branches choisies (« Tout afficher ») et revient au choix mémorisé
+    /// « branche courante seulement » ; relit le journal.
     pub(super) fn clear_filter_refs(&mut self, shared: &Shared) {
         self.history.filter_refs.clear();
+        self.history.current_branch_only = shared.settings.current_branch_only_of(&self.path);
         self.load_log(shared);
     }
 

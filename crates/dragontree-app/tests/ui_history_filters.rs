@@ -188,6 +188,7 @@ fn current_branch_only_is_remembered_per_repository_across_sessions() {
     wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
     assert_eq!(menu_item_checked(&h, entry), Some(true));
     h.key_press(Key::Escape);
+    drop(h);
 
     // Un autre dépôt n'est pas touché.
     let mut h = open(&other_repo);
@@ -206,4 +207,34 @@ fn current_branch_only_is_remembered_per_repository_across_sessions() {
     wait_until(&mut h, "réglage oublié", |_| {
         Settings::load_from(&tmp.path().join("profil").join("settings.json")).current_branch_only_repos.is_empty()
     });
+}
+
+/// Un filtre sur des branches désactive « branche courante seulement » pour la session ; le retirer (dernière
+/// pastille ou « Tout afficher ») revient au choix mémorisé.
+#[test]
+fn clearing_the_branch_filter_returns_to_the_remembered_current_branch_only_choice() {
+    let tmp = tempfile::tempdir().unwrap();
+    filter_repo(tmp.path());
+    let mut h = open_filter_repo(tmp.path());
+    let entry = "Branche courante seulement Ctrl+Maj+A";
+
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+    wait_until(&mut h, "branche courante seulement", |h| shown(h).is_empty());
+
+    for clear in ["Retirer du filtre : a", "Tout afficher"] {
+        click_label(&mut h, "Filtrer l'historique sur : a");
+        wait_until(&mut h, "filtre sur a", |h| shown(h) == ["Commit de a"]);
+        open_menu(&mut h, "Affichage");
+        wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
+        assert_eq!(menu_item_checked(&h, entry), Some(false), "le filtre prend le pas pour la session");
+        h.key_press(Key::Escape);
+
+        click_label(&mut h, clear);
+        wait_until(&mut h, "retour à la branche courante seulement", |h| shown(h).is_empty());
+        assert!(h.query_by_label("Commit principal").is_some());
+        open_menu(&mut h, "Affichage");
+        wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
+        assert_eq!(menu_item_checked(&h, entry), Some(true), "après {clear}");
+        h.key_press(Key::Escape);
+    }
 }
