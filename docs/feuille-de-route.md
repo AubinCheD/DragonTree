@@ -174,7 +174,7 @@ Activation et licence, mises à jour automatiques, modèle « Lean Branching » 
 
 ## Reste à faire
 
-Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2 (branche `points-restants`).
+Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2 et B3 (branche `points-restants`).
 
 ### Bugs à corriger
 
@@ -182,7 +182,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 |---|---|---|---|
 | B1 | Ctrl+1 (« Modifications locales ») jamais atteint (corrigé : Affichage › Modifications locales) | revue finale, mineur n°19 | basse |
 | B2 | Dossier `.git/dragontree-rebase` laissé après un rebase arrêté puis terminé (corrigé) | revue finale, mineur n°20 | basse |
-| B3 | Décocher « Amend » trop vite écrase le message restauré | revue finale, mineur n°13 | basse |
+| B3 | Décocher « Amend » trop vite écrase le message restauré (corrigé) | revue finale, mineur n°13 | basse |
 | B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié | revue finale, mineur n°10 | basse |
 | B5 | La fenêtre Réglages écrase des changements faits ailleurs (corrigé) | revue finale, mineur n°8 | basse |
 | B6 | `wt.exe -d` coupe un chemin contenant « ; » (corrigé) | revue finale, annexe de I8 | basse |
@@ -426,14 +426,12 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin :** atteint (tests d'intégration `continuing_a_stopped_rebase_removes_the_rebase_folder`, `aborting_…`, `skipping_…` et `a_rebase_still_in_progress_keeps_its_folder`, `crates/dragontree-git/tests/advanced_ops.rs`).
 - **Priorité :** basse.
 
-#### B3 — Décocher « Amend » trop vite écrase le message restauré
+#### B3 — Décocher « Amend » trop vite écrase le message restauré (fait)
 
 - **Contexte :** mineur n°13 de la revue finale.
-- **État :**
-  - cocher Amend lance la lecture du dernier message dans un thread (`crates/dragontree-app/src/repo/changes.rs:586-596`, `crates/dragontree-app/src/repo/actions.rs:265-271`) ;
-  - le résultat remplace le résumé et la description sans vérifier qu'Amend est encore coché (`crates/dragontree-app/src/repo/mod.rs:674-678`).
-- **À faire :** ignorer le message reçu si Amend a été décoché entre-temps, avec un numéro de génération comme pour les autres lectures.
-- **Critère de fin :** test : cocher puis décocher avant l'arrivée de l'événement ; le message saisi est conservé.
+- **État :** corrigé. Avant : cocher Amend lançait la lecture du dernier message dans un thread et le résultat remplaçait le résumé et la description sans vérifier qu'Amend était encore coché.
+- **Réalisé :** la lecture porte un numéro (`ChangesState::last_message_generation`, `RepoEvent::LastMessage(generation, message)`) ; cocher et décocher l'incrémentent, et `apply_last_message` (`crates/dragontree-app/src/repo/changes.rs`) ignore un message dont le numéro n'est plus le bon ou arrivé quand Amend n'est plus coché. Le message restauré ou saisi est conservé ; le modèle de message (R8) et les suggestions (C5, C7) ne sont pas touchés.
+- **Critère de fin :** atteint (tests unitaires `a_last_message_arriving_after_amend_was_unchecked_keeps_the_typed_message` et `a_last_message_from_an_earlier_check_is_ignored_after_checking_again`, `crates/dragontree-app/src/repo/changes.rs`).
 - **Priorité :** basse.
 
 #### B4 — Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié

@@ -299,11 +299,11 @@ impl RepoTab {
     }
 
     /// Charge le message du dernier commit (pour « Amend »).
-    pub(crate) fn load_last_message(&mut self, shared: &Shared) {
+    pub(crate) fn load_last_message(&mut self, shared: &Shared, generation: u64) {
         let Some(repo) = self.repo.clone() else { return };
         let id = self.id;
         shared.jobs.spawn("last-msg", move || {
-            Some(AppEvent::Repo(id, RepoEvent::LastMessage(repo.last_commit_message().unwrap_or_default())))
+            Some(AppEvent::Repo(id, RepoEvent::LastMessage(generation, repo.last_commit_message().unwrap_or_default())))
         });
     }
 

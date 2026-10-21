@@ -10,7 +10,7 @@ use super::commit_message::{self, LengthLevel};
 use super::details::file_row;
 use super::diff_view::{self, DiffMode};
 use super::patches::PatchSource;
-use super::{Dialog, RepoTab, Side};
+use super::{ChangesState, Dialog, RepoTab, Side};
 use crate::app::{AppAction, Shared};
 use crate::commands::Command;
 use crate::external_tools::ExternalDiff;
@@ -73,6 +73,35 @@ fn with_rename_origins(paths: &[String], status: &StatusSnapshot) -> Vec<String>
         }
     }
     all
+}
+
+impl ChangesState {
+    /// « Amend » vient d'être coché : retient le message saisi et renvoie le numéro de la lecture du dernier message.
+    fn start_amend(&mut self) -> u64 {
+        self.saved_message = Some((self.subject.clone(), self.body.clone()));
+        self.last_message_generation += 1;
+        self.last_message_generation
+    }
+
+    /// « Amend » vient d'être décoché : restaure le message saisi avant et invalide la lecture en cours.
+    fn stop_amend(&mut self) {
+        self.last_message_generation += 1;
+        if let Some((subject, body)) = self.saved_message.take() {
+            self.subject = subject;
+            self.body = body;
+        }
+    }
+
+    /// Dernier message lu : repris dans la zone de commit seulement si c'est la lecture attendue et qu'« Amend » est
+    /// toujours coché (sinon il écraserait le message restauré ou saisi depuis).
+    pub(super) fn apply_last_message(&mut self, generation: u64, message: &str) {
+        if generation != self.last_message_generation || !self.amend {
+            return;
+        }
+        let (subject, body) = super::split_message(message);
+        self.subject = subject;
+        self.body = body;
+    }
 }
 
 impl RepoTab {
@@ -839,11 +868,10 @@ impl RepoTab {
             ui.checkbox(&mut self.changes.amend, "Amend").on_hover_text(tr!("Modifier le dernier commit"));
             if self.changes.amend != before {
                 if self.changes.amend {
-                    self.changes.saved_message = Some((self.changes.subject.clone(), self.changes.body.clone()));
-                    self.load_last_message(shared);
-                } else if let Some((s, b)) = self.changes.saved_message.take() {
-                    self.changes.subject = s;
-                    self.changes.body = b;
+                    let generation = self.changes.start_amend();
+                    self.load_last_message(shared, generation);
+                } else {
+                    self.changes.stop_amend();
                 }
             }
             if ui.checkbox(&mut self.changes.push_after, tr!("Pousser après le commit")).changed() {
@@ -920,5 +948,46 @@ mod tests {
         assert_eq!(with_rename_origins(&chosen, &status), ["neuf.txt", "b.txt", "vieux.txt"]);
         // Un renommage non choisi n'ajoute rien.
         assert_eq!(with_rename_origins(&["b.txt".to_string()], &status), ["b.txt"]);
+    }
+
+    /// Zone de commit où `subject` est saisi puis « Amend » coché, comme le fait la case à cocher.
+    fn amending(subject: &str) -> (ChangesState, u64) {
+        let mut c = ChangesState { subject: subject.into(), ..Default::default() };
+        c.amend = true;
+        let generation = c.start_amend();
+        (c, generation)
+    }
+
+    #[test]
+    fn the_last_message_replaces_the_text_while_amend_stays_checked() {
+        let (mut c, generation) = amending("Saisi");
+        c.apply_last_message(generation, "Ancien sujet\n\nCorps\n");
+        assert_eq!((c.subject.as_str(), c.body.as_str()), ("Ancien sujet", "Corps"));
+        // Décocher restaure ce qui avait été saisi.
+        c.amend = false;
+        c.stop_amend();
+        assert_eq!((c.subject.as_str(), c.body.as_str()), ("Saisi", ""));
+    }
+
+    #[test]
+    fn a_last_message_arriving_after_amend_was_unchecked_keeps_the_typed_message() {
+        let (mut c, generation) = amending("Saisi");
+        c.amend = false;
+        c.stop_amend();
+        c.apply_last_message(generation, "Ancien sujet\n\nCorps\n");
+        assert_eq!((c.subject.as_str(), c.body.as_str()), ("Saisi", ""));
+    }
+
+    #[test]
+    fn a_last_message_from_an_earlier_check_is_ignored_after_checking_again() {
+        let (mut c, first) = amending("Saisi");
+        c.amend = false;
+        c.stop_amend();
+        c.amend = true;
+        let second = c.start_amend();
+        c.apply_last_message(first, "Premier\n");
+        assert_eq!(c.subject, "Saisi");
+        c.apply_last_message(second, "Second\n");
+        assert_eq!(c.subject, "Second");
     }
 }

@@ -239,6 +239,9 @@ pub struct ChangesState {
     pub push_after: bool,
     /// Message saisi avant de cocher « Amend » (restauré si on décoche).
     saved_message: Option<(String, String)>,
+    /// Numéro de la dernière lecture du message du dernier commit (cocher ou décocher « Amend » le change) : une
+    /// lecture arrivée après un décochage, ou après un nouveau cochage, est ignorée.
+    last_message_generation: u64,
     /// Message de fusion (MERGE_MSG) déjà repris dans la zone de commit.
     merge_msg_loaded: bool,
     /// Modèle de message que la zone de commit a reçu (sujet, corps) : tant qu'elle le contient tel quel, elle
@@ -356,7 +359,8 @@ pub enum RepoEvent {
         /// La liste des worktrees liés (`<common>/worktrees`) a changé.
         worktrees: bool,
     },
-    LastMessage(String),
+    /// Message du dernier commit lu pour « Amend » (numéro de lecture : `ChangesState::last_message_generation`).
+    LastMessage(u64, String),
     Blame(blame::BlameEvent),
     Compare(compare::CompareEvent),
     /// Verrous Git LFS lus sur le serveur pour la fenêtre des verrous.
@@ -1034,10 +1038,8 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                     None => (deadline, what),
                 });
             }
-            RepoEvent::LastMessage(msg) => {
-                let (subject, body) = split_message(&msg);
-                self.changes.subject = subject;
-                self.changes.body = body;
+            RepoEvent::LastMessage(generation, msg) => {
+                self.changes.apply_last_message(generation, &msg);
             }
             RepoEvent::Blame(ev) => {
                 if let Some(w) = &mut self.file_history {
