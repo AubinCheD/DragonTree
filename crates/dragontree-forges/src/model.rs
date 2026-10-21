@@ -96,6 +96,11 @@ impl RemoteRepo {
     pub fn full_name(&self) -> String {
         format!("{}/{}", self.namespace, self.name)
     }
+
+    /// Date de dernière activité en secondes Unix (UTC), si elle est connue et lisible.
+    pub fn updated_timestamp(&self) -> Option<i64> {
+        self.updated_at.as_deref().and_then(timestamp_key).map(|(secs, _)| secs)
+    }
 }
 
 /// Erreur d'une opération sur une forge.
@@ -397,6 +402,13 @@ mod tests {
         assert_eq!(timestamp_key("2024-01-15T09:30:12.1234567+00:00"), Some((1_705_311_012, 123_456_700)));
         assert_eq!(timestamp_key("hier"), None);
         assert_eq!(timestamp_key("2024-13-01T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn updated_timestamp_reads_the_activity_date() {
+        assert_eq!(repo("a", "ns", Some("2011-01-26T19:06:43Z")).updated_timestamp(), Some(1_296_068_803));
+        assert_eq!(repo("a", "ns", Some("pas une date")).updated_timestamp(), None);
+        assert_eq!(repo("a", "ns", None).updated_timestamp(), None);
     }
 
     #[test]

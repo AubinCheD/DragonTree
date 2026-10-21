@@ -109,6 +109,12 @@ pub struct CloneWindow {
 }
 
 /// Nom de dossier déduit d'une URL (`…/repo.git` → `repo`).
+/// Date de mise à jour d'un dépôt pour la liste : relative si récente, absolue sinon ; `None` si la forge n'en donne
+/// pas (Azure DevOps).
+fn updated_label(r: &RemoteRepo, now: i64) -> Option<String> {
+    r.updated_timestamp().map(|ts| widgets::format_time(ts, now))
+}
+
 pub fn folder_from_url(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
     let last = trimmed.rsplit(['/', ':']).next().unwrap_or("");
@@ -370,6 +376,7 @@ impl CloneWindow {
         }
         ui.label(RichText::new(trn!(rows.len(), "{n} dépôt", "{n} dépôts")).color(p.weak).size(12.0));
         let mut chosen: Option<(String, RemoteRepo)> = None;
+        let now = widgets::now_ts();
         egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, true]).show_rows(
             ui,
             38.0,
@@ -399,6 +406,16 @@ impl CloneWindow {
                         egui::FontId::new(13.5, crate::theme::bold_family()),
                         p.text,
                     );
+                    // Date de mise à jour, à droite de la première ligne (à gauche du cadenas).
+                    if let Some(when) = updated_label(r, now) {
+                        painter.text(
+                            rect.right_top() + egui::vec2(-34.0, 11.0),
+                            egui::Align2::RIGHT_CENTER,
+                            when,
+                            egui::FontId::proportional(11.5),
+                            p.weak,
+                        );
+                    }
                     let mut sub = r.namespace.clone();
                     if let Some(d) = r.description.as_ref().filter(|d| !d.is_empty()) {
                         sub.push_str(&format!(" — {d}"));
@@ -548,7 +565,33 @@ impl CloneWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::folder_from_url;
+    use super::{folder_from_url, updated_label};
+
+    fn repo(updated_at: Option<&str>) -> dragontree_forges::RemoteRepo {
+        dragontree_forges::RemoteRepo {
+            account_id: "acc".into(),
+            name: "api".into(),
+            namespace: "contoso".into(),
+            clone_url: "https://example.com/contoso/api.git".into(),
+            ssh_url: None,
+            web_url: "https://example.com/contoso/api".into(),
+            description: None,
+            private: false,
+            default_branch: None,
+            updated_at: updated_at.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn the_update_date_is_relative_when_recent_and_absolute_otherwise() {
+        let now = 1_296_068_803 + 3 * 3600;
+        // Forme des dates de GitHub (`pushed_at`) et de GitLab (`last_activity_at`, avec fraction).
+        assert_eq!(updated_label(&repo(Some("2011-01-26T19:06:43Z")), now).as_deref(), Some("il y a 3 h"));
+        assert_eq!(updated_label(&repo(Some("2011-01-26T19:06:43.841Z")), now).as_deref(), Some("il y a 3 h"));
+        let old = updated_label(&repo(Some("2011-01-26T19:06:43Z")), now + 30 * 86_400).unwrap();
+        assert!(old.contains("2011") || old.contains("26"), "date absolue : {old}");
+        assert_eq!(updated_label(&repo(None), now), None, "Azure DevOps : pas de date");
+    }
 
     #[test]
     fn folder_names_from_urls() {

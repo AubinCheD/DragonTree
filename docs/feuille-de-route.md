@@ -333,10 +333,9 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - **b. Colonne du graphe redimensionnable** (tâche 15) (fait).
     - État : réalisé. Une poignée au bord droit de la colonne, dans l'en-tête, la redimensionne (22 à 600 px) ; un double-clic revient à la largeur calculée d'après les branches (22 à 220 px, `graph_paint::graph_width`). La largeur choisie est enregistrée dans les réglages (`graph_column_width`, globale, absente par défaut) et prime sur la largeur calculée : repli des fusions et filtres ne la changent pas. La fenêtre Réglages ne l'édite pas.
     - Fin (atteinte) : `crates/dragontree-app/tests/ui_graph_column.rs` (glisser la poignée, largeur retrouvée par une nouvelle session du même profil ; double-clic).
-  - **c. Colonne « mise à jour » dans la liste de clonage** (tâche 18).
-    - État : la liste montre le nom, l'espace, la description et un cadenas (`crates/dragontree-app/src/clone.rs:373-427`). `RemoteRepo::updated_at` existe et sert déjà au tri (`crates/dragontree-forges/src/model.rs:91`, `:265`), mais Azure DevOps ne le renseigne pas (`crates/dragontree-forges/src/azure.rs:252`).
-    - À faire : afficher la date relative, et la chercher côté Azure DevOps (date du dernier push) si l'API la fournit.
-    - Fin : la date s'affiche sur les fixtures GitHub et GitLab.
+  - **c. Colonne « mise à jour » dans la liste de clonage** (tâche 18) (fait).
+    - État : réalisé. Chaque ligne affiche la date de mise à jour à droite de la première ligne, à gauche du cadenas (relative si récente, absolue sinon : `widgets::format_time`), d'après `RemoteRepo::updated_timestamp` (GitHub : `pushed_at`, sinon `updated_at` ; GitLab : `last_activity_at`). Azure DevOps : colonne vide, décision documentée dans `crates/dragontree-forges/src/azure.rs` : l'API des dépôts ne donne aucune date par dépôt (le `project.lastUpdateTime` est celui du projet, donc trompeur) et le dernier push demanderait un appel par dépôt.
+    - Fin (atteinte) : tests `updated_timestamp_reads_the_activity_date` (forges) et `the_update_date_is_relative_when_recent_and_absolute_otherwise` (formats GitHub et GitLab ; Azure sans date) ; `azure_repositories_fixture_parses` vérifie l'absence de date côté Azure.
   - **d. Aperçu du résultat dans l'éditeur de conflits** (tâche 22).
     - État : l'éditeur montre les deux côtés de chaque région, sans aperçu (`crates/dragontree-app/src/repo/conflicts.rs:91-164`). `resolve` (`crates/dragontree-git/src/conflict.rs:118`) sait déjà produire le texte final.
     - À faire : afficher le résultat au fil des choix.

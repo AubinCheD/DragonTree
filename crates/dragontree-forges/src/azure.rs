@@ -249,6 +249,8 @@ impl AzRepo {
             // Visibilité du projet ; inconnue → privé par prudence.
             private: !visibility.is_some_and(|v| v.eq_ignore_ascii_case("public")),
             default_branch,
+            // L'API des dépôts ne donne aucune date par dépôt (le `lastUpdateTime` de la réponse est celui du projet,
+            // pas du dépôt : trompeur) ; le dernier push demanderait un appel par dépôt. Colonne vide.
             updated_at: None,
         })
     }
@@ -465,6 +467,8 @@ mod tests {
         assert_eq!(fiber.default_branch.as_deref(), Some("main"));
         assert!(fiber.private);
         assert_eq!(fiber.description, None);
+        // Pas de date par dépôt : le `lastUpdateTime` de la fixture est celui du projet, on ne l'utilise pas.
+        assert_eq!(fiber.updated_at, None);
         assert_eq!(fiber.updated_at, None);
 
         let docs = &repos[1];

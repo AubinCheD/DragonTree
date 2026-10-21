@@ -83,7 +83,7 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   DragonTree lance la CLI `claude` en mode non interactif, sans aucun outil (`--tools ""`) : la consigne passe par stdin
   et la réponse revient sur stdout ; l'IA n'exécute ni ne modifie rien.
 - **Comptes GitHub, GitLab et Azure DevOps**, plusieurs à la fois (GitHub Enterprise, GitLab auto-hébergé et
-  Azure DevOps Server compris) ; **clonage** depuis la liste agrégée de vos dépôts ou depuis une URL.
+  Azure DevOps Server compris) ; **clonage** depuis la liste agrégée de vos dépôts (avec leur date de mise à jour, sauf Azure DevOps) ou depuis une URL.
 - Surveillance du dossier (rafraîchissement automatique), fetch automatique silencieux, palette **Ctrl+P**
   (dépôts, branches, commandes), journal des commandes git, thèmes clair/sombre.
 - **Interface en français ou en anglais** (Réglages › Apparence › Langue), changement immédiat sans redémarrer.
