@@ -16,6 +16,7 @@ mod details;
 mod dialogs;
 pub mod diff_view;
 mod external_diff;
+mod file_drag;
 mod folding;
 mod gitflow;
 mod graph_paint;

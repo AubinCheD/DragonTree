@@ -40,7 +40,23 @@ pub fn file_row(
     selected: bool,
     p: &Palette,
 ) -> egui::Response {
-    let (rect, resp) = widgets::row_response(ui, id_salt, 22.0, selected, Sense::click());
+    file_row_sense(ui, id_salt, letter, color, path, old_path, selected, Sense::click(), p)
+}
+
+/// Comme [`file_row`], avec le `sense` choisi (clic et glisser pour les listes de changements).
+#[allow(clippy::too_many_arguments)]
+pub fn file_row_sense(
+    ui: &mut Ui,
+    id_salt: impl egui::AsIdSalt,
+    letter: &str,
+    color: egui::Color32,
+    path: &str,
+    old_path: Option<&str>,
+    selected: bool,
+    sense: Sense,
+    p: &Palette,
+) -> egui::Response {
+    let (rect, resp) = widgets::row_response(ui, id_salt, 22.0, selected, sense);
     widgets::a11y(&resp, path, true);
     let badge = egui::Rect::from_center_size(rect.left_center() + egui::vec2(12.0, 0.0), egui::vec2(16.0, 16.0));
     ui.painter().rect_filled(badge, 3.0, color.gamma_multiply(0.16));

@@ -327,9 +327,9 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 - **Contexte :** la revue finale (mineur n°21) a relevé quatre éléments du plan absents. Ils ont été différés.
 - **État et travail restant :**
-  - **a. Glisser-déposer entre « Non indexés » et « Indexés »** (plan, tâche 16).
-    - État : absent. Un fichier change de liste par double-clic, Espace, Entrée ou par le menu (`crates/dragontree-app/src/repo/changes.rs:134-145`, `:261`).
-    - Fin : test d'interface où un glisser d'une liste à l'autre indexe le fichier.
+  - **a. Glisser-déposer entre « Non indexés » et « Indexés »** (plan, tâche 16) (fait).
+    - État : réalisé (`crates/dragontree-app/src/repo/file_drag.rs`). Un fichier se glisse d'une liste à l'autre ; toute la sélection de sa liste le suit ; conflits et fichiers ignorés ne se glissent pas. Double-clic, Espace, Entrée et menus sont inchangés.
+    - Fin (atteinte) : `crates/dragontree-app/tests/ui_file_drag.rs` (glisser vers Indexés puis retour, sélection multiple, dépôt sur sa propre liste).
   - **b. Colonne du graphe redimensionnable** (tâche 15).
     - État : la largeur est calculée et bornée entre 22 et 220 px (`crates/dragontree-app/src/repo/graph_paint.rs:40-42`, utilisée en `crates/dragontree-app/src/repo/history.rs:130`). Il n'y a pas de poignée.
     - À faire : ajouter une poignée et mémoriser la largeur.

@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use dragontree_git::{ConflictKind, FileState, OpState, PatchMode, StatusEntry, StatusSnapshot};
 use dragontree_i18n::{tr, trn};
-use egui::{Frame, Key, RichText, Ui};
+use egui::{Frame, Key, RichText, Sense, Ui};
 
 use super::commit_message::{self, LengthLevel};
-use super::details::file_row;
+use super::details::{file_row, file_row_sense};
 use super::diff_view::{self, DiffMode};
+use super::file_drag::{FileDrag, file_drag_ghost};
 use super::patches::PatchSource;
 use super::{ChangesState, Dialog, RepoTab, Side};
 use crate::app::{AppAction, Shared};
@@ -200,6 +201,7 @@ impl RepoTab {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(p.bg))
             .show(ui, |ui| self.change_detail(ui, shared, p, &status));
+        file_drag_ghost(ui.ctx());
     }
 
     fn changes_keyboard(&mut self, ui: &Ui, shared: &mut Shared, status: &Arc<StatusSnapshot>) {
@@ -234,7 +236,7 @@ impl RepoTab {
         }
     }
 
-    fn selection_paths(&self, side: Side) -> Vec<String> {
+    pub(super) fn selection_paths(&self, side: Side) -> Vec<String> {
         self.changes.multi.iter().filter(|(s, _)| *s == side).map(|(_, p)| p.clone()).collect()
     }
 
@@ -261,6 +263,9 @@ impl RepoTab {
     }
 
     fn file_list(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette, status: &Arc<StatusSnapshot>, side: Side) {
+        // Toute la zone de la liste reçoit les fichiers glissés depuis l'autre liste.
+        let list_rect = ui.available_rect_before_wrap();
+        self.file_drop_zone(ui, shared, p, side, list_rect);
         let entries = Self::entries(status, side, shared.settings.hide_untracked_files);
         // Fichiers ignorés : en fin de la liste des non indexés, seulement si le statut les a demandés.
         let ignored: Vec<StatusEntry> = if side == Side::Unstaged && shared.settings.show_ignored_files {
@@ -342,7 +347,12 @@ impl RepoTab {
                     let selected = self.changes.multi.contains(&key);
                     let (letter, color, label) = status_letter(e, side, p);
                     let orig = if side == Side::Staged { e.orig_path.as_deref() } else { None };
-                    let resp = file_row(ui, (side, &e.path), letter, color, &e.path, orig, selected, p);
+                    // Les fichiers en conflit ne se glissent pas ; les autres portent leur sélection.
+                    let sense = if side == Side::Conflict { Sense::click() } else { Sense::click_and_drag() };
+                    let resp = file_row_sense(ui, (side, &e.path), letter, color, &e.path, orig, selected, sense, p);
+                    if resp.drag_started() && side != Side::Conflict {
+                        resp.dnd_set_drag_payload(FileDrag { from: side, paths: self.dragged_paths(side, &e.path) });
+                    }
                     // Fichier géré par Git LFS : icône à droite de la ligne.
                     let resp = if self.lfs_files.contains(&e.path) {
                         ui.painter().text(

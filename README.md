@@ -26,6 +26,7 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   - **Graphe** : stashs affichés comme des commits (masquables), commits perdus du reflog (Ctrl+Maj+.), fusions
     repliables (← / →, Tout replier), révéler HEAD, tri topologique ou par date, disposition horizontale ou verticale.
   - **Glisser une branche** sur une autre pour la fusionner ou la rebaser.
+  - **Glisser des fichiers** entre « Non indexés » et « Indexés » pour les indexer ou les désindexer (la sélection suit).
   - **Comparer** deux commits, deux branches, ou un commit avec les modifications locales.
 - **Changements locaux** : fichiers non indexés / indexés / en conflit, indexation par fichier, par **hunk** ou
   par **ligne** (y compris fichiers non suivis et CRLF), annulation de modifications, « Ignorer » dans le
