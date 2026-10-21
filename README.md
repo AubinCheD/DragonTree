@@ -20,7 +20,7 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   message/auteur/SHA, dans le contenu des diffs ou par chemin, détails du commit, fichiers modifiés,
   diff unifié ou côte à côte avec coloration syntaxique et surlignage des caractères modifiés, images en côte à côte,
   par balayage ou par superposition.
-  - **Filtres** : toutes les branches, la branche courante seule (Ctrl+Maj+A, suit les checkouts) ou des branches,
+  - **Filtres** : toutes les branches, la branche courante seule (Ctrl+Maj+A, suit les checkouts, choix mémorisé par dépôt) ou des branches,
     dossiers et remotes choisis (entonnoir, bandeau « Filtré par »), masquer une branche, un dossier ou un remote
     (icône œil), masquer les tags ou les branches distantes.
   - **Graphe** : stashs affichés comme des commits (masquables), commits perdus du reflog (Ctrl+Maj+.), fusions

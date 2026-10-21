@@ -195,7 +195,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | T1 | Worktrees : lister, ouvrir, créer, supprimer (fait, via R3) | demande du 2026-10-17 | haute |
 | T2 | Barre de menus Fichier / Affichage / Dépôt / Configuration et raccourcis (fait) | demande du 2026-10-17 | haute |
 | T3 | Stashs plus visibles (fait : section avant Remotes et Tags, stashs dans le graphe) | demande du 2026-10-17 | moyenne |
-| T4 | Filtre sur la branche active : mémorisation par dépôt (à vérifier avec l'utilisateur ; raccourci fait, V2) | demande du 2026-10-17 | moyenne |
+| T4 | Filtre sur la branche active : mémorisation par dépôt (fait ; raccourci fait, V2) | demande du 2026-10-17 | moyenne |
 | T5 | Éléments du plan non livrés : glisser-déposer entre listes, colonne du graphe, colonne « mise à jour », aperçu des conflits | revue finale, mineur n°21 | basse |
 | T6 | Associer un compte à un dépôt existant | arbitrage de la tâche 18, « plus tard » | moyenne |
 
@@ -305,7 +305,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** avec 400 branches distantes, le stash est visible sans défilement (`the_stash_entry_is_visible_in_the_sidebar_without_scrolling_despite_many_remote_branches`, `crates/dragontree-app/tests/ui_stashes.rs`), plus les tests propres à V7 et R4.
 - **Priorité :** moyenne (demande explicite, mais la fonction existe).
 
-#### T4 — Filtre sur la branche active : raccourci et mémorisation
+#### T4 — Filtre sur la branche active : raccourci et mémorisation (fait)
 
 - **Contexte :** l'utilisateur a demandé à filtrer l'historique sur la branche active. La fonction existe ; même réserve que pour T3.
 - **État :**
@@ -313,14 +313,14 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - le journal est alors limité à HEAD (`crates/dragontree-app/src/repo/scope.rs:102`) et il est rechargé après chaque checkout ;
   - fait (V2) : raccourci Ctrl+Maj+A et entrée Affichage › Branche courante seulement (cochée quand le filtre est actif) ;
   - fait (V3) : filtre sur plusieurs branches, dossiers ou remotes, exclusif avec « Branche courante seulement » ;
-  - reste : le choix est propre à l'onglet et repart sur « Toutes les branches » à chaque ouverture (`crates/dragontree-app/src/repo/mod.rs:215`).
+  - réalisé : le choix est mémorisé par dépôt (`Settings::current_branch_only_repos`) et restauré à l'ouverture de l'onglet ; le filtre V3 reste de session ;
 - **À faire :**
   1. Raccourci Ctrl+Maj+A et entrée du menu Affichage (V2, fait).
   2. Mémoriser le choix par dépôt dans les réglages (Fork le garde par worktree), à confirmer avec l'utilisateur.
   3. Filtre sur plusieurs branches (V3, fait).
 - **Critère de fin :**
   - test d'interface : Ctrl+Maj+A bascule le filtre et son libellé (atteint : `current_branch_shortcut_hides_and_restores_the_other_branch_commits`, `crates/dragontree-app/tests/ui_history_filters.rs`) ;
-  - test : à la réouverture du dépôt, le choix est conservé (reste à faire).
+  - test : à la réouverture du dépôt, le choix est conservé (atteint : `current_branch_only_is_remembered_per_repository_across_sessions`, même fichier).
 - **Priorité :** moyenne (pour la mémorisation).
 
 #### T5 — Éléments du plan non livrés

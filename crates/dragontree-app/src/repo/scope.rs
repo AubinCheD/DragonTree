@@ -149,10 +149,12 @@ impl RepoTab {
         self.load_log(shared);
     }
 
-    /// Active ou désactive « branche courante seulement » ; l'activer retire le filtre sur des branches choisies
+    /// Active ou désactive « branche courante seulement » (mémorisé pour le dépôt) ; l'activer retire le filtre sur des branches choisies
     /// (les deux ne se combinent pas) ; relit le journal.
-    pub(super) fn set_current_branch_only(&mut self, shared: &Shared, on: bool) {
+    pub(super) fn set_current_branch_only(&mut self, shared: &mut Shared, on: bool) {
         self.history.current_branch_only = on;
+        shared.settings.set_current_branch_only(&self.path, on);
+        shared.settings_dirty = true;
         if on {
             self.history.filter_refs.clear();
         }
@@ -293,9 +295,9 @@ mod tests {
     #[test]
     fn current_branch_only_and_the_branch_filter_exclude_each_other() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut tab, shared) = tab_without_git(dir.path());
+        let (mut tab, mut shared) = tab_without_git(dir.path());
         tab.toggle_filter_ref(&shared, "refs/heads/a");
-        tab.set_current_branch_only(&shared, true);
+        tab.set_current_branch_only(&mut shared, true);
         assert!(tab.history.current_branch_only && tab.history.filter_refs.is_empty());
         assert_eq!(tab.log_options(&shared).scope, LogScope::Head);
         tab.toggle_filter_ref(&shared, "refs/heads/a");
@@ -308,14 +310,14 @@ mod tests {
     #[test]
     fn lost_commits_only_join_the_graph_of_all_branches() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut tab, shared) = tab_without_git(dir.path());
+        let (mut tab, mut shared) = tab_without_git(dir.path());
         assert!(!tab.shows_lost(), "désactivé par défaut");
         tab.history.show_lost = true;
         assert!(tab.shows_lost());
         tab.toggle_filter_ref(&shared, "refs/heads/a");
         assert!(!tab.shows_lost(), "pas avec un filtre sur des branches");
         tab.clear_filter_refs(&shared);
-        tab.set_current_branch_only(&shared, true);
+        tab.set_current_branch_only(&mut shared, true);
         assert!(!tab.shows_lost(), "pas avec la branche courante seulement");
         assert!(tab.history.show_lost, "le choix est gardé pour le retour à toutes les branches");
     }
@@ -336,9 +338,9 @@ mod tests {
         tab.toggle_filter_ref(&shared, "refs/heads/a");
         assert_eq!(tab.shown_stashes(&shared), [oid]);
         tab.clear_filter_refs(&shared);
-        tab.set_current_branch_only(&shared, true);
+        tab.set_current_branch_only(&mut shared, true);
         assert_eq!(tab.shown_stashes(&shared), [oid]);
-        tab.set_current_branch_only(&shared, false);
+        tab.set_current_branch_only(&mut shared, false);
         shared.settings.show_stashes = false;
         assert!(tab.shown_stashes(&shared).is_empty(), "réglage décoché");
     }

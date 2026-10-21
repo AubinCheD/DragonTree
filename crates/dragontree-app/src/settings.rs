@@ -1,7 +1,7 @@
 //! Réglages persistants (`%APPDATA%\DragonTree\settings.json`). Aucun secret ici : les jetons
 //! des comptes sont dans le Gestionnaire d'identifiants Windows.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use dragontree_forges::Account;
@@ -113,6 +113,9 @@ pub struct Settings {
     /// Dépôt (chemin) -> références masquées du graphe : noms complets ou motifs (`refs/heads/x`,
     /// `refs/heads/feature/*`, `refs/remotes/origin/*`).
     pub hidden_refs: BTreeMap<String, Vec<String>>,
+    /// Dépôts (chemin) dont l'historique est limité à la branche courante ; le filtre sur des branches choisies
+    /// (V3) reste propre à la session.
+    pub current_branch_only_repos: BTreeSet<String>,
     pub repo_list_width: f32,
     pub favorites: Vec<PathBuf>,
     pub hidden_repos: Vec<PathBuf>,
@@ -195,6 +198,7 @@ impl Default for Settings {
             show_ignored_files: false,
             hide_untracked_files: false,
             hidden_refs: BTreeMap::new(),
+            current_branch_only_repos: BTreeSet::new(),
             repo_list_width: 280.0,
             favorites: Vec::new(),
             hidden_repos: Vec::new(),
@@ -382,6 +386,20 @@ impl Settings {
         }
         if list.is_empty() {
             self.hidden_refs.remove(&path_key(repo));
+        }
+    }
+
+    /// Vrai si le choix « branche courante seulement » est mémorisé pour `repo`.
+    pub fn current_branch_only_of(&self, repo: &Path) -> bool {
+        self.current_branch_only_repos.contains(&path_key(repo))
+    }
+
+    /// Mémorise (ou oublie) le choix « branche courante seulement » de `repo`.
+    pub fn set_current_branch_only(&mut self, repo: &Path, on: bool) {
+        if on {
+            self.current_branch_only_repos.insert(path_key(repo));
+        } else {
+            self.current_branch_only_repos.remove(&path_key(repo));
         }
     }
 

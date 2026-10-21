@@ -522,6 +522,8 @@ impl RepoTab {
             pr_after_push: None,
             pr_generation: 0,
         };
+        // Le choix « branche courante seulement » est mémorisé par dépôt (le filtre sur des branches ne l'est pas).
+        tab.history.current_branch_only = shared.settings.current_branch_only_of(&tab.path);
         tab.reopen(shared);
         tab
     }

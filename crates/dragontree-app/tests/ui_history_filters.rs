@@ -5,6 +5,7 @@ mod common;
 
 use common::*;
 use dragontree_app::StartOptions;
+use dragontree_app::settings::Settings;
 use egui::{Key, Modifiers};
 use egui_kittest::kittest::Queryable;
 
@@ -148,4 +149,61 @@ fn current_branch_only_and_the_branch_filter_exclude_each_other() {
     open_menu(&mut h, "Affichage");
     wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
     assert_eq!(menu_item_checked(&h, entry), Some(false));
+}
+
+/// T4 : « Branche courante seulement » est mémorisé par dépôt et retrouvé à la réouverture.
+#[test]
+fn current_branch_only_is_remembered_per_repository_across_sessions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("divergent");
+    init_repo(&repo);
+    commit_file(&repo, "base.txt", "base\n", "Commit commun");
+    git(&repo, &["switch", "-q", "-c", "autre"]);
+    commit_file(&repo, "autre.txt", "autre\n", "Commit de l'autre branche");
+    git(&repo, &["switch", "-q", "main"]);
+    commit_file(&repo, "main.txt", "main\n", "Commit de la branche courante");
+    let other_repo = tmp.path().join("autre-depot");
+    init_repo(&other_repo);
+    commit_file(&other_repo, "x.txt", "x\n", "Commit de l'autre dépôt");
+
+    let open = |repo: &std::path::Path| {
+        harness(StartOptions { open: vec![repo.to_path_buf()], view: Some("history".into()), ..start(tmp.path()) })
+    };
+    let entry = "Branche courante seulement Ctrl+Maj+A";
+    {
+        let mut h = open(&repo);
+        wait_until(&mut h, "historique complet", |h| h.query_by_label("Commit de l'autre branche").is_some());
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+        wait_until(&mut h, "filtre actif", |h| h.query_by_label("Commit de l'autre branche").is_none());
+        wait_until(&mut h, "réglage enregistré", |_| {
+            Settings::load_from(&tmp.path().join("profil").join("settings.json")).current_branch_only_repos.len() == 1
+        });
+    }
+
+    let mut h = open(&repo);
+    wait_until(&mut h, "historique filtré", |h| h.query_by_label("Commit de la branche courante").is_some());
+    h.run_steps(10);
+    assert!(h.query_by_label("Commit de l'autre branche").is_none(), "filtre restauré à la réouverture");
+    open_menu(&mut h, "Affichage");
+    wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
+    assert_eq!(menu_item_checked(&h, entry), Some(true));
+    h.key_press(Key::Escape);
+
+    // Un autre dépôt n'est pas touché.
+    let mut h = open(&other_repo);
+    wait_until(&mut h, "autre dépôt", |h| h.query_by_label("Commit de l'autre dépôt").is_some());
+    open_menu(&mut h, "Affichage");
+    wait_until(&mut h, "entrée du filtre", |h| menu_item(h, entry).is_some());
+    assert_eq!(menu_item_checked(&h, entry), Some(false));
+    h.key_press(Key::Escape);
+    drop(h);
+
+    // Le décocher l'oublie.
+    let mut h = open(&repo);
+    wait_until(&mut h, "historique filtré", |h| h.query_by_label("Commit de la branche courante").is_some());
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+    wait_until(&mut h, "filtre retiré", |h| h.query_by_label("Commit de l'autre branche").is_some());
+    wait_until(&mut h, "réglage oublié", |_| {
+        Settings::load_from(&tmp.path().join("profil").join("settings.json")).current_branch_only_repos.is_empty()
+    });
 }
