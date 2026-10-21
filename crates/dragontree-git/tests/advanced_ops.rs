@@ -132,3 +132,75 @@ fn mergetool_resolves_with_configured_tool() {
     assert_eq!(t.read("f"), "theirs\n");
     assert!(repo.status().unwrap().conflicted().is_empty());
 }
+
+/// Rebase interactif qui s'arrête sur `edit` (premier commit) puis rejoue un `reword` : le dossier de rebase
+/// de DragonTree contient alors le todo et le message.
+fn stopped_rebase() -> (TestRepo, Repo) {
+    let t = TestRepo::new();
+    t.write("f", "0\n");
+    let base = t.commit_all("base");
+    t.write("a", "a\n");
+    t.commit_all("c1 ajoute a");
+    t.write("b", "b\n");
+    t.commit_all("c2 ajoute b");
+    let repo = open(&t);
+    let c = repo.rebase_candidates(&base).unwrap();
+    let items = vec![
+        RebaseItem { id: c[0].id, action: RebaseAction::Edit, summary: c[0].summary.to_string() },
+        RebaseItem {
+            id: c[1].id,
+            action: RebaseAction::Reword("c2 renommé".into()),
+            summary: c[1].summary.to_string(),
+        },
+    ];
+    repo.interactive_rebase(&base, &items).unwrap();
+    assert!(matches!(repo.operation_state(), OpState::Rebase { .. }), "le rebase doit être arrêté sur edit");
+    assert!(t.file(".git/dragontree-rebase").is_dir(), "le dossier reste tant que le rebase est en cours");
+    (t, repo)
+}
+
+#[test]
+fn continuing_a_stopped_rebase_removes_the_rebase_folder() {
+    let (t, repo) = stopped_rebase();
+    repo.continue_op(repo.operation_state()).unwrap();
+    assert_eq!(repo.operation_state(), OpState::None);
+    assert!(!t.file(".git/dragontree-rebase").exists());
+    assert_eq!(repo.last_commit_message().unwrap(), "c2 renommé");
+}
+
+#[test]
+fn aborting_a_stopped_rebase_removes_the_rebase_folder() {
+    let (t, repo) = stopped_rebase();
+    repo.abort_op(repo.operation_state()).unwrap();
+    assert_eq!(repo.operation_state(), OpState::None);
+    assert!(!t.file(".git/dragontree-rebase").exists());
+}
+
+#[test]
+fn skipping_the_last_commit_of_a_stopped_rebase_removes_the_rebase_folder() {
+    let (t, repo) = stopped_rebase();
+    repo.skip_rebase_commit().unwrap();
+    assert_eq!(repo.operation_state(), OpState::None);
+    assert!(!t.file(".git/dragontree-rebase").exists());
+}
+
+#[test]
+fn a_rebase_still_in_progress_keeps_its_folder() {
+    let t = TestRepo::new();
+    t.write("f", "base\n");
+    let base = t.commit_all("base");
+    t.write("f", "un\n");
+    t.commit_all("c1");
+    t.write("f", "deux\n");
+    t.commit_all("c2");
+    let repo = open(&t);
+    let c = repo.rebase_candidates(&base).unwrap();
+    let items = vec![
+        RebaseItem { id: c[0].id, action: RebaseAction::Edit, summary: c[0].summary.to_string() },
+        RebaseItem { id: c[1].id, action: RebaseAction::Edit, summary: c[1].summary.to_string() },
+    ];
+    repo.interactive_rebase(&base, &items).unwrap();
+    repo.continue_op(repo.operation_state()).unwrap();
+    assert!(matches!(repo.operation_state(), OpState::Rebase { .. }), "arrêté sur le second edit");
+    assert!(t.file(".git/dragontree-rebase").is_dir());
+}

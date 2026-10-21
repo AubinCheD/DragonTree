@@ -229,28 +229,34 @@ impl Repo {
     }
 
     pub fn continue_op(&self, state: OpState) -> Result<(), GitError> {
-        match state {
+        let result = match state {
             OpState::None => Ok(()),
             OpState::Merge => self.run_write(["commit", "--no-edit"]),
             OpState::Rebase { .. } => self.run_write(["rebase", "--continue"]),
             OpState::CherryPick => self.run_write(["cherry-pick", "--continue"]),
             OpState::Revert => self.run_write(["revert", "--continue"]),
-        }
+        };
+        self.cleanup_rebase_dir();
+        result
     }
 
     pub fn abort_op(&self, state: OpState) -> Result<(), GitError> {
-        match state {
+        let result = match state {
             OpState::None => Ok(()),
             OpState::Merge => self.run_write(["merge", "--abort"]),
             OpState::Rebase { .. } => self.run_write(["rebase", "--abort"]),
             OpState::CherryPick => self.run_write(["cherry-pick", "--abort"]),
             OpState::Revert => self.run_write(["revert", "--abort"]),
-        }
+        };
+        self.cleanup_rebase_dir();
+        result
     }
 
     /// Passe le commit courant d'un rebase arrêté.
     pub fn skip_rebase_commit(&self) -> Result<(), GitError> {
-        self.run_write(["rebase", "--skip"])
+        let result = self.run_write(["rebase", "--skip"]);
+        self.cleanup_rebase_dir();
+        result
     }
 
     pub fn create_tag(&self, name: &str, rev: &str, message: Option<&str>) -> Result<(), GitError> {

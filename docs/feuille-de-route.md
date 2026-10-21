@@ -174,14 +174,14 @@ Activation et licence, mises à jour automatiques, modèle « Lean Branching » 
 
 ## Reste à faire
 
-Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`).
+Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2 (branche `points-restants`).
 
 ### Bugs à corriger
 
 | # | Point | Origine | Priorité |
 |---|---|---|---|
 | B1 | Ctrl+1 (« Modifications locales ») jamais atteint (corrigé : Affichage › Modifications locales) | revue finale, mineur n°19 | basse |
-| B2 | Dossier `.git/dragontree-rebase` laissé après un rebase arrêté puis terminé | revue finale, mineur n°20 | basse |
+| B2 | Dossier `.git/dragontree-rebase` laissé après un rebase arrêté puis terminé (corrigé) | revue finale, mineur n°20 | basse |
 | B3 | Décocher « Amend » trop vite écrase le message restauré | revue finale, mineur n°13 | basse |
 | B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié | revue finale, mineur n°10 | basse |
 | B5 | La fenêtre Réglages écrase des changements faits ailleurs (corrigé) | revue finale, mineur n°8 | basse |
@@ -418,12 +418,12 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin :** atteint (accès par le menu testé, code mort supprimé).
 - **Priorité :** basse.
 
-#### B2 — Dossier `.git/dragontree-rebase` laissé après un rebase arrêté
+#### B2 — Dossier `.git/dragontree-rebase` laissé après un rebase arrêté (fait)
 
 - **Contexte :** mineur n°20 de la revue finale.
-- **État :** le dossier n'est supprimé que si le rebase se termine d'un seul coup (`crates/dragontree-git/src/rebase.rs:84-86`). Continuer, abandonner ou passer un commit depuis le bandeau (`crates/dragontree-git/src/ops.rs:193-216`) le laisse en place.
-- **À faire :** après chacune de ces trois opérations, supprimer le dossier si `operation_state()` vaut `None`.
-- **Critère de fin :** test d'intégration avec un rebase interactif contenant `edit` (il s'arrête), puis `continue_op` : le dossier a disparu. Même test avec `abort_op`.
+- **État :** corrigé. Avant : le dossier n'était supprimé que si le rebase se terminait d'un seul coup ; continuer, abandonner ou passer un commit depuis le bandeau le laissait en place.
+- **Réalisé :** `Repo::cleanup_rebase_dir` (`crates/dragontree-git/src/rebase.rs`) supprime le dossier quand `operation_state()` vaut `None` ; elle est appelée après `interactive_rebase`, `continue_op`, `abort_op` et `skip_rebase_commit` (`crates/dragontree-git/src/ops.rs`), même si git renvoie une erreur.
+- **Critère de fin :** atteint (tests d'intégration `continuing_a_stopped_rebase_removes_the_rebase_folder`, `aborting_…`, `skipping_…` et `a_rebase_still_in_progress_keeps_its_folder`, `crates/dragontree-git/tests/advanced_ops.rs`).
 - **Priorité :** basse.
 
 #### B3 — Décocher « Amend » trop vite écrase le message restauré

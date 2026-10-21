@@ -81,10 +81,16 @@ impl Repo {
             .args(["rebase", "-i", base])
             .run()
             .map(|_| ());
-        if self.operation_state() == OpState::None {
-            let _ = std::fs::remove_dir_all(&dir);
-        }
+        self.cleanup_rebase_dir();
         result
+    }
+
+    /// Supprime le dossier `dragontree-rebase` (todo et messages des « reword ») quand plus aucune opération n'est en
+    /// cours : à appeler après un rebase, qu'il se termine, soit arrêté puis continué, passé ou abandonné.
+    pub(crate) fn cleanup_rebase_dir(&self) {
+        if self.operation_state() == OpState::None {
+            let _ = std::fs::remove_dir_all(self.git_dir.join("dragontree-rebase"));
+        }
     }
 }
 
