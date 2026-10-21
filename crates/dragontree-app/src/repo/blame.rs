@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dragontree_git::blame::{BlameCommit, BlameLine};
-use dragontree_git::{ChangeKind, Commit, FileChange, FileDiff, GitError, LogOptions, LogScope, Oid, Repo};
+use dragontree_git::{ChangeKind, Commit, FileChange, GitError, LogOptions, LogScope, Oid, Repo};
 use dragontree_i18n::{tr, trn};
 use egui::{Align2, FontId, RichText, Sense, Ui};
 
@@ -12,13 +12,14 @@ use super::diff_view::{self, DiffMode, DiffViewState};
 use super::restore::{RestoreFrom, RestoreTarget};
 use super::{RepoEvent, RepoTab};
 use crate::app::{AppEvent, Shared, TabId};
+use crate::diff_style::LoadedDiff;
 use crate::icons;
 use crate::theme::Palette;
 use crate::widgets;
 
 pub enum BlameEvent {
     History(u64, Result<Vec<Commit>, GitError>),
-    Diff(u64, Result<FileDiff, GitError>),
+    Diff(u64, Result<LoadedDiff, GitError>),
     Blame(u64, Result<(Vec<BlameLine>, HashMap<Oid, BlameCommit>), GitError>),
 }
 
@@ -30,7 +31,7 @@ pub struct FileHistoryWindow {
     commits: Vec<Commit>,
     history_loading: bool,
     selected: Option<usize>,
-    diff: Option<FileDiff>,
+    diff: Option<LoadedDiff>,
     diff_state: DiffViewState,
     blame: Option<(Vec<BlameLine>, HashMap<Oid, BlameCommit>)>,
     blame_loading: bool,
@@ -91,10 +92,8 @@ impl FileHistoryWindow {
         let change = FileChange { path: self.path.clone(), old_path: None, kind: ChangeKind::Modified };
         let o = RepoTab::diff_options(shared);
         shared.jobs.spawn("file-diff", move || {
-            Some(AppEvent::Repo(
-                tab,
-                RepoEvent::Blame(BlameEvent::Diff(generation, repo.diff_commit_file(oid, parent, &change, &o))),
-            ))
+            let res = repo.diff_commit_file(oid, parent, &change, &o).map(LoadedDiff::new);
+            Some(AppEvent::Repo(tab, RepoEvent::Blame(BlameEvent::Diff(generation, res))))
         });
     }
 

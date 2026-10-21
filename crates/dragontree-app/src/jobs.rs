@@ -49,6 +49,39 @@ impl Jobs {
             }
         });
     }
+
+    /// Comme [`Jobs::spawn`], pour une tâche dont l'interface attend la réponse : si `f` panique ou si son thread ne
+    /// démarre pas, `fallback` est envoyé à la place (l'interface n'attend jamais en vain). Une tâche qui se termine
+    /// sans événement (`None`, calcul annulé) n'envoie rien.
+    pub fn spawn_guarded(&self, name: &str, fallback: AppEvent, f: impl FnOnce() -> Option<AppEvent> + Send + 'static) {
+        /// Envoie son événement s'il est détruit sans avoir été désarmé : panique de la tâche (déroulement de la
+        /// pile) ou thread jamais démarré (la tâche est alors détruite sans avoir tourné).
+        struct Fallback {
+            sender: EventSender,
+            event: Option<AppEvent>,
+        }
+        impl Fallback {
+            fn disarm(mut self) {
+                self.event = None;
+            }
+        }
+        impl Drop for Fallback {
+            fn drop(&mut self) {
+                if let Some(ev) = self.event.take() {
+                    self.sender.send(ev);
+                }
+            }
+        }
+        let fallback = Fallback { sender: self.sender.clone(), event: Some(fallback) };
+        let sender = self.sender.clone();
+        let _ = std::thread::Builder::new().name(format!("dragontree-{name}")).spawn(move || {
+            let ev = f();
+            fallback.disarm();
+            if let Some(ev) = ev {
+                sender.send(ev);
+            }
+        });
+    }
 }
 
 /// Exécute `f` ; une panique devient une erreur au lieu de tuer le thread appelant.
@@ -122,6 +155,25 @@ mod tests {
         worker.submit(|| panic!("tâche en échec"));
         worker.submit(move || tx.send(()).unwrap());
         rx.recv_timeout(Duration::from_secs(10)).expect("la file continue après une panique");
+    }
+
+    /// Réponse d'une tâche gardée : son événement, celui de secours si elle panique, rien si elle n'en a pas.
+    #[test]
+    fn a_guarded_job_that_panics_sends_its_fallback() {
+        let (jobs, rx) = Jobs::new(egui::Context::default());
+        let fallback = || AppEvent::GitVersion(0, Err("secours".into()));
+        let received = |rx: &Receiver<AppEvent>| match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(AppEvent::GitVersion(n, r)) => (n, r),
+            Ok(_) => panic!("événement inattendu"),
+            Err(e) => panic!("aucune réponse : {e}"),
+        };
+        jobs.spawn_guarded("panique", fallback(), || panic!("tâche en échec"));
+        assert_eq!(received(&rx), (0, Err("secours".into())), "panique : l'événement de secours");
+        jobs.spawn_guarded("reponse", fallback(), || Some(AppEvent::GitVersion(1, Ok("2.50".into()))));
+        assert_eq!(received(&rx), (1, Ok("2.50".into())), "réponse normale, sans secours");
+        jobs.spawn_guarded("rien", fallback(), || None);
+        jobs.spawn_guarded("apres", fallback(), || Some(AppEvent::GitVersion(2, Ok(String::new()))));
+        assert_eq!(received(&rx).0, 2, "une tâche sans réponse n'envoie rien");
     }
 
     #[test]

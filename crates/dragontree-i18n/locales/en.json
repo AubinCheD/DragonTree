@@ -724,6 +724,7 @@
   "Le fichier .gitmodules a des modifications non indexées : indexez-les ou annulez-les d'abord.": "The .gitmodules file has unstaged changes: stage or discard them first.",
   "Le fichier remis est aussi ajouté à l'index, comme le fait git checkout <commit> -- <chemin>.": "The restored file is also added to the index, as git checkout <commit> -- <path> does.",
   "Le fichier « {name} » existe déjà dans le dossier .ssh : DragonTree n'écrase jamais une clé.": "The file “{name}” already exists in the .ssh folder: DragonTree never overwrites a key.",
+  "Le filtre de l'historique n'a pas pu être calculé": "The history filter could not be computed",
   "Le hunk sera annulé dans la copie de travail.": "The hunk will be discarded in the working copy.",
   "le jeton est vide": "the token is empty",
   "Le motif doit tenir sur une seule ligne, non vide.": "The pattern must be a single, non-empty line.",

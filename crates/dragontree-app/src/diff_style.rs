@@ -2,8 +2,13 @@
 //!
 //! Le même style sert aux vues de diff (unifiée, côte à côte), au blame et à l'éditeur de conflits. Les marqueurs
 //! d'espaces (`·` et `→`) ne sont qu'un habillage d'affichage : le texte copié est toujours l'original.
+//!
+//! Les vues reçoivent le diff sous forme de [`LoadedDiff`] : son empreinte et sa taille sont calculées une fois, au
+//! chargement, et non à chaque image.
 
 use std::collections::BTreeSet;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use dragontree_git::FileDiff;
 use dragontree_i18n::tr;
@@ -182,6 +187,70 @@ pub fn copy_text(diff: &FileDiff, lines: &[(usize, usize)]) -> String {
     out
 }
 
+/// Diff chargé pour l'affichage, avec ce qui en est tiré une seule fois, au chargement et hors du thread de
+/// l'interface : l'empreinte de son contenu, clé des caches de la vue (lignes, surlignage intra-ligne) et de la
+/// coloration syntaxique, et sa taille, qui décide de la coloration. Partagé (`Arc`) : l'afficher à chaque image ne
+/// le copie pas.
+#[derive(Debug, Clone)]
+pub struct LoadedDiff {
+    diff: Arc<FileDiff>,
+    content: u64,
+    lines: usize,
+    bytes: usize,
+    longest_line: usize,
+}
+
+impl LoadedDiff {
+    pub fn new(diff: FileDiff) -> LoadedDiff {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        diff.display_path().hash(&mut h);
+        (diff.is_binary, diff.truncated, diff.hunks.len()).hash(&mut h);
+        let (mut lines, mut bytes, mut longest_line) = (0, 0, 0);
+        for hunk in &diff.hunks {
+            hunk.header.hash(&mut h);
+            hunk.lines.len().hash(&mut h);
+            for line in &hunk.lines {
+                (line.kind as u8).hash(&mut h);
+                line.text.hash(&mut h);
+                bytes += line.text.len();
+                longest_line = longest_line.max(line.text.len());
+            }
+            lines += hunk.lines.len();
+        }
+        LoadedDiff { diff: Arc::new(diff), content: h.finish(), lines, bytes, longest_line }
+    }
+
+    /// Empreinte du contenu : chemin (la syntaxe en dépend), nature (binaire, tronqué), puis chaque hunk : en-tête,
+    /// nature et texte de chaque ligne. Tout ce dont dépendent les lignes affichées, leur largeur, le surlignage
+    /// intra-ligne et les couleurs : une ligne modifiée change l'empreinte, même à longueur égale.
+    pub fn content_hash(&self) -> u64 {
+        self.content
+    }
+
+    /// Nombre de lignes, tous hunks confondus.
+    pub fn line_count(&self) -> usize {
+        self.lines
+    }
+
+    /// Taille du texte des lignes, en octets.
+    pub fn byte_count(&self) -> usize {
+        self.bytes
+    }
+
+    /// Taille de la plus longue ligne, en octets.
+    pub fn longest_line(&self) -> usize {
+        self.longest_line
+    }
+}
+
+impl std::ops::Deref for LoadedDiff {
+    type Target = FileDiff;
+
+    fn deref(&self) -> &FileDiff {
+        &self.diff
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +295,21 @@ mod tests {
         // Clic sur une ligne hors sélection : seule cette ligne est copiée.
         assert_eq!(copy_text(&diff, &lines_to_copy(&selected, (0, 0))), "a b\n");
         assert!(!text.contains('·') && !text.contains('→') && !text.starts_with(['+', '-']));
+    }
+
+    fn one_line(path: &str, added: &str) -> LoadedDiff {
+        let text = format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-x\n+{added}\n");
+        LoadedDiff::new(parse_unified_diff(&text).remove(0))
+    }
+
+    #[test]
+    fn the_content_hash_tells_apart_texts_of_the_same_length() {
+        let a = one_line("same.rs", "let a = 1;");
+        assert_ne!(a.content_hash(), one_line("same.rs", "let b = 1;").content_hash());
+        assert_eq!(a.content_hash(), one_line("same.rs", "let a = 1;").content_hash());
+        assert_ne!(a.content_hash(), one_line("other.rs", "let a = 1;").content_hash(), "le chemin compte");
+        assert_eq!((a.line_count(), a.byte_count(), a.longest_line()), (2, 11, 10));
+        assert_eq!(a.display_path(), "same.rs", "le diff reste lisible tel quel");
     }
 
     #[test]

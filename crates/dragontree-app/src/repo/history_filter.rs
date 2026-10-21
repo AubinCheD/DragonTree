@@ -9,16 +9,20 @@
 //! En attendant un résultat, le précédent reste affiché (pas de clignotement d'une frappe à l'autre). Les lignes
 //! désignent toujours la liste affichée : quand celle-ci est remplacée (journal relu, fusions repliées :
 //! `show_list`), l'ancien résultat est aussitôt ramené aux commits qu'elle contient encore (`carry_filter_over`),
-//! puis recalculé sur la nouvelle liste.
+//! puis recalculé sur la nouvelle liste. Un commit défilé pendant le calcul (sur ces lignes provisoires) l'est de
+//! nouveau à l'arrivée du résultat (`refollow`). La tâche répond toujours : si elle panique ou ne démarre pas, le
+//! calcul n'est plus attendu (`Jobs::spawn_guarded`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use dragontree_git::{CancelToken, Commit, Oid};
+use dragontree_i18n::tr;
 
 use super::history_search::SearchMode;
 use super::{RepoEvent, RepoTab};
 use crate::app::{AppEvent, Shared};
+use crate::toasts::Toast;
 use crate::widgets;
 
 /// Nombre de commits examinés entre deux vérifications de l'annulation.
@@ -92,6 +96,7 @@ impl RepoTab {
         self.history.filter_pending = false;
         let what = if query.is_empty() {
             self.history.filtered = None;
+            self.refollow();
             return;
         } else if mode == SearchMode::Text {
             FilterQuery::Text(widgets::fold(&query))
@@ -101,6 +106,7 @@ impl RepoTab {
                 // Recherche git pas encore terminée : aucune ligne.
                 None => {
                     self.history.filtered = Some(Arc::new(Vec::new()));
+                    self.refollow();
                     return;
                 }
             }
@@ -109,20 +115,35 @@ impl RepoTab {
         self.history.filter_cancel = Some(cancel.clone());
         self.history.filter_pending = true;
         let (generation, id, commits) = (self.gens.filter, self.id, self.history.commits.clone());
-        shared.jobs.spawn("history-filter", move || {
+        // Une tâche qui panique, ou qui ne démarre pas, répond quand même : le filtre n'attend jamais en vain.
+        let failed = AppEvent::Repo(id, RepoEvent::Filtered { generation, rows: None });
+        shared.jobs.spawn_guarded("history-filter", failed, move || {
             let rows = filter_rows(&commits, &what, &cancel)?;
-            Some(AppEvent::Repo(id, RepoEvent::Filtered { generation, rows }))
+            Some(AppEvent::Repo(id, RepoEvent::Filtered { generation, rows: Some(rows) }))
         });
     }
 
-    /// Résultat du filtre ; ignoré s'il n'est plus celui de la dernière saisie ou de la liste affichée.
-    pub(super) fn filter_done(&mut self, generation: u64, rows: Vec<usize>) {
+    /// Résultat du filtre ; ignoré s'il n'est plus celui de la dernière saisie ou de la liste affichée. En cas d'échec
+    /// de sa tâche (`None`), le résultat précédent reste affiché.
+    pub(super) fn filter_done(&mut self, shared: &mut Shared, generation: u64, rows: Option<Vec<usize>>) {
         if generation != self.gens.filter {
             return;
         }
         self.history.filter_pending = false;
         self.history.filter_cancel = None;
-        self.history.filtered = Some(Arc::new(rows));
+        match rows {
+            Some(rows) => self.history.filtered = Some(Arc::new(rows)),
+            None => shared.toast(Toast::error(tr!("Le filtre de l'historique n'a pas pu être calculé"), "")),
+        }
+        self.refollow();
+    }
+
+    /// Le filtre n'est plus en calcul : un commit défilé entre-temps, sur des lignes provisoires, l'est de nouveau sur
+    /// les lignes affichées, s'il est toujours sélectionné (un clic ou une flèche a pu en choisir un autre).
+    fn refollow(&mut self) {
+        if let Some(oid) = self.history.follow.take().filter(|oid| self.history.selected == Some(*oid)) {
+            self.scroll_to_commit(oid);
+        }
     }
 
     /// La liste affichée vient de remplacer `old` : le résultat du filtre (des lignes de `old`) est ramené aux
@@ -256,7 +277,7 @@ mod tests {
         tab.history.filter = "numéro 12345".into();
         tab.apply_filter(&shared);
         assert_eq!(summaries(&tab), numbered([4242].into_iter().chain(42420..=42429)), "l'ancien reste affiché");
-        tab.handle_event(RepoEvent::Filtered { generation: stale, rows: vec![0, 1, 2] }, &mut shared);
+        tab.handle_event(RepoEvent::Filtered { generation: stale, rows: Some(vec![0, 1, 2]) }, &mut shared);
         assert!(tab.history.filter_pending, "résultat périmé ignoré");
         until_filtered(&mut tab, &mut shared, &events);
         assert_eq!(summaries(&tab), numbered([12345]));
@@ -303,6 +324,47 @@ mod tests {
         let mut expected = vec!["Corrige le numéro 1 du nouveau module".to_string()];
         expected.extend(kept);
         assert_eq!(summaries(&tab), expected, "puis le calcul sur la nouvelle liste");
+    }
+
+    /// Un commit choisi pendant le calcul du filtre (recherche, « Aller à HEAD »…) est défilé sur les lignes
+    /// provisoires, puis de nouveau à l'arrivée du résultat : sa position y a changé.
+    #[test]
+    fn the_scroll_follows_the_selected_commit_when_the_filter_result_arrives() {
+        let (mut tab, mut shared, events, _dir) = tab_with(2_000);
+        tab.history.filter = "numéro 1".into();
+        tab.apply_filter(&shared);
+        until_filtered(&mut tab, &mut shared, &events);
+        tab.history.filter = "numéro 15".into();
+        tab.apply_filter(&shared);
+        assert!(tab.history.filter_pending);
+        // Le commit 1500 est la ligne 1 + 10 + 100 + 500 des résultats provisoires (« numéro 1… »).
+        tab.select_commit(&shared, oid(1500), true);
+        assert_eq!(tab.history.scroll_to.take(), Some(611), "défilé sur les lignes provisoires");
+        until_filtered(&mut tab, &mut shared, &events);
+        // Résultat de « numéro 15 » : 15, 150…159, puis 1500…1599.
+        assert_eq!(tab.history.scroll_to, Some(11), "défilé de nouveau sur le résultat");
+
+        // Un autre commit choisi entre-temps (clic, clavier) : le défilement n'y revient plus.
+        tab.history.filter = "numéro 1".into();
+        tab.apply_filter(&shared);
+        tab.select_commit(&shared, oid(1500), true);
+        tab.history.selected = Some(oid(15));
+        tab.history.scroll_to = None;
+        until_filtered(&mut tab, &mut shared, &events);
+        assert_eq!(tab.history.scroll_to, None);
+    }
+
+    /// Une tâche du filtre qui panique (ou ne démarre pas) répond quand même : le calcul n'est plus attendu, le
+    /// résultat précédent reste affiché.
+    #[test]
+    fn a_failed_filter_job_does_not_leave_the_filter_pending() {
+        let (mut tab, mut shared, _events, _dir) = tab_with(100);
+        tab.history.filter = "numéro 4".into();
+        tab.apply_filter(&shared);
+        assert!(tab.history.filter_pending);
+        tab.handle_event(RepoEvent::Filtered { generation: tab.gens.filter, rows: None }, &mut shared);
+        assert!(!tab.history.filter_pending, "plus de calcul attendu");
+        assert!(shared.toasts.has_error(), "l'échec est signalé");
     }
 
     #[test]

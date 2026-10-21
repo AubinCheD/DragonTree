@@ -254,19 +254,21 @@ impl RepoTab {
             PatchMode::Discard => tr!("Annulation"),
         };
         self.run_simple(shared, title, Refresh::STATUS, move |r| {
-            let diff = if untracked {
+            let added;
+            let diff: &dragontree_git::FileDiff = if untracked {
                 // Fichier non suivi : `git add -N` puis diff ordinaire (mêmes lignes, même ordre).
                 r.intent_to_add(&path)?;
-                r.diff_worktree_file(
+                added = r.diff_worktree_file(
                     &path,
                     false,
                     false,
                     &DiffOptions { context: o.context, ignore_whitespace: false },
-                )?
+                )?;
+                &added
             } else {
-                diff
+                &diff
             };
-            let Some(patch) = build_patch(&diff, &sel, mode.is_reverse()) else { return Ok(None) };
+            let Some(patch) = build_patch(diff, &sel, mode.is_reverse()) else { return Ok(None) };
             r.apply_patch(&patch, mode)?;
             Ok(None)
         });

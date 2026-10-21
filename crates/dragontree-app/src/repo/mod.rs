@@ -49,14 +49,15 @@ use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
-    BisectState, CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError,
-    GitFlowConfig, HeadState, LogOptions, LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry,
-    StatusSnapshot, Submodule, Worktree,
+    BisectState, CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, GitError, GitFlowConfig,
+    HeadState, LogOptions, LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot,
+    Submodule, Worktree,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
 
 use crate::app::{AppAction, AppEvent, Shared, TabId};
+use crate::diff_style::LoadedDiff;
 use crate::icons;
 use crate::repo_list::QuickStatus;
 use crate::theme::Palette;
@@ -160,13 +161,16 @@ pub struct HistoryState {
     pub filter_pending: bool,
     filter_cancel: Option<CancelToken>,
     pub scroll_to: Option<usize>,
+    /// Commit défilé pendant le calcul du filtre, donc sur des lignes provisoires : il l'est de nouveau à l'arrivée
+    /// du résultat, s'il est toujours sélectionné (`history_filter`).
+    follow: Option<Oid>,
     pub details: Option<(CommitInfo, Vec<FileChange>)>,
     /// Stash affiché : indice du premier fichier non suivi dans `details` et commit qui les porte (leur diff se lit
     /// depuis ce commit racine).
     pub stash_untracked: Option<(usize, Oid)>,
     pub details_loading: bool,
     pub selected_file: Option<usize>,
-    pub diff: Option<FileDiff>,
+    pub diff: Option<LoadedDiff>,
     pub diff_loading: bool,
     pub diff_state: DiffViewState,
     pub highlighter: crate::highlight::Highlighter,
@@ -210,6 +214,7 @@ impl Default for HistoryState {
             filter_pending: false,
             filter_cancel: None,
             scroll_to: None,
+            follow: None,
             details: None,
             stash_untracked: None,
             details_loading: false,
@@ -237,7 +242,7 @@ pub struct ChangesState {
     pub multi: BTreeSet<(Side, String)>,
     /// Point de départ d'une sélection Maj+clic (fichier, pas position : la liste change).
     pub anchor: Option<(Side, String)>,
-    pub diff: Option<FileDiff>,
+    pub diff: Option<LoadedDiff>,
     pub diff_key: Option<(Side, String)>,
     pub diff_loading: bool,
     pub diff_state: DiffViewState,
@@ -336,10 +341,11 @@ pub enum RepoEvent {
         generation: u64,
         result: Result<HashSet<Oid>, GitError>,
     },
-    /// Lignes de la liste affichée retenues par le filtre de l'historique (voir `history_filter`).
+    /// Lignes de la liste affichée retenues par le filtre de l'historique (voir `history_filter`) ; `None` si sa tâche
+    /// a échoué (panique, thread pas démarré).
     Filtered {
         generation: u64,
-        rows: Vec<usize>,
+        rows: Option<Vec<usize>>,
     },
     /// Liste affichée recalculée pour les fusions repliées (`follow_selection` : voir `show_list`).
     Folded {
@@ -350,8 +356,8 @@ pub enum RepoEvent {
     Extras(u64, Vec<StashEntry>, Vec<Remote>, Vec<Submodule>, Vec<Worktree>, Box<Integrations>),
     /// Détails d'un commit ; pour un stash, le commit de ses fichiers non suivis et l'indice du premier d'entre eux.
     Details(u64, Oid, Result<DetailsData, GitError>),
-    CommitDiff(u64, Result<FileDiff, GitError>),
-    WorkDiff(u64, (Side, String), Result<FileDiff, GitError>),
+    CommitDiff(u64, Result<LoadedDiff, GitError>),
+    WorkDiff(u64, (Side, String), Result<LoadedDiff, GitError>),
     /// Patch lu et vérifié, prêt pour le dialogue d'application.
     PatchPreview(u64, Result<Box<patches::PatchPreview>, GitError>),
     /// Texte d'un patch lu pour le presse-papiers.
@@ -787,7 +793,8 @@ impl RepoTab {
         self.gens.commit_diff += 1;
         let (g, id, o) = (self.gens.commit_diff, self.id, Self::diff_options(shared));
         shared.jobs.spawn("commit-diff", move || {
-            Some(AppEvent::Repo(id, RepoEvent::CommitDiff(g, repo.diff_commit_file(oid, parent, &change, &o))))
+            let res = repo.diff_commit_file(oid, parent, &change, &o).map(LoadedDiff::new);
+            Some(AppEvent::Repo(id, RepoEvent::CommitDiff(g, res)))
         });
     }
 
@@ -806,7 +813,7 @@ impl RepoTab {
         self.gens.work_diff += 1;
         let (g, id, o) = (self.gens.work_diff, self.id, Self::diff_options(shared));
         shared.jobs.spawn("work-diff", move || {
-            let res = repo.diff_worktree_file(&path, side == Side::Staged, untracked, &o);
+            let res = repo.diff_worktree_file(&path, side == Side::Staged, untracked, &o).map(LoadedDiff::new);
             Some(AppEvent::Repo(id, RepoEvent::WorkDiff(g, (side, path), res)))
         });
     }
@@ -909,7 +916,7 @@ impl RepoTab {
                 }
             }
             RepoEvent::Searched { generation, result } => self.search_done(generation, result),
-            RepoEvent::Filtered { generation, rows } => self.filter_done(generation, rows),
+            RepoEvent::Filtered { generation, rows } => self.filter_done(shared, generation, rows),
             RepoEvent::Folded { generation, view, follow_selection } if generation == self.gens.folding => {
                 let CollapsedLog { commits, graph, index, folded, hidden_in } = *view;
                 let list = CommitList { commits: Arc::new(commits), graph: Arc::new(graph), index: Arc::new(index) };
@@ -974,7 +981,7 @@ impl RepoTab {
                     Ok(d) => {
                         self.changes.diff = Some(d);
                         self.changes.diff_key = Some(key);
-                        self.changes.diff_state.prune_selection(self.changes.diff.as_ref());
+                        self.changes.diff_state.prune_selection(self.changes.diff.as_deref());
                     }
                     Err(e) => {
                         self.changes.diff = None;
@@ -1155,10 +1162,12 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
     }
 
     /// Fait défiler l'historique jusqu'à la ligne affichée de `oid` (parmi les résultats de la recherche si elle
-    /// est active).
+    /// est active). Pendant le calcul du filtre, la position est celle des lignes provisoires : elle est revue à
+    /// l'arrivée du résultat.
     pub(crate) fn scroll_to_commit(&mut self, oid: Oid) {
         if let Some(&row) = self.history.index.get(&oid) {
             self.history.scroll_to = Some(self.shown_position(row).unwrap_or(0));
+            self.history.follow = self.history.filter_pending.then_some(oid);
         }
     }
 

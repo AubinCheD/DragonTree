@@ -2,7 +2,6 @@
 //! sélection de lignes et actions sur les hunks (indexer, désindexer, annuler).
 
 use std::collections::{BTreeSet, HashMap};
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::time::Duration;
 
@@ -11,7 +10,7 @@ use dragontree_i18n::{tr, trn};
 use egui::text::LayoutJob;
 use egui::{Align2, FontId, Rect, RichText, Sense, TextFormat, Ui};
 
-use crate::diff_style::{DiffStyle, copy_text, expand_tabs, lines_to_copy, whitespace_markers};
+use crate::diff_style::{DiffStyle, LoadedDiff, copy_text, expand_tabs, lines_to_copy, whitespace_markers};
 use crate::highlight::{Highlighter, Span};
 use crate::icons;
 use crate::theme::Palette;
@@ -65,20 +64,17 @@ impl DiffViewState {
         });
         self.anchor = None;
     }
-}
 
-fn fingerprint(diff: &FileDiff) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    diff.display_path().hash(&mut h);
-    (diff.is_binary, diff.truncated, diff.hunks.len()).hash(&mut h);
-    for hunk in &diff.hunks {
-        hunk.header.hash(&mut h);
-        hunk.lines.len().hash(&mut h);
-        for l in &hunk.lines {
-            (l.kind as u8, l.text.len()).hash(&mut h);
+    /// Recalcule les lignes affichées et le surlignage intra-ligne si le contenu du diff (son empreinte, texte des
+    /// lignes compris), la disposition ou la largeur de tabulation ont changé.
+    fn refresh_cache(&mut self, diff: &LoadedDiff, split: bool, tab_width: usize) {
+        let key = diff.content_hash();
+        if self.cache.as_ref().is_none_or(|c| c.key != key || c.split != split || c.tab_width != tab_width) {
+            let (rows, max_chars) = build_rows(diff, split, tab_width);
+            let highlights = build_highlights(diff, tab_width);
+            self.cache = Some(RowCache { key, split, tab_width, rows, highlights, max_chars });
         }
     }
-    h.finish()
 }
 
 fn build_rows(diff: &FileDiff, split: bool, tab_width: usize) -> (Vec<Row>, usize) {
@@ -204,7 +200,7 @@ fn merge_close(ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
-    diff: &FileDiff,
+    diff: &LoadedDiff,
     mode: DiffMode,
     state: &mut DiffViewState,
     split: bool,
@@ -232,13 +228,8 @@ pub fn show(
         return None;
     }
 
-    let key = fingerprint(diff);
     let tab_width = style.tab_width;
-    if state.cache.as_ref().is_none_or(|c| c.key != key || c.split != split || c.tab_width != tab_width) {
-        let (rows, max_chars) = build_rows(diff, split, tab_width);
-        let highlights = build_highlights(diff, tab_width);
-        state.cache = Some(RowCache { key, split, tab_width, rows, highlights, max_chars });
-    }
+    state.refresh_cache(diff, split, tab_width);
     let cache = state.cache.take().expect("cache construit");
 
     let font = style.font_id();
@@ -681,11 +672,39 @@ mod tests {
     use dragontree_git::diff::parse_unified_diff;
 
     fn sample() -> FileDiff {
-        let text =
-            ["diff --git a/f b/f", "--- a/f", "+++ b/f", "@@ -1,3 +1,3 @@", " a", "-let x = 1;", "+let x = 42;", " c"]
-                .join("\n")
-                + "\n";
+        sample_with("let x = 42;")
+    }
+
+    /// Diff d'une ligne `let x = 1;` remplacée par `added`.
+    fn sample_with(added: &str) -> FileDiff {
+        let added = format!("+{added}");
+        let text = ["diff --git a/f b/f", "--- a/f", "+++ b/f", "@@ -1,3 +1,3 @@", " a", "-let x = 1;", &added, " c"]
+            .join("\n")
+            + "\n";
         parse_unified_diff(&text).remove(0)
+    }
+
+    /// Plages intra-ligne de la ligne ajoutée, en texte.
+    fn added_highlights(state: &DiffViewState, added: &str) -> Vec<String> {
+        let cache = state.cache.as_ref().expect("cache construit");
+        cache.highlights[&(0, 2)].iter().map(|r| added[r.clone()].to_string()).collect()
+    }
+
+    /// Rafraîchissement de l'état (le diff est relu en gardant la sélection, donc la vue et son cache) : une ligne
+    /// modifiée sans changer de longueur est surlignée à nouveau, et une tabulation devenue espace change la largeur.
+    #[test]
+    fn a_line_edited_without_changing_its_length_is_highlighted_again() {
+        let mut state = DiffViewState::default();
+        state.refresh_cache(&LoadedDiff::new(sample_with("let x = 42;")), false, 4);
+        assert_eq!(added_highlights(&state, "let x = 42;"), ["42"]);
+        state.refresh_cache(&LoadedDiff::new(sample_with("let y = 42;")), false, 4);
+        assert_eq!(added_highlights(&state, "let y = 42;"), ["y", "42"], "surlignage recalculé");
+
+        state.refresh_cache(&LoadedDiff::new(sample_with("\tlet x = 42;")), false, 4);
+        let tab = state.cache.as_ref().unwrap().max_chars;
+        state.refresh_cache(&LoadedDiff::new(sample_with(" let x = 42;")), false, 4);
+        let space = state.cache.as_ref().unwrap().max_chars;
+        assert_eq!((tab, space), (4 + 11, 1 + 11), "largeur recalculée");
     }
 
     #[test]

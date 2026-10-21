@@ -88,6 +88,12 @@ impl Toasts {
         }
     }
 
+    /// Une notification d'erreur est affichée (tests unitaires).
+    #[cfg(test)]
+    pub(crate) fn has_error(&self) -> bool {
+        self.items.iter().any(|t| t.toast.kind == ToastKind::Error)
+    }
+
     /// Affiche les notifications ; renvoie l'action dont le bouton a été cliqué.
     pub fn show(&mut self, ctx: &egui::Context, p: &Palette) -> Option<ToastAction> {
         let mut clicked = None;

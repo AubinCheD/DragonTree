@@ -3,13 +3,14 @@
 
 use std::sync::Arc;
 
-use dragontree_git::{FileChange, FileDiff, GitError, Oid, Repo};
+use dragontree_git::{FileChange, GitError, Oid, Repo};
 use dragontree_i18n::{tr, trn};
 use egui::{RichText, Ui};
 
 use super::diff_view::{self, DiffMode, DiffViewState};
 use super::{RepoEvent, RepoTab};
 use crate::app::{AppEvent, Shared, TabId};
+use crate::diff_style::LoadedDiff;
 use crate::icons;
 use crate::theme::Palette;
 use crate::toasts::Toast;
@@ -38,7 +39,7 @@ impl CompareSide {
 
 pub enum CompareEvent {
     Files(u64, Result<Vec<FileChange>, GitError>),
-    Diff(u64, Result<FileDiff, GitError>),
+    Diff(u64, Result<LoadedDiff, GitError>),
 }
 
 pub struct CompareWindow {
@@ -50,7 +51,7 @@ pub struct CompareWindow {
     files: Vec<FileChange>,
     files_loading: bool,
     selected: Option<usize>,
-    diff: Option<FileDiff>,
+    diff: Option<LoadedDiff>,
     diff_loading: bool,
     diff_state: DiffViewState,
     highlighter: crate::highlight::Highlighter,
@@ -112,7 +113,7 @@ impl CompareWindow {
         let (a, b) = (self.a.rev.clone(), self.b_rev());
         let o = RepoTab::diff_options(shared);
         shared.jobs.spawn("compare-diff", move || {
-            let res = repo.compare_file_diff(&a, b.as_deref(), &change, &o);
+            let res = repo.compare_file_diff(&a, b.as_deref(), &change, &o).map(LoadedDiff::new);
             Some(AppEvent::Repo(tab, RepoEvent::Compare(CompareEvent::Diff(generation, res))))
         });
     }
