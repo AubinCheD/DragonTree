@@ -263,7 +263,75 @@ pub fn menu_item_checked(h: &Harness<'static, DragonTreeApp>, label: &str) -> Op
 
 /// Vrai si la dernière image a demandé la fermeture de la fenêtre (`ViewportCommand::Close`).
 pub fn close_requested(h: &Harness<'static, DragonTreeApp>) -> bool {
-    h.output().viewport_output.values().any(|v| v.commands.iter().any(|c| matches!(c, egui::ViewportCommand::Close)))
+    viewport_command_sent(h, &egui::ViewportCommand::Close)
+}
+
+/// Vrai si la dernière image a envoyé `command` à la fenêtre.
+pub fn viewport_command_sent(h: &Harness<'static, DragonTreeApp>, command: &egui::ViewportCommand) -> bool {
+    h.output().viewport_output.values().any(|v| v.commands.contains(command))
+}
+
+/// Joue une image où Windows demande de fermer la fenêtre (croix, Alt+F4, ou suite d'un `ViewportCommand::Close`) ;
+/// renvoie vrai si l'application l'a refusée (`ViewportCommand::CancelClose`), comme eframe le lit.
+pub fn request_close(h: &mut Harness<'static, DragonTreeApp>) -> bool {
+    let root = h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default();
+    root.events.push(egui::ViewportEvent::Close);
+    h.step();
+    viewport_command_sent(h, &egui::ViewportCommand::CancelClose)
+}
+
+/// Serveur HTTP local muet : il accepte les connexions et les garde ouvertes sans répondre (fetch bloqué) jusqu'à
+/// `release` ; il compte aussi les connexions fermées par le client (git arrêté).
+pub struct SilentServer {
+    pub port: u16,
+    accepted: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    closed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    held: std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>>,
+}
+
+impl SilentServer {
+    pub fn start() -> SilentServer {
+        use std::io::Read;
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server =
+            SilentServer { port, accepted: Default::default(), closed: Default::default(), held: Default::default() };
+        let (accepted, closed, held) = (server.accepted.clone(), server.closed.clone(), server.held.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                // Lit la requête puis attend : la lecture ne s'arrête qu'à la fermeture de la connexion par le client
+                // (ou par `release`).
+                if let Ok(mut reader) = stream.try_clone() {
+                    let closed = closed.clone();
+                    std::thread::spawn(move || {
+                        let mut buf = [0u8; 4096];
+                        while matches!(reader.read(&mut buf), Ok(n) if n > 0) {}
+                        closed.fetch_add(1, Ordering::SeqCst);
+                    });
+                }
+                held.lock().unwrap().push(stream);
+                accepted.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        server
+    }
+
+    pub fn connections(&self) -> usize {
+        self.accepted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Connexions fermées (par le client, ou par `release`).
+    pub fn closed(&self) -> usize {
+        self.closed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Ferme les connexions : les fetchs bloqués échouent et se terminent.
+    pub fn release(&self) {
+        for stream in self.held.lock().unwrap().drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
 }
 
 /// Attend qu'un élément de libellé exactement `label` soit affiché et utilisable, puis le clique en une image (la

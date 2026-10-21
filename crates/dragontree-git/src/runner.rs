@@ -294,7 +294,8 @@ pub(crate) struct Finished {
 }
 
 /// Exécution surveillée d'un processus : sans fenêtre, rattaché à un Job Object (l'annulation tue aussi ses
-/// sous-processus), entrée standard fournie ou vide, sorties lues jusqu'à la fin.
+/// sous-processus, et aucun ne survit à DragonTree : voir `job::JobGuard`), entrée standard fournie ou vide, sorties
+/// lues jusqu'à la fin.
 pub(crate) struct Supervised<'a> {
     pub stdin: Option<Vec<u8>>,
     pub cancel: Option<&'a CancelToken>,
@@ -434,6 +435,13 @@ impl Supervised<'_> {
                 None => std::thread::sleep(Duration::from_millis(5)),
             }
         };
+        // Commande terminée : un programme qu'elle a lancé en arrière-plan (`start`) lui survit, à elle comme à
+        // DragonTree. Pendant qu'elle tourne, la limite du job la lie à l'application.
+        if self.detach_after_exit
+            && let Some(job) = &job
+        {
+            job.let_survive();
+        }
         Ok(Finished {
             code: status.code().unwrap_or(-1),
             stdout: stdout_buf,
@@ -538,27 +546,36 @@ mod job {
 
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-        JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+        SetInformationJobObject, TerminateJobObject,
     };
 
-    /// Job Windows contenant git et tous ses descendants.
+    /// Job Windows contenant git et tous ses descendants. Créé avec `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` : ses
+    /// processus meurent à la fermeture de son handle, que ce soit à la fin de la commande ou à la fin du processus de
+    /// DragonTree (Windows ferme alors tous ses handles) ; aucun processus git ne survit à l'application (RV4a).
     pub struct JobGuard(HANDLE);
 
     impl JobGuard {
         pub fn attach(child: &std::process::Child) -> Option<JobGuard> {
             // SAFETY: appels Win32 avec des handles valides ; le handle du job est fermé dans Drop.
-            unsafe {
+            let guard = unsafe {
                 let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
                 if job.is_null() {
                     return None;
                 }
-                if AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) == 0 {
-                    CloseHandle(job);
-                    return None;
-                }
-                Some(JobGuard(job))
+                JobGuard(job)
+            };
+            // Avant d'y mettre le processus ; sans cette limite (refusée), le job sert encore à l'annulation.
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = Default::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            guard.set_limits(&info);
+            // SAFETY: handle du job valide (guard), handle du processus valide tant que `child` existe.
+            if unsafe { AssignProcessToJobObject(guard.0, child.as_raw_handle() as HANDLE) } == 0 {
+                return None;
             }
+            Some(guard)
         }
 
         pub fn terminate(&self) {
@@ -590,6 +607,49 @@ mod job {
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
         }
+
+        /// Limites du job (drapeaux `JOB_OBJECT_LIMIT_*`) ; `None` si Windows ne les donne pas.
+        fn limits(&self) -> Option<JOBOBJECT_EXTENDED_LIMIT_INFORMATION> {
+            // SAFETY: structure POD remplie par l'API ; handle valide tant que self existe.
+            unsafe {
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                let ok = QueryInformationJobObject(
+                    self.0,
+                    JobObjectExtendedLimitInformation,
+                    (&mut info as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                );
+                (ok != 0).then_some(info)
+            }
+        }
+
+        fn set_limits(&self, info: &JOBOBJECT_EXTENDED_LIMIT_INFORMATION) -> bool {
+            // SAFETY: structure POD lue par l'API ; handle valide tant que self existe.
+            unsafe {
+                SetInformationJobObject(
+                    self.0,
+                    JobObjectExtendedLimitInformation,
+                    (info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) != 0
+            }
+        }
+
+        /// Les processus du job sont tués à la fermeture de son handle.
+        #[cfg(test)]
+        pub fn kills_on_close(&self) -> bool {
+            self.limits().is_some_and(|i| i.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0)
+        }
+
+        /// Laisse vivre, à la fermeture du handle, les processus restés dans le job : un programme qu'une commande
+        /// terminée a lancé en arrière-plan (`start` de cmd, éditeur ouvert par une commande personnalisée).
+        pub fn let_survive(&self) {
+            if let Some(mut info) = self.limits() {
+                info.BasicLimitInformation.LimitFlags &= !JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                self.set_limits(&info);
+            }
+        }
     }
 
     impl Drop for JobGuard {
@@ -598,6 +658,58 @@ mod job {
             unsafe {
                 CloseHandle(self.0);
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::os::windows::process::CommandExt;
+        use std::process::{Child, Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        use super::*;
+
+        /// Processus qui dure une minute sans rien faire (aucune fenêtre).
+        fn long_process() -> Child {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            Command::new("ping")
+                .args(["-n", "60", "127.0.0.1"])
+                .stdout(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .expect("ping lancé")
+        }
+
+        /// RV4a : un processus git ne survit pas à DragonTree. Le job est créé avec
+        /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` : quand son handle se ferme (fin de la commande, ou fin du processus
+        /// de DragonTree, dont Windows ferme alors les handles), ses processus sont tués.
+        #[test]
+        fn a_process_dies_when_its_job_handle_closes() {
+            let mut child = long_process();
+            let job = JobGuard::attach(&child).expect("job créé");
+            assert!(job.kills_on_close(), "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE");
+            drop(job);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while child.try_wait().expect("état du processus").is_none() {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    panic!("le processus a survécu à la fermeture de son job");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        /// Une commande terminée laisse vivre ce qu'elle a lancé en arrière-plan.
+        #[test]
+        fn a_released_job_lets_its_processes_live() {
+            let mut child = long_process();
+            let job = JobGuard::attach(&child).expect("job créé");
+            job.let_survive();
+            assert!(!job.kills_on_close());
+            drop(job);
+            assert!(child.try_wait().expect("état du processus").is_none(), "toujours en vie");
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
@@ -614,5 +726,7 @@ mod job {
         pub fn terminate(&self) {}
 
         pub fn wait_empty(&self, _timeout: std::time::Duration) {}
+
+        pub fn let_survive(&self) {}
     }
 }

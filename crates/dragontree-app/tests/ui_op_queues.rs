@@ -3,48 +3,12 @@
 
 mod common;
 
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::*;
 use dragontree_app::StartOptions;
 use egui_kittest::kittest::Queryable;
-
-/// Serveur HTTP local muet : il accepte les connexions et les garde ouvertes sans répondre (fetch bloqué) jusqu'à
-/// `release`.
-struct SilentServer {
-    port: u16,
-    accepted: Arc<AtomicUsize>,
-    held: Arc<Mutex<Vec<TcpStream>>>,
-}
-
-impl SilentServer {
-    fn start() -> SilentServer {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let (accepted, held) = (Arc::new(AtomicUsize::new(0)), Arc::new(Mutex::new(Vec::new())));
-        let (count, streams) = (accepted.clone(), held.clone());
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                streams.lock().unwrap().push(stream);
-                count.fetch_add(1, Ordering::SeqCst);
-            }
-        });
-        SilentServer { port, accepted, held }
-    }
-
-    fn connections(&self) -> usize {
-        self.accepted.load(Ordering::SeqCst)
-    }
-
-    /// Ferme les connexions : les fetchs bloqués échouent et se terminent.
-    fn release(&self) {
-        self.held.lock().unwrap().clear();
-    }
-}
 
 /// Dépôt avec un commit, un remote `origin` servi par `server` et un fichier modifié (`a.txt`).
 fn repo(base: &Path, server: &SilentServer) -> PathBuf {

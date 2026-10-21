@@ -214,7 +214,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | RV1 | Fluidité de l'interface sur un gros dépôt : filtre, copies par image, coloration synchrone (corrigé) | revue finale, mineur n°6 | moyenne |
 | RV2 | Gros diffs lus entièrement en mémoire avant la limite de 8 Mio (corrigé) | revue finale, mineur n°7 | moyenne |
 | RV3 | Fetch automatique dans la file des écritures ; deux files pour un même dépôt (corrigé) | revue finale, mineur n°16 | basse |
-| RV4 | Points non jugés : processus git à la fermeture, instances multiples, proxy, cas des forges (à vérifier) | revue finale et rapport du crate forges | basse |
+| RV4 | Points non jugés : processus git à la fermeture (corrigé), instances multiples, proxy, cas des forges (à vérifier) | revue finale et rapport du crate forges | basse |
 | RV5 | Résidus de la relecture de la traduction : `--lang` enregistré, bouton Push occupé, textes figés | relecture de la traduction | basse |
 
 ### Pistes
@@ -544,10 +544,14 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 - **Contexte :** la revue finale a laissé ces points sans jugement. Le rapport du crate des forges a signalé les autres.
 - **Points (tous à vérifier) :**
-  - **a. Processus git à la fermeture de l'application.**
-    - État : aucun arrêt n'est prévu. Le job Windows est créé sans `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`crates/dragontree-git/src/runner.rs:420-433`), donc un push ou un fetch en cours continue probablement après la fermeture.
-    - Pour trancher : fermer la fenêtre pendant un push lent et observer.
-    - Décision à prendre : attendre la fin des écritures, ou les arrêter proprement.
+  - **a. Processus git à la fermeture de l'application (corrigé).**
+    - Avant : aucun arrêt n'était prévu. Le job Windows était créé sans `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, donc un push ou un fetch en cours continuait après la fermeture.
+    - Décision (plan) : demander confirmation (« Attendre / Quitter quand même ») ; en quittant, annuler les opérations, et aucun processus git ne survit ; les opérations silencieuses (fetch automatique) sont arrêtées sans demander.
+    - Réalisé :
+      - le job de chaque commande est créé avec `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`job::JobGuard`, `crates/dragontree-git/src/runner.rs`) : ses processus meurent à la fermeture de son handle, à la fin de la commande comme à la fin du processus de DragonTree, dont Windows ferme alors les handles. Une commande personnalisée terminée lève la limite : un programme qu'elle a lancé en arrière-plan (`start`, un éditeur) lui survit ;
+      - la demande de fermeture (croix, Alt+F4, Fichier › Quitter, barre des tâches) passe par `DragonTreeApp::intercept_close` (`crates/dragontree-app/src/app.rs`, appelée par `App::logic`, qui tourne aussi fenêtre réduite) : si des opérations visibles attendent ou tournent (files des dépôts, `Shared::queues.pending()`, et clonage), la fermeture est suspendue (`ViewportCommand::CancelClose`) et un dialogue les nomme. « Attendre » ferme la fenêtre d'elle-même à la fin des opérations ; « Quitter quand même » annule tous les jetons (chaque opération arrête son git) et ferme ; Échap renonce à fermer. Sans opération visible, les opérations silencieuses sont annulées et la fenêtre se ferme sans question ; une fois la fermeture décidée, plus aucun fetch automatique ne part ;
+      - à la sortie (`App::on_exit`), les onglets ne font plus rien attendre : la surveillance du disque n'est pas arrêtée une à une (jusqu'à 1 s par onglet), Windows la ferme avec le processus.
+    - Critère : atteint. Tests `a_process_dies_when_its_job_handle_closes` et `a_released_job_lets_its_processes_live` (`runner.rs`, le premier vu rouge sans la limite), `a_program_started_in_the_background_outlives_the_command` (`crates/dragontree-git/tests/shell.rs`, vu rouge sans la levée de la limite) ; tests d'interface (`crates/dragontree-app/tests/ui_quit.rs`, remote servi par un serveur HTTP local muet, vus rouges) : `closing_during_an_operation_asks_and_quitting_anyway_stops_it` (fetch visible bloqué : fermeture suspendue, dialogue, « Quitter quand même » ferme et git est arrêté, sa connexion se fermant), `waiting_closes_the_window_when_the_operations_end`, `closing_while_only_the_automatic_fetch_runs_does_not_ask`.
   - **b. Plusieurs instances.**
     - État : rien n'empêche deux instances, qui écrivent alors le même `settings.json` ; la dernière écriture l'emporte.
     - Décision à prendre : instance unique avec transmission des arguments à l'instance ouverte (comme Fork), ou fusion à l'écriture.

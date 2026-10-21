@@ -15,6 +15,8 @@ pub struct RepoWatcher {
     debouncer: Option<Debouncer<RecommendedWatcher>>,
     /// Dossiers surveillés, rendus à la fermeture (voir `Drop`).
     watched: Vec<PathBuf>,
+    /// L'application se termine : rien n'est rendu ni attendu (voir `Drop`).
+    exiting: bool,
 }
 
 /// Attente maximale, à la fermeture, de la fin de la surveillance : au-delà, le thread de l'interface reprend la main
@@ -27,9 +29,13 @@ impl Drop for RepoWatcher {
     /// temporaire d'un test) pendant qu'il se réarme peut bloquer pour toujours la suppression et ce thread (vu sous
     /// Windows). Sur un thread d'aide : les `unwatch`, puis `configure`, qui attend la réponse du thread de `notify`
     /// (il a d'abord traité les `unwatch` : les poignées des dossiers sont alors fermées). Si `notify` ne répond
-    /// jamais, l'interface ne reste pas figée.
+    /// jamais, l'interface ne reste pas figée. À la sortie de l'application (`on_app_exit`), rien n'est attendu.
     fn drop(&mut self) {
         let Some(mut debouncer) = self.debouncer.take() else { return };
+        if self.exiting {
+            std::mem::forget(debouncer);
+            return;
+        }
         let watched = std::mem::take(&mut self.watched);
         let released = run_bounded("watch-release", RELEASE_WAIT, move || {
             let watcher = debouncer.watcher();
@@ -137,7 +143,13 @@ impl RepoWatcher {
         {
             watched.push(worktrees);
         }
-        Some(RepoWatcher { debouncer: Some(debouncer), watched })
+        Some(RepoWatcher { debouncer: Some(debouncer), watched, exiting: false })
+    }
+
+    /// L'application se termine : la surveillance n'est pas arrêtée proprement, Windows ferme ses poignées avec le
+    /// processus. Sinon chaque onglet attendrait jusqu'à `RELEASE_WAIT` à la sortie.
+    pub fn on_app_exit(&mut self) {
+        self.exiting = true;
     }
 }
 

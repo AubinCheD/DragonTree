@@ -1218,6 +1218,13 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
         }
     }
 
+    /// L'application se termine (`eframe::App::on_exit`) : rien ne sera attendu à la fermeture de l'onglet.
+    pub fn on_app_exit(&mut self) {
+        if let Some(watcher) = &mut self.watcher {
+            watcher.on_app_exit();
+        }
+    }
+
     pub fn on_focus_regained(&mut self, shared: &mut Shared) {
         if self.repo.is_some() {
             self.refresh(shared, Refresh::REFS);

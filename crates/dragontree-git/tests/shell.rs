@@ -93,3 +93,19 @@ fn a_program_started_in_the_background_does_not_hold_the_command() {
     assert!(out.output.contains("lance"), "{}", out.output);
     assert!(start.elapsed() < Duration::from_secs(15), "attendu la fin du programme lancé : {:?}", start.elapsed());
 }
+
+/// RV4a : les processus d'une commande meurent avec son job (et donc avec DragonTree) tant qu'elle tourne ; une fois
+/// la commande terminée, un programme qu'elle a lancé en arrière-plan (un éditeur…) lui survit.
+#[test]
+fn a_program_started_in_the_background_outlives_the_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let line = "start /b cmd /c \"ping -n 2 127.0.0.1 >nul & echo fini>marque.txt\"";
+    let out = run_shell(dir.path(), line, &[], &CancelToken::new()).unwrap();
+    assert_eq!(out.code, 0, "{}", out.output);
+    let marker = dir.path().join("marque.txt");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "le programme lancé en arrière-plan n'a pas survécu à la commande");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
