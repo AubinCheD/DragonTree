@@ -174,7 +174,7 @@ Activation et licence, mises à jour automatiques, modèle « Lean Branching » 
 
 ## Reste à faire
 
-Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2, B3 et B4 (branche `points-restants`).
+Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2, B3, B4 et B7 (branche `points-restants`).
 
 ### Bugs à corriger
 
@@ -186,7 +186,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | B4 | Compte enregistré avec le jeton du formulaire au lieu du jeton vérifié (corrigé) | revue finale, mineur n°10 | basse |
 | B5 | La fenêtre Réglages écrase des changements faits ailleurs (corrigé) | revue finale, mineur n°8 | basse |
 | B6 | `wt.exe -d` coupe un chemin contenant « ; » (corrigé) | revue finale, annexe de I8 | basse |
-| B7 | Menu contextuel d'onglet lié à la position de l'onglet | arbitrage de la revue (M14) | basse |
+| B7 | Menu contextuel d'onglet lié à l'identifiant de l'onglet (corrigé) | arbitrage de la revue (M14) | basse |
 
 ### Fonctionnalités à terminer
 
@@ -458,15 +458,12 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin :** atteint (test unitaire `windows_terminal_escapes_semicolons_and_keeps_other_characters`, sur la commande construite pour un chemin contenant « ; »).
 - **Priorité :** terminé.
 
-#### B7 — Menu contextuel d'onglet lié à la position de l'onglet
+#### B7 — Menu contextuel d'onglet lié à la position de l'onglet (fait)
 
 - **Contexte :** arbitrage de la correction M14. Les lignes des listes ont reçu des identifiants stables, mais pas les onglets.
-- **État :**
-  - chaque onglet prend un identifiant positionnel (`crates/dragontree-app/src/tabbar.rs:92`) ;
-  - ses actions portent un index (`crates/dragontree-app/src/tabbar.rs:168-190`, `crates/dragontree-app/src/app.rs:510-552`) ;
-  - si un onglet se ferme pendant qu'un menu est ouvert, l'action peut viser l'onglet voisin.
-- **À faire :** dériver l'identifiant de `TabId`, et faire porter `TabId` aux actions au lieu de l'index.
-- **Critère de fin :** test d'interface : menu ouvert sur l'onglet 2, l'onglet 1 se ferme, puis « Fermer l'onglet » ferme bien l'onglet visé.
+- **État :** corrigé. Avant : chaque onglet prenait un identifiant positionnel et ses actions portaient un index ; si un onglet se fermait pendant qu'un menu était ouvert, l'action pouvait viser l'onglet voisin.
+- **Réalisé :** le widget d'un onglet a un identifiant dérivé de son `TabId` (`crates/dragontree-app/src/tabbar.rs`) ; toutes les actions (`Select`, `Close`, `CloseOthers`, `Move`, `OpenExplorer`, `CopyPath`, comme `SetColor`) portent des `TabId`, et `apply_tab_actions` (`crates/dragontree-app/src/app.rs`) en retrouve la position à l'application (action ignorée si l'onglet n'existe plus).
+- **Critère de fin :** atteint (test d'interface `the_tab_menu_closes_the_tab_it_was_opened_on_even_if_an_earlier_tab_closes_meanwhile`, `crates/dragontree-app/tests/ui_tab_menu.rs` : vu rouge avec les index, vert avec les identifiants).
 - **Priorité :** basse.
 
 ### Constats de revue

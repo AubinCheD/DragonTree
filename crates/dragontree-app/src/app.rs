@@ -955,12 +955,28 @@ impl DragonTreeApp {
             .collect()
     }
 
+    /// Position actuelle de l'onglet `id` ; `None` s'il a été fermé entre-temps.
+    fn tab_position(&self, id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == id)
+    }
+
+    /// Applique les actions de la barre d'onglets. Les onglets y sont désignés par identifiant : la position est
+    /// recherchée à l'application, car un onglet fermé plus tôt (ou dans la même image) la décale.
     fn apply_tab_actions(&mut self, actions: Vec<TabBarAction>, ctx: &egui::Context) {
         for a in actions {
             match a {
-                TabBarAction::Select(i) => self.active = i.min(self.tabs.len() - 1),
-                TabBarAction::Close(i) => self.close_tab(i),
-                TabBarAction::CloseOthers(i) => {
+                TabBarAction::Select(id) => {
+                    if let Some(i) = self.tab_position(id) {
+                        self.active = i;
+                    }
+                }
+                TabBarAction::Close(id) => {
+                    if let Some(i) = self.tab_position(id) {
+                        self.close_tab(i);
+                    }
+                }
+                TabBarAction::CloseOthers(id) => {
+                    let Some(i) = self.tab_position(id) else { continue };
                     self.remember_closed_all(Some(i));
                     let keep = self.tabs.remove(i);
                     self.tabs = vec![keep];
@@ -980,8 +996,8 @@ impl DragonTreeApp {
                         self.shared.settings_dirty = true;
                     }
                 }
-                TabBarAction::Move(from, to) => {
-                    if from < self.tabs.len() && to < self.tabs.len() {
+                TabBarAction::Move(id, with) => {
+                    if let (Some(from), Some(to)) = (self.tab_position(id), self.tab_position(with)) {
                         self.tabs.swap(from, to);
                         if self.active == from {
                             self.active = to;
@@ -995,13 +1011,13 @@ impl DragonTreeApp {
                     self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
                     self.shared.settings_dirty = true;
                 }
-                TabBarAction::OpenExplorer(i) => {
-                    if let Some(TabKind::Repo(r)) = self.tabs.get(i).map(|t| &t.kind) {
+                TabBarAction::OpenExplorer(id) => {
+                    if let Some(TabKind::Repo(r)) = self.tabs.iter().find(|t| t.id == id).map(|t| &t.kind) {
                         crate::util::open_in_explorer(&r.path);
                     }
                 }
-                TabBarAction::CopyPath(i) => {
-                    if let Some(TabKind::Repo(r)) = self.tabs.get(i).map(|t| &t.kind) {
+                TabBarAction::CopyPath(id) => {
+                    if let Some(TabKind::Repo(r)) = self.tabs.iter().find(|t| t.id == id).map(|t| &t.kind) {
                         ctx.copy_text(r.path.display().to_string());
                     }
                 }

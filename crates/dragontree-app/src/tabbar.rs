@@ -3,12 +3,13 @@
 use dragontree_i18n::tr;
 use egui::{Align2, CornerRadius, FontId, Id, Rect, Sense, Stroke, Ui};
 
+use crate::app::TabId;
 use crate::icons;
 use crate::theme::Palette;
 use crate::workspaces::TabColor;
 
 pub struct TabInfo {
-    pub id: u64,
+    pub id: TabId,
     pub title: String,
     pub tooltip: String,
     pub busy: bool,
@@ -19,17 +20,19 @@ pub struct TabInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabBarAction {
-    Select(usize),
-    Close(usize),
-    CloseOthers(usize),
+    Select(TabId),
+    Close(TabId),
+    CloseOthers(TabId),
     CloseAll,
     New,
-    Move(usize, usize),
+    /// Échange un onglet avec son voisin (les deux désignés par identifiant).
+    Move(TabId, TabId),
     ToggleRepoList,
-    OpenExplorer(usize),
-    CopyPath(usize),
-    /// Couleur d'un onglet, désigné par son identifiant (la position change quand on réordonne ou ferme).
-    SetColor(u64, Option<TabColor>),
+    OpenExplorer(TabId),
+    CopyPath(TabId),
+    /// Toutes les actions d'un onglet le désignent par son identifiant : la position change quand on réordonne ou
+    /// ferme, alors qu'un menu contextuel peut rester ouvert.
+    SetColor(TabId, Option<TabColor>),
 }
 
 const TAB_H: f32 = 32.0;
@@ -49,8 +52,8 @@ pub fn show(ui: &mut Ui, tabs: &[TabInfo], active: usize, repo_list_visible: boo
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 1.0;
-                    for (i, tab) in tabs.iter().enumerate() {
-                        let rect = tab_widget(ui, tab, i, i == active, &prev_rects, &mut actions, p);
+                    for i in 0..tabs.len() {
+                        let rect = tab_widget(ui, tabs, i, i == active, &prev_rects, &mut actions, p);
                         rects.push(rect);
                     }
                     ui.add_space(4.0);
@@ -84,17 +87,21 @@ pub fn show(ui: &mut Ui, tabs: &[TabInfo], active: usize, repo_list_visible: boo
 
 fn tab_widget(
     ui: &mut Ui,
-    tab: &TabInfo,
+    tabs: &[TabInfo],
     index: usize,
     active: bool,
     prev_rects: &[Rect],
     actions: &mut Vec<TabBarAction>,
     p: &Palette,
 ) -> Rect {
+    let tab = &tabs[index];
     let font = FontId::proportional(13.0);
     let title_galley = ui.painter().layout_no_wrap(tab.title.clone(), font.clone(), p.text);
     let width = (title_galley.size().x + 58.0).clamp(110.0, 240.0);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, TAB_H), Sense::click_and_drag());
+    // Identifiant dérivé de l'onglet, pas de sa position : le menu contextuel ouvert reste sur son onglet quand un
+    // autre se ferme ou que les onglets sont réordonnés.
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, TAB_H), Sense::hover());
+    let resp = ui.interact(rect, Id::unique(("tab", tab.id)), Sense::click_and_drag());
     crate::widgets::a11y(&resp, &tab.title, true);
     let resp = resp.on_hover_text(&tab.tooltip);
     let hovered = resp.hovered();
@@ -162,9 +169,9 @@ fn tab_widget(
     }
 
     if close.clicked() || resp.middle_clicked() {
-        actions.push(TabBarAction::Close(index));
+        actions.push(TabBarAction::Close(tab.id));
     } else if resp.clicked() || resp.drag_started() {
-        actions.push(TabBarAction::Select(index));
+        actions.push(TabBarAction::Select(tab.id));
     }
 
     // Glisser pour réordonner : on échange avec le voisin quand on dépasse son milieu.
@@ -172,19 +179,21 @@ fn tab_widget(
         && let Some(pointer) = ui.ctx().pointer_interact_pos()
     {
         if index > 0 && prev_rects.get(index - 1).is_some_and(|r| pointer.x < r.center().x) {
-            actions.push(TabBarAction::Move(index, index - 1));
-        } else if prev_rects.get(index + 1).is_some_and(|r| pointer.x > r.center().x) {
-            actions.push(TabBarAction::Move(index, index + 1));
+            actions.push(TabBarAction::Move(tab.id, tabs[index - 1].id));
+        } else if let Some(next) = tabs.get(index + 1)
+            && prev_rects.get(index + 1).is_some_and(|r| pointer.x > r.center().x)
+        {
+            actions.push(TabBarAction::Move(tab.id, next.id));
         }
     }
 
     resp.context_menu(|ui| {
         if ui.button(tr!("Fermer l'onglet")).clicked() {
-            actions.push(TabBarAction::Close(index));
+            actions.push(TabBarAction::Close(tab.id));
             ui.close();
         }
         if ui.button(tr!("Fermer les autres onglets")).clicked() {
-            actions.push(TabBarAction::CloseOthers(index));
+            actions.push(TabBarAction::CloseOthers(tab.id));
             ui.close();
         }
         if ui.button(tr!("Fermer tous les onglets")).clicked() {
@@ -212,11 +221,11 @@ fn tab_widget(
                 }
             });
             if ui.button(format!("{} {}", icons::FOLDER_OPEN, tr!("Ouvrir dans l'Explorateur"))).clicked() {
-                actions.push(TabBarAction::OpenExplorer(index));
+                actions.push(TabBarAction::OpenExplorer(tab.id));
                 ui.close();
             }
             if ui.button(format!("{} {}", icons::COPY, tr!("Copier le chemin"))).clicked() {
-                actions.push(TabBarAction::CopyPath(index));
+                actions.push(TabBarAction::CopyPath(tab.id));
                 ui.close();
             }
         }
