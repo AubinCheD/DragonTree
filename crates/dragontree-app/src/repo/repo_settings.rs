@@ -1,6 +1,6 @@
-//! Réglages du dépôt (Dépôt › Réglages du dépôt…) : identité propre au dépôt, modèle de message de commit et
-//! liens vers les tickets. L'identité et le modèle sont dans la configuration git du dépôt (`--local`), les
-//! règles de liens dans les réglages de l'application, par dépôt.
+//! Réglages du dépôt (Dépôt › Réglages du dépôt…) : identité propre au dépôt, compte associé, modèle de message de
+//! commit et liens vers les tickets. L'identité et le modèle sont dans la configuration git du dépôt (`--local`), le
+//! compte et les règles de liens dans les réglages de l'application, par dépôt.
 
 use dragontree_git::ssh::ConfigScope;
 use dragontree_git::{GitError, Repo};
@@ -8,6 +8,7 @@ use dragontree_i18n::tr;
 use egui::{RichText, Ui};
 use regex::Regex;
 
+use super::repo_account::{AccountChoice, account_choices, account_picker};
 use super::{Dialog, Refresh, RepoEvent, RepoTab};
 use crate::app::{AppEvent, Shared};
 use crate::icons;
@@ -29,6 +30,11 @@ pub struct RepoSettingsForm {
     /// Chemin du fichier modèle (`commit.template`).
     pub template: String,
     pub rules: Vec<TicketRule>,
+    /// Comptes proposés (voir `repo_account::account_choices`), compte coché et compte associé à l'ouverture : seul
+    /// un changement est enregistré.
+    pub accounts: Vec<AccountChoice>,
+    pub account: Option<String>,
+    pub account_opened: Option<String>,
     /// Clés dont la lecture a échoué, avec le message de git : leur champ est affiché grisé et n'est jamais
     /// écrit (un champ vide par défaut ferait retirer la clé à l'enregistrement).
     pub read_errors: Vec<(&'static str, String)>,
@@ -60,7 +66,7 @@ impl RepoSettingsForm {
             global_name: global(KEY_NAME),
             global_email: global(KEY_EMAIL),
             read_errors: form.read_errors,
-            rules: Vec::new(),
+            ..RepoSettingsForm::default()
         }
     }
 
@@ -131,6 +137,9 @@ impl RepoTab {
         // Un dialogue déjà ouvert garde la main.
         if self.dialog.is_none() {
             form.rules = shared.settings.ticket_rules_of(&self.path).to_vec();
+            form.accounts = account_choices(&shared.settings.accounts, &self.remotes);
+            form.account = self.account(&shared.settings).map(|a| a.id.clone());
+            form.account_opened = form.account.clone();
             self.dialog = Some(Dialog::RepoSettings(form));
         }
     }
@@ -138,6 +147,9 @@ impl RepoTab {
     pub(crate) fn save_repo_settings(&mut self, shared: &mut Shared, form: Box<RepoSettingsForm>) {
         shared.settings.set_ticket_rules(&self.path, form.rules.clone());
         shared.settings_dirty = true;
+        if form.account != form.account_opened {
+            self.set_account(shared, form.account.clone());
+        }
         self.run_simple(shared, tr!("Réglages du dépôt"), Refresh::NONE, move |r| {
             for (key, value) in form.writes() {
                 write_local(r, key, value)?;
@@ -203,6 +215,15 @@ impl RepoTab {
             );
             ui.end_row();
         });
+
+        ui.add_space(10.0);
+        ui.label(RichText::new(tr!("Compte pour fetch, pull et push")).strong());
+        if form.accounts.is_empty() {
+            let none = tr!("Aucun compte enregistré : ajoutez-en dans Configuration › Comptes…");
+            ui.label(RichText::new(none).color(p.weak).size(12.0));
+        } else {
+            account_picker(ui, &form.accounts, &mut form.account, true, p);
+        }
 
         ui.add_space(10.0);
         ui.label(RichText::new(tr!("Modèle de message de commit")).strong());

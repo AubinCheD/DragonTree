@@ -151,8 +151,13 @@ pub enum Command {
     OpenIn(usize),
     /// Fenêtre des statistiques du dépôt (commits, contributeurs, commits par mois, taille).
     RepoStats,
-    /// Réglages du dépôt : identité locale, liens vers les tickets, modèle de message de commit.
+    /// Réglages du dépôt : identité locale, compte, liens vers les tickets, modèle de message de commit.
     RepoSettings,
+    /// Associe au dépôt un compte enregistré, dont le jeton authentifie fetch, pull et push (les comptes qui
+    /// correspondent à un remote sont proposés d'abord).
+    UseAccount,
+    /// Retire le compte associé au dépôt : git reprend sa configuration habituelle.
+    StopUsingAccount,
     /// Revue de la branche courante par Claude Code (IA activée dans les réglages) : fenêtre avec le texte.
     AiReviewBranch,
     Settings,
@@ -328,6 +333,8 @@ pub const MENUS: &[(&str, &[MenuItem])] = &[
             Separator,
             Cmd(Command::RepoStats),
             Cmd(Command::RepoSettings),
+            Cmd(Command::UseAccount),
+            Cmd(Command::StopUsingAccount),
         ],
     ),
     (
@@ -452,6 +459,8 @@ impl Command {
         Command::OpenInEditor,
         Command::RepoStats,
         Command::RepoSettings,
+        Command::UseAccount,
+        Command::StopUsingAccount,
         Command::AiReviewBranch,
         Command::Settings,
         Command::KeyboardShortcuts,
@@ -549,6 +558,8 @@ impl Command {
             Command::OpenIn(_) => tr!("Ouvrir dans"),
             Command::RepoStats => tr!("Statistiques…"),
             Command::RepoSettings => tr!("Réglages du dépôt…"),
+            Command::UseAccount => tr!("Utiliser le compte…"),
+            Command::StopUsingAccount => tr!("Ne plus utiliser de compte"),
             Command::AiReviewBranch => tr!("Revue de la branche par Claude…"),
             Command::Settings => tr!("Réglages…"),
             Command::KeyboardShortcuts => tr!("Raccourcis clavier"),
@@ -658,6 +669,8 @@ impl Command {
             Command::OpenInEditor | Command::OpenIn(_) => icons::CODE,
             Command::RepoStats => icons::CHART_BAR,
             Command::RepoSettings => icons::GEAR_SIX,
+            Command::UseAccount => icons::USER_CIRCLE_CHECK,
+            Command::StopUsingAccount => icons::USER_CIRCLE_MINUS,
             Command::AiReviewBranch => icons::SPARKLE,
             Command::Settings => icons::GEAR_SIX,
             Command::KeyboardShortcuts => icons::KEYBOARD,
@@ -751,6 +764,8 @@ impl Command {
             | Command::OpenIn(_)
             | Command::RepoStats
             | Command::RepoSettings
+            | Command::UseAccount
+            | Command::StopUsingAccount
             | Command::AiReviewBranch => Scope::Repo,
         }
     }
@@ -868,6 +883,10 @@ impl Command {
             // L'IA est activée dans les réglages (rien ne part sans elle) et la branche courante existe.
             Scope::Repo if self == Command::AiReviewBranch => {
                 cx.settings.ai_enabled && cx.repo.is_some_and(|tab| tab.can_run(self))
+            }
+            // Aucun compte associé au dépôt : rien à retirer.
+            Scope::Repo if self == Command::StopUsingAccount => {
+                cx.repo.is_some_and(|tab| tab.can_run(self) && tab.account(cx.settings).is_some())
             }
             // Rien à réafficher : l'entrée est grisée.
             Scope::Repo if self == Command::ShowHiddenRefs => {

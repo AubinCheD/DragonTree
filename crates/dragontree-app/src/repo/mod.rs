@@ -29,6 +29,7 @@ mod open_in;
 mod patches;
 mod pull_request;
 mod rebase_ui;
+mod repo_account;
 mod repo_settings;
 mod restore;
 mod scope;

@@ -946,7 +946,13 @@ impl DragonTreeApp {
                 TabKind::Repo(r) => TabInfo {
                     id: t.id,
                     title: r.title(),
-                    tooltip: r.path.display().to_string(),
+                    // Chemin du dépôt, puis le compte qui authentifie fetch, pull et push s'il y en a un.
+                    tooltip: match r.account(&self.shared.settings) {
+                        Some(account) => {
+                            format!("{}\n{}", r.path.display(), tr!("Compte : {title}", title = account.title()))
+                        }
+                        None => r.path.display().to_string(),
+                    },
                     busy: r.is_busy(),
                     is_repo: true,
                     color: self.shared.settings.tab_color_of(&r.path),

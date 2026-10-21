@@ -663,14 +663,15 @@ mod tests {
     #[test]
     fn take_edits_keeps_what_changed_elsewhere() {
         let opened = Settings::default();
-        // Ailleurs, pendant que la fenêtre était ouverte : menu Affichage, réglages du dépôt, zoom, « Espaces » dans la
-        // vue diff, barre d'onglets.
+        // Ailleurs, pendant que la fenêtre était ouverte : menu Affichage, réglages du dépôt, compte du dépôt, zoom,
+        // « Espaces » dans la vue diff, barre d'onglets.
         let mut live = opened.clone();
         live.show_tags = false;
         live.topological_order = true;
         let rule = TicketRule { pattern: r"#(\d+)".into(), url: "https://forge.contoso.test/issues/$1".into() };
         live.ticket_links.insert("c:/dev/fabrikam".into(), vec![rule]);
         live.hidden_refs.insert("c:/dev/fabrikam".into(), vec!["refs/heads/old".into()]);
+        live.set_account_for_repo(Path::new(r"C:\DEV\fabrikam"), Some("compte-contoso"));
         live.ui_scale = 1.25;
         live.ignore_whitespace = true;
         live.open_tabs = vec![PathBuf::from(r"C:\DEV\fabrikam")];

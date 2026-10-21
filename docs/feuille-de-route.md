@@ -197,7 +197,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | T3 | Stashs plus visibles (fait : section avant Remotes et Tags, stashs dans le graphe) | demande du 2026-10-17 | moyenne |
 | T4 | Filtre sur la branche active : mémorisation par dépôt (fait ; raccourci fait, V2) | demande du 2026-10-17 | moyenne |
 | T5 | Éléments du plan non livrés : glisser-déposer entre listes, colonne du graphe, colonne « mise à jour », aperçu des conflits (fait) | revue finale, mineur n°21 | basse |
-| T6 | Associer un compte à un dépôt existant | arbitrage de la tâche 18, « plus tard » | moyenne |
+| T6 | Associer un compte à un dépôt existant (fait) | arbitrage de la tâche 18, « plus tard » | moyenne |
 
 ### À implémenter
 
@@ -341,21 +341,24 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
     - Fin (atteinte) : tests unitaires de l'aperçu pour chaque choix (notre, leur, les deux, les deux inversés, sans choix) dans `crates/dragontree-app/src/repo/conflicts.rs`, et test de `resolve_partial` dans le moteur.
 - **Priorité :** basse (mineurs différés).
 
-#### T6 — Associer un compte à un dépôt existant
+#### T6 — Associer un compte à un dépôt existant (fait)
 
 - **Contexte :** arbitrage de la tâche 18. L'authentification d'un compte n'est injectée que pour les dépôts clonés depuis ce compte, pour ne pas casser un Git Credential Manager qui fonctionne. L'association manuelle était notée « à ajouter plus tard ».
-- **État :**
-  - `repo_accounts` (`crates/dragontree-app/src/settings.rs:46`) n'est rempli qu'à la fin d'un clonage (`crates/dragontree-app/src/clone.rs:57`) ;
-  - il est lu par `account_for_repo` (`crates/dragontree-app/src/settings.rs:215`) pour fetch, pull et push (`crates/dragontree-app/src/repo/actions.rs:37-40`) ;
-  - il est vidé à la suppression du compte (`crates/dragontree-app/src/accounts.rs:241`) ;
-  - aucune interface ne permet d'associer ou de dissocier un compte.
+- **État :** réalisé (`crates/dragontree-app/src/repo/repo_account.rs`).
+  - Avant : `repo_accounts` (`crates/dragontree-app/src/settings.rs`) n'était rempli qu'à la fin d'un clonage (`crates/dragontree-app/src/clone.rs`), lu par `account_for_repo` pour fetch, pull et push (`RepoTab::net_account`, `crates/dragontree-app/src/repo/actions.rs`) et vidé à la suppression du compte (`crates/dragontree-app/src/accounts.rs`) ; aucune interface ne permettait d'associer ou de dissocier un compte.
+  - Dépôt › **Utiliser le compte…** ouvre un dialogue : les comptes dont `account_matches_url` (`crates/dragontree-forges/src/auth.rs`) correspond à l'URL de fetch ou de push d'un remote d'abord, suivis du nom de ce remote, puis les autres sous un intertitre, avec un avertissement si l'on en coche un (son jeton ne serait envoyé à aucun remote). Le compte du dépôt est coché, sinon le premier qui correspond. Sans compte enregistré, la fenêtre Comptes s'ouvre.
+  - Dépôt › **Ne plus utiliser de compte** retire l'association (grisée sans compte associé) : git reprend sa configuration habituelle.
+  - Les réglages du dépôt (R8) ont la même liste, avec « Aucun » en tête ; seul un changement est enregistré.
+  - Le compte associé est affiché dans la barre d'outils de l'onglet (un clic rouvre le choix) et dans l'infobulle de l'onglet.
+  - L'association (`Settings::set_account_for_repo`) est rangée sous la racine de la copie de travail, comme après un clonage. La fenêtre Réglages n'édite pas `repo_accounts` : il reste hors de `take_edits`.
 - **À faire :**
-  1. Ajouter « Utiliser le compte… » et « Ne plus utiliser de compte » dans le menu du dépôt, ou dans les réglages du dépôt (R8).
-  2. Proposer les comptes dont `account_matches_url` (`crates/dragontree-forges/src/auth.rs`) correspond à un remote.
-  3. Afficher le compte associé dans l'onglet.
-- **Critère de fin :**
-  - test unitaire de la proposition de comptes à partir des remotes ;
-  - test : après association, `account_for_repo` renvoie le compte, et la dissociation le retire.
+  1. Ajouter « Utiliser le compte… » et « Ne plus utiliser de compte » dans le menu du dépôt, ou dans les réglages du dépôt (R8) (fait : les deux).
+  2. Proposer les comptes dont `account_matches_url` (`crates/dragontree-forges/src/auth.rs`) correspond à un remote (fait).
+  3. Afficher le compte associé dans l'onglet (fait).
+- **Critère de fin (atteint) :**
+  - test unitaire de la proposition de comptes à partir des remotes : `accounts_matching_a_remote_are_proposed_first_with_that_remote` et `without_a_matching_remote_every_account_is_still_proposed_in_order` (`crates/dragontree-app/src/repo/repo_account.rs`) ;
+  - test : après association, `account_for_repo` renvoie le compte, et la dissociation le retire (`an_associated_account_is_returned_until_it_is_dissociated`, `crates/dragontree-app/src/settings.rs`) ;
+  - tests d'interface avec des comptes fictifs, sans jeton : `crates/dragontree-app/tests/ui_repo_account.rs` (menu Dépôt, réglages du dépôt, aucun compte enregistré).
 - **Priorité :** moyenne (reportée explicitement ; utile dès qu'on a plusieurs comptes).
 
 ### À implémenter

@@ -187,7 +187,10 @@ Pour Azure DevOps, si le jeton est limité à une organisation, indiquez-la dans
 Sécurité : les jetons sont stockés dans le **Gestionnaire d'identifiants Windows** (service « DragonTree »), jamais
 dans les réglages ni dans les URL. Pour un clone fait depuis un compte, puis pour les fetch/pull/push de ce
 dépôt, DragonTree transmet l'authentification à git par variables d'environnement (`http.<origine>.extraHeader`) :
-rien n'est écrit dans `.git/config`. Les autres dépôts utilisent votre configuration git habituelle.
+rien n'est écrit dans `.git/config`. Les autres dépôts utilisent votre configuration git habituelle, sauf si vous leur
+associez un compte : **Dépôt › Utiliser le compte…** (ou les réglages du dépôt) propose d'abord les comptes qui
+correspondent à un remote, **Dépôt › Ne plus utiliser de compte** retire l'association. Le compte associé est affiché
+dans la barre d'outils de l'onglet.
 
 ## Architecture
 

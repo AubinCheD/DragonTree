@@ -33,10 +33,9 @@ pub(crate) fn auth_env(account: Option<&dragontree_forges::Account>) -> Vec<(Str
 }
 
 impl RepoTab {
-    /// Compte associé au dépôt, dont le jeton authentifie les opérations réseau.
+    /// Compte associé au dépôt (voir `RepoTab::account`), dont le jeton authentifie les opérations réseau.
     pub(crate) fn net_account(&self, shared: &Shared) -> Option<dragontree_forges::Account> {
-        let settings = &shared.settings;
-        settings.account_for_repo(&self.workdir()).or_else(|| settings.account_for_repo(&self.path)).cloned()
+        self.account(&shared.settings).cloned()
     }
 
     pub(crate) fn run_op(&mut self, shared: &Shared, title: &str, refresh: Refresh, opts: OpOptions, f: Box<OpFn>) {

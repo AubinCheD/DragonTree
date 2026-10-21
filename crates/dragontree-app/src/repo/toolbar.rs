@@ -137,8 +137,23 @@ impl RepoTab {
                 if toolbar_button(ui, icons::TERMINAL_WINDOW, "Terminal", true, false).clicked() {
                     self.run_command(Command::OpenTerminal, shared);
                 }
+                self.account_chip(ui, shared, p);
             });
         });
+    }
+
+    /// Compte associé au dépôt, s'il y en a un : son jeton authentifie fetch, pull et push ; un clic ouvre le choix
+    /// du compte.
+    fn account_chip(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
+        let Some((kind, title)) = self.account(&shared.settings).map(|a| (a.kind, a.title())) else { return };
+        ui.separator();
+        let text = RichText::new(format!("{} {title}", crate::accounts::kind_icon(kind))).size(12.0).color(p.weak);
+        let chip = ui
+            .add_enabled(self.can_run(Command::UseAccount), egui::Button::new(text).frame(false).truncate())
+            .on_hover_text(tr!("Fetch, pull et push s'authentifient avec ce compte. Clic : choisir un autre compte."));
+        if chip.clicked() {
+            self.run_command(Command::UseAccount, shared);
+        }
     }
 
     /// Flèche à côté de Pop : la liste des stashs, chacun avec le menu d'un stash (Pop, Appliquer, Renommer…).

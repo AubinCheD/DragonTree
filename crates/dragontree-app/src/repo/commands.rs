@@ -22,7 +22,8 @@ impl RepoTab {
         let has_remote = !self.remotes.is_empty();
         let on_branch = matches!(self.refs.as_ref().map(|r| &r.head), Some(HeadState::Branch(_)));
         match cmd {
-            Command::Fetch => has_remote,
+            // Le compte associé ne sert qu'aux échanges avec les remotes (proposition d'après leurs URL).
+            Command::Fetch | Command::UseAccount => has_remote,
             Command::Pull | Command::QuickPull | Command::Push | Command::QuickPush => has_remote && on_branch,
             Command::Stash | Command::Snapshot => self.status.as_ref().is_some_and(|s| !s.is_clean()),
             Command::NewBranch
@@ -153,6 +154,8 @@ impl RepoTab {
             Command::LfsPrune => self.op_lfs_prune(shared),
             Command::LfsLocks => self.open_lfs_locks(shared),
             Command::RepoSettings => self.open_repo_settings(shared),
+            Command::UseAccount => self.open_use_account(shared),
+            Command::StopUsingAccount => self.set_account(shared, None),
             Command::RepoStats => self.open_stats(shared),
             Command::AiReviewBranch => {
                 if let Some(HeadState::Branch(name)) = self.refs.as_ref().map(|r| r.head.clone()) {

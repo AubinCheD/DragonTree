@@ -132,7 +132,8 @@ pub struct Settings {
     /// Espace de travail actif ; vide : « Par défaut ».
     pub current_workspace: String,
     pub accounts: Vec<Account>,
-    /// Dépôt (chemin) → identifiant du compte utilisé pour fetch/pull/push.
+    /// Dépôt (chemin) → identifiant du compte utilisé pour fetch/pull/push : rempli par un clonage depuis un compte,
+    /// par Dépôt › Utiliser le compte… et par les réglages du dépôt (la fenêtre Réglages ne l'édite pas).
     pub repo_accounts: BTreeMap<String, String>,
     pub diff_context: u32,
     pub ignore_whitespace: bool,
@@ -368,9 +369,20 @@ impl Settings {
         }
     }
 
+    /// Compte associé au dépôt `path` (voir [`Settings::repo_accounts`]) : `None` sans association, ou si le compte
+    /// n'existe plus.
     pub fn account_for_repo(&self, path: &Path) -> Option<&Account> {
         let id = self.repo_accounts.get(&path_key(path))?;
         self.accounts.iter().find(|a| &a.id == id)
+    }
+
+    /// Associe le compte `account_id` au dépôt `path` (fetch, pull et push s'authentifient avec son jeton), ou
+    /// retire l'association (`None`) : git reprend alors sa configuration habituelle.
+    pub fn set_account_for_repo(&mut self, path: &Path, account_id: Option<&str>) {
+        match account_id {
+            Some(id) => self.repo_accounts.insert(path_key(path), id.to_string()),
+            None => self.repo_accounts.remove(&path_key(path)),
+        };
     }
 
     /// Références masquées du graphe pour un dépôt (voir [`Settings::hidden_refs`]).
@@ -621,6 +633,34 @@ mod tests {
         });
         s.save_to(&file).unwrap();
         assert_eq!(Settings::load_from(&file), s);
+    }
+
+    fn account(id: &str) -> Account {
+        Account {
+            id: id.into(),
+            kind: dragontree_forges::ForgeKind::GitHub,
+            host: "github.com".into(),
+            username: "ada".into(),
+            display_name: String::new(),
+            orgs: Vec::new(),
+            avatar_url: None,
+        }
+    }
+
+    #[test]
+    fn an_associated_account_is_returned_until_it_is_dissociated() {
+        let mut s = Settings { accounts: vec![account("compte-a"), account("compte-b")], ..Settings::default() };
+        let repo = Path::new(r"C:\DEV\Fabrikam");
+        assert!(s.account_for_repo(repo).is_none(), "aucun compte avant l'association");
+        s.set_account_for_repo(repo, Some("compte-b"));
+        // Même dépôt quelle que soit l'écriture du chemin.
+        assert_eq!(s.account_for_repo(Path::new(r"c:\dev\fabrikam\")).map(|a| a.id.as_str()), Some("compte-b"));
+        assert!(s.account_for_repo(Path::new(r"C:\DEV\Contoso")).is_none(), "propre à ce dépôt");
+        s.set_account_for_repo(repo, Some("compte-a"));
+        assert_eq!(s.account_for_repo(repo).map(|a| a.id.as_str()), Some("compte-a"), "un seul compte par dépôt");
+        s.set_account_for_repo(repo, None);
+        assert!(s.account_for_repo(repo).is_none());
+        assert!(s.repo_accounts.is_empty(), "plus d'entrée pour un dépôt dissocié");
     }
 
     #[test]

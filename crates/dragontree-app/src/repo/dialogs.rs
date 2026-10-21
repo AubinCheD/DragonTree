@@ -44,7 +44,7 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `StashFiles` : seulement les fichiers choisis dans la vue Changements ; `ApplyPatch` : aperçu d'un patch lu (fichier
 /// déposé, texte collé) et cible choisie ; `PastePatch` : zone où coller le texte d'un patch ; `EditRemoteUrl` :
 /// `push_url` est un champ séparé, seulement si le remote a une URL de push distincte ; `RepoSettings` : identité
-/// locale, modèle de message et liens vers les tickets ; `AddSubmodule` : `path` vide reprend le nom du dépôt cloné,
+/// locale, compte, modèle de message, liens des tickets ; `AddSubmodule` : `path` vide reprend le nom du dépôt cloné,
 /// `branch` est facultative ; `EditSubmoduleUrl`, `MoveSubmodule` et `RemoveSubmodule` portent sur le sous-module installé
 /// dans `path` (`old` pour le déplacement) ; `Ignore` : motif, fichier cible et aperçu des fichiers concernés ;
 /// `GitFlowInit` : réglages de Git Flow à écrire ; `GitFlowStart` : nature et nom court de la branche à créer ;
@@ -56,7 +56,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// `RestoreFile` : fichier à remettre dans son état à `rev` (`label` décrit la version), demandé seulement quand il a
 /// des modifications locales ; `PullRequest` : formulaire de création d'une pull request, qui reste ouvert pendant le push
 /// et l'appel à la forge (voir `pull_request`) ; `OpenSolution` : solution à ouvrir dans `editor` (Visual Studio) quand le
-/// dépôt en contient plusieurs, `chosen` est sa position dans `solutions`.
+/// dépôt en contient plusieurs, `chosen` est sa position dans `solutions` ; `UseAccount` : comptes proposés pour le
+/// dépôt (voir `repo_account`), `chosen` est l'identifiant du compte coché.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -102,6 +103,7 @@ pub enum Dialog {
     PushBranches { items: Vec<super::branch_batch::BranchChoice> },
     DeleteStaleBranches { items: Option<Vec<super::branch_batch::BranchChoice>>, force: bool },
     RepoSettings(Box<super::repo_settings::RepoSettingsForm>),
+    UseAccount { choices: Vec<super::repo_account::AccountChoice>, chosen: Option<String> },
     CustomCommand(Box<Prepared>),
     OpenSolution { editor: crate::editors::Editor, solutions: Vec<PathBuf>, chosen: usize },
     Confirm { title: String, text: String, action: ConfirmAction },
@@ -199,6 +201,9 @@ impl Dialog {
                 (tr!("Supprimer les branches périmées").into(), tr!("Supprimer").into(), true)
             }
             Dialog::RepoSettings(_) => (tr!("Réglages du dépôt").into(), tr!("Enregistrer").into(), false),
+            Dialog::UseAccount { .. } => {
+                (tr!("Utiliser un compte pour ce dépôt").into(), tr!("Utiliser").into(), false)
+            }
             Dialog::OpenSolution { editor, .. } => {
                 (tr!("Ouvrir dans {editor}", editor = editor.kind.label()), tr!("Ouvrir").into(), false)
             }
@@ -601,6 +606,7 @@ impl RepoTab {
             Dialog::PushBranches { items } => Self::push_branches_body(ui, items, p),
             Dialog::DeleteStaleBranches { items, force } => Self::delete_stale_body(ui, items, force, p),
             Dialog::RepoSettings(form) => Self::repo_settings_body(ui, form, p),
+            Dialog::UseAccount { choices, chosen } => Self::use_account_body(ui, choices, chosen, p),
             Dialog::CustomCommand(prepared) => self.custom_command_body(ui, prepared, p),
             Dialog::OpenSolution { solutions, chosen, .. } => self.open_solution_body(ui, solutions, chosen, p),
             Dialog::Confirm { text, .. } => {
@@ -750,6 +756,7 @@ impl RepoTab {
                 self.op_delete_stale(shared, items.unwrap_or_default(), force)
             }
             Dialog::RepoSettings(form) => self.save_repo_settings(shared, form),
+            Dialog::UseAccount { chosen, .. } => self.set_account(shared, chosen),
             Dialog::CustomCommand(prepared) => self.launch_custom(shared, *prepared),
             Dialog::OpenSolution { editor, solutions, chosen } => {
                 self.open_solution(shared, &editor, &solutions, chosen)
