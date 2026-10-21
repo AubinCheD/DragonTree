@@ -2,6 +2,8 @@
 //! `build.rs` depuis `assets/dragontree.ico`) : c'est elle que montrent l'Explorateur et les raccourcis. Le test lit
 //! le répertoire des ressources du fichier PE, sans outil externe.
 
+#![cfg(windows)]
+
 /// Types de ressources Windows.
 const RT_ICON: u32 = 3;
 const RT_GROUP_ICON: u32 = 14;
@@ -94,7 +96,6 @@ fn ico_images(ico: &[u8]) -> Vec<(u32, &[u8])> {
         .collect()
 }
 
-#[cfg(windows)]
 #[test]
 fn the_executable_carries_the_application_icon_at_every_size() {
     let pe = Pe::read(std::fs::read(env!("CARGO_BIN_EXE_dragontree")).unwrap());

@@ -351,6 +351,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - Les réglages du dépôt (R8) ont la même liste, avec « Aucun » en tête ; seul un changement est enregistré.
   - Le compte associé est affiché dans la barre d'outils de l'onglet (un clic rouvre le choix) et dans l'infobulle de l'onglet.
   - L'association (`Settings::set_account_for_repo`) est rangée sous la racine de la copie de travail, comme après un clonage. La fenêtre Réglages n'édite pas `repo_accounts` : il reste hors de `take_edits`.
+  - Un worktree lié sans association propre reprend le compte de la copie de travail principale (`Repo::main_workdir`, dérivé du répertoire commun) ; « Ne plus utiliser de compte » ne retire que l'association du worktree lui-même.
 - **À faire :**
   1. Ajouter « Utiliser le compte… » et « Ne plus utiliser de compte » dans le menu du dépôt, ou dans les réglages du dépôt (R8) (fait : les deux).
   2. Proposer les comptes dont `account_matches_url` (`crates/dragontree-forges/src/auth.rs`) correspond à un remote (fait).
@@ -358,7 +359,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :**
   - test unitaire de la proposition de comptes à partir des remotes : `accounts_matching_a_remote_are_proposed_first_with_that_remote` et `without_a_matching_remote_every_account_is_still_proposed_in_order` (`crates/dragontree-app/src/repo/repo_account.rs`) ;
   - test : après association, `account_for_repo` renvoie le compte, et la dissociation le retire (`an_associated_account_is_returned_until_it_is_dissociated`, `crates/dragontree-app/src/settings.rs`) ;
-  - tests d'interface avec des comptes fictifs, sans jeton : `crates/dragontree-app/tests/ui_repo_account.rs` (menu Dépôt, réglages du dépôt, aucun compte enregistré).
+  - tests d'interface avec des comptes fictifs, sans jeton : `crates/dragontree-app/tests/ui_repo_account.rs` (menu Dépôt, réglages du dépôt, aucun compte enregistré, worktree lié).
 - **Priorité :** moyenne (reportée explicitement ; utile dès qu'on a plusieurs comptes).
 
 ### À implémenter
@@ -406,13 +407,13 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **État :** réalisé.
   - Avant : seule l'icône de fenêtre existait, dessinée en code dans `main.rs`, et `dragontree.exe` n'avait pas de ressource d'icône.
   - Le dessin est dans `crates/dragontree-app/src/app_icon.rs` : à toute taille (grille de 64 unités, bords lissés sur un pixel, composition sans frange sombre), pour l'icône de fenêtre (64 px) et pour `assets/dragontree.ico` (16, 24, 32, 48 et 64 px en bitmaps 32 bits, 256 px en PNG), versionné. `cargo run -p dragontree-app --example app_icon` le régénère ; un test vérifie qu'il correspond au dessin.
-  - `crates/dragontree-app/build.rs` intègre le `.ico` sans outil externe ni nouvelle dépendance : il écrit l'objet COFF qu'aurait produit `cvtres` (`.rsrc$01` : répertoire des ressources RT_ICON et RT_GROUP_ICON, `.rsrc$02` : les images, adresses relogées en ADDR32NB) et le passe à l'éditeur de liens du binaire (`cargo:rustc-link-arg-bins`). Le même objet convient à ld (GNU) et à link.exe (MSVC) ; `scripts/setup-toolchain.ps1` reste inchangé (pas de `windres.exe`).
+  - `crates/dragontree-app/build.rs` intègre le `.ico` sans outil externe ni nouvelle dépendance : il écrit l'objet COFF qu'aurait produit `cvtres` (`.rsrc$01` : répertoire des ressources RT_ICON et RT_GROUP_ICON, `.rsrc$02` : les images, adresses relogées en ADDR32NB) et le passe à l'éditeur de liens du binaire (`cargo:rustc-link-arg-bins`). Le même objet est destiné à ld (GNU) et à link.exe (MSVC) ; `scripts/setup-toolchain.ps1` reste inchangé (pas de `windres.exe`).
 - **À faire :**
   1. Ajouter un `.ico` dans `assets/` (fait).
   2. Ajouter un `build.rs` qui intègre la ressource. Avec la toolchain GNU, il faut aussi extraire `windres.exe`, ou utiliser une crate qui n'a besoin d'aucun outil externe (fait : objet écrit par `build.rs`, sans outil).
-- **Critère de fin (atteint) :** l'Explorateur affiche l'icône de `target\release\dragontree.exe`, avec les toolchains GNU et MSVC.
+- **Critère de fin (atteint avec GNU ; MSVC : objet lié par lld-link, link.exe à confirmer) :** l'Explorateur affiche l'icône de `target\release\dragontree.exe`, avec les toolchains GNU et MSVC.
   - Test `the_executable_carries_the_application_icon_at_every_size` (`crates/dragontree-app/tests/exe_icon.rs`) : il lit les ressources PE de l'exécutable construit (groupe d'icônes, six images identiques à celles du `.ico`), quelle que soit la toolchain qui lance les tests.
-  - Vérifié le 2026-10-21 avec la toolchain GNU (ld 2.44) : icône extraite par le shell Windows (`ExtractAssociatedIcon`) en debug et en release. Côté MSVC, l'objet a été lié par `rust-lld -flavor link` (éditeur de liens compatible link.exe) : ressources identiques ; la toolchain MSVC elle-même n'est pas installée sur le poste de développement.
+  - Vérifié le 2026-10-21 avec la toolchain GNU (ld 2.44) : icône extraite par le shell Windows (`ExtractAssociatedIcon`) en debug et en release. Côté MSVC, l'objet a été lié par `rust-lld -flavor link` (éditeur de liens compatible link.exe) : ressources identiques ; la toolchain MSVC elle-même n'est pas installée sur le poste de développement, l'édition des liens par link.exe reste donc à confirmer.
 - **Priorité :** basse.
 
 ### Bugs à corriger

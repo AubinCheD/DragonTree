@@ -129,6 +129,15 @@ impl Repo {
             .unwrap_or_else(|| self.workdir.display().to_string())
     }
 
+    /// Racine de la copie de travail principale quand ce dépôt est un worktree lié (dossier parent du répertoire
+    /// commun `.git`) ; `None` pour la copie principale elle-même, ou si le dépôt principal est nu.
+    pub fn main_workdir(&self) -> Option<PathBuf> {
+        if self.git_dir == self.common_dir || self.common_dir.file_name()? != ".git" {
+            return None;
+        }
+        self.common_dir.parent().map(Path::to_path_buf)
+    }
+
     pub(crate) fn cmd(&self) -> GitCommand {
         self.git.cmd(&self.workdir)
     }

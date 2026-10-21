@@ -32,6 +32,21 @@ fn open_from_subdir_finds_toplevel() {
 }
 
 #[test]
+fn a_linked_worktree_knows_the_root_of_the_main_worktree() {
+    let t = TestRepo::new();
+    t.write("a.txt", "a\n");
+    t.commit_all("init");
+    let main = open(&t);
+    assert_eq!(main.main_workdir(), None, "copie de travail principale : rien à remonter");
+    let dir = tempfile::tempdir().unwrap();
+    let wt_path = dir.path().join("wt");
+    t.run(&["worktree", "add", "-q", "-b", "wt", &wt_path.display().to_string()]);
+    let linked = Repo::open(&t.git, &wt_path).unwrap();
+    let root = linked.main_workdir().expect("racine de la copie principale");
+    assert!(same_dir(&root, t.path()), "{}", root.display());
+}
+
+#[test]
 fn open_non_repo_reports_not_a_repository() {
     let dir = tempfile::tempdir().unwrap();
     let git = dragontree_git::Git::discover().unwrap();

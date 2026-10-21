@@ -54,7 +54,7 @@ pub fn finish_clone(shared: &mut Shared, done: &CloneDone, window_open: bool) {
     match &done.result {
         Ok(()) => {
             if let Some(acc) = &done.account {
-                shared.settings.repo_accounts.insert(path_key(&done.dest), acc.clone());
+                shared.settings.set_account_for_repo(&done.dest, Some(acc));
             }
             shared.settings.default_clone_dir = Some(done.parent.clone());
             shared.settings_dirty = true;

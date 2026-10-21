@@ -156,6 +156,42 @@ fn the_repository_settings_dialog_changes_or_removes_the_account() {
     wait_until(&mut h, "autre compte associé", |_| saved_associations(tmp.path()) == [GITHUB]);
 }
 
+/// Un worktree lié du dépôt reprend le compte associé au dépôt principal, sauf s'il a le sien.
+#[test]
+fn a_linked_worktree_uses_the_account_of_the_main_repository_unless_it_has_its_own() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = repo(tmp.path());
+    let wt = tmp.path().join("northwind-wt");
+    git(&repo, &["worktree", "add", "-q", "-b", "fonction", wt.to_str().unwrap()]);
+    seed(tmp.path(), two_accounts(), Some((&repo, GITLAB)));
+    let mut h = open(tmp.path(), &wt);
+    wait_until(&mut h, "compte du dépôt principal affiché", |h| shows_account(h, GITLAB_TITLE));
+    // Rien à retirer sur le worktree lui-même : l'association est celle du dépôt principal.
+    open_menu(&mut h, "Dépôt");
+    assert!(menu_item_disabled(&h, "Ne plus utiliser de compte"));
+
+    // Son propre compte passe devant celui du dépôt principal…
+    click_menu_item(&mut h, "Utiliser le compte…");
+    wait_until(&mut h, "dialogue", |h| h.query_by_label("Utiliser").is_some());
+    assert!(is_selected(&h, GITLAB_TITLE), "le compte en vigueur est coché");
+    click_radio(&mut h, GITHUB_TITLE);
+    click_label(&mut h, "Utiliser");
+    let both = |base: &Path| {
+        let mut ids = saved_associations(base);
+        ids.sort();
+        ids == [GITHUB, GITLAB]
+    };
+    wait_until(&mut h, "association propre au worktree", |_| both(tmp.path()));
+    wait_until(&mut h, "compte du worktree affiché", |h| shows_account(h, GITHUB_TITLE));
+    assert!(!shows_account(&h, GITLAB_TITLE));
+
+    // … et la retirer rend celui du dépôt principal.
+    open_menu(&mut h, "Dépôt");
+    click_menu_item(&mut h, "Ne plus utiliser de compte");
+    wait_until(&mut h, "association du worktree retirée", |_| saved_associations(tmp.path()) == [GITLAB]);
+    wait_until(&mut h, "compte du dépôt principal de nouveau", |h| shows_account(h, GITLAB_TITLE));
+}
+
 #[test]
 fn without_any_account_the_menu_opens_the_accounts_window() {
     let tmp = tempfile::tempdir().unwrap();

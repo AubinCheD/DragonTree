@@ -1,7 +1,8 @@
 //! Intègre l'icône `assets/dragontree.ico` à l'exécutable (ressources Windows RT_ICON et RT_GROUP_ICON, affichées par
 //! l'Explorateur), sans compilateur de ressources : le script écrit lui-même l'objet COFF que produirait `cvtres`
 //! (section `.rsrc$01` : répertoire des ressources, `.rsrc$02` : leurs données) et le passe à l'éditeur de liens des
-//! binaires du paquet. Le même objet convient à ld (toolchain GNU) et à link.exe (toolchain MSVC).
+//! binaires du paquet. Le même objet est destiné à ld (toolchain GNU) et à link.exe (toolchain MSVC). Toute autre
+//! ressource (manifeste, VERSIONINFO) doit être ajoutée à cet objet.
 //!
 //! Le fichier `.ico` est versionné ; il se régénère depuis le dessin de l'icône (`src/app_icon.rs`) avec
 //! `cargo run -p dragontree-app --example app_icon`.

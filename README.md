@@ -125,8 +125,8 @@ Avec Visual Studio Build Tools (« Développement Desktop en C++ ») et `rustup 
 inutile : supprimez `.cargo\config.toml` puis `cargo build --release`.
 
 L'exécutable est `target\release\dragontree.exe` (environ 16 Mo, aucune dépendance à installer). Il porte l'icône
-`assets/dragontree.ico`, intégrée par `crates/dragontree-app/build.rs` sans compilateur de ressources (même chose
-avec les deux toolchains). Elle est dessinée en code (`crates/dragontree-app/src/app_icon.rs`) ; après un changement
+`assets/dragontree.ico`, intégrée par `crates/dragontree-app/build.rs` sans compilateur de ressources (atteint avec
+GNU ; MSVC : objet lié par lld-link, link.exe à confirmer). Elle est dessinée en code (`crates/dragontree-app/src/app_icon.rs`) ; après un changement
 du dessin, `cargo run -p dragontree-app --example app_icon` régénère le fichier.
 
 ## Utilisation
@@ -200,7 +200,7 @@ dépôt, DragonTree transmet l'authentification à git par variables d'environne
 rien n'est écrit dans `.git/config`. Les autres dépôts utilisent votre configuration git habituelle, sauf si vous leur
 associez un compte : **Dépôt › Utiliser le compte…** (ou les réglages du dépôt) propose d'abord les comptes qui
 correspondent à un remote, **Dépôt › Ne plus utiliser de compte** retire l'association. Le compte associé est affiché
-dans la barre d'outils de l'onglet.
+dans la barre d'outils de l'onglet ; un worktree lié sans compte propre utilise celui du dépôt principal.
 
 ## Architecture
 

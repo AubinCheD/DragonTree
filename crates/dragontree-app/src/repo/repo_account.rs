@@ -85,9 +85,18 @@ pub(super) fn account_picker(
 }
 
 impl RepoTab {
-    /// Compte associé au dépôt (racine de la copie de travail, sinon dossier de l'onglet), dont le jeton
-    /// authentifie les opérations réseau.
+    /// Compte en vigueur pour le dépôt, dont le jeton authentifie les opérations réseau : le sien (voir
+    /// [`RepoTab::own_account`]), sinon, pour un worktree lié, celui de la copie de travail principale.
     pub fn account<'s>(&self, settings: &'s Settings) -> Option<&'s Account> {
+        self.own_account(settings).or_else(|| {
+            let main = self.repo.as_ref()?.main_workdir()?;
+            settings.account_for_repo(&main)
+        })
+    }
+
+    /// Compte associé à ce dépôt lui-même (racine de la copie de travail, sinon dossier de l'onglet) : c'est celui
+    /// que « Ne plus utiliser de compte » retire.
+    pub fn own_account<'s>(&self, settings: &'s Settings) -> Option<&'s Account> {
         settings.account_for_repo(&self.workdir()).or_else(|| settings.account_for_repo(&self.path))
     }
 
