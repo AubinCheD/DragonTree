@@ -310,7 +310,7 @@ mod tests {
     /// Attente bornée par `LIMIT` : au-delà, l'enfant est tué (`TerminateProcess`) et le relais échoue.
     #[cfg(windows)]
     fn spawn_like_cmd(exe: &std::path::Path) {
-        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_FAILED, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{
             CreateProcessW, GetExitCodeProcess, PROCESS_INFORMATION, STARTUPINFOW, TerminateProcess,
             WaitForSingleObject,
@@ -322,7 +322,7 @@ mod tests {
         let mut line: Vec<u16> = line.encode_utf16().chain(Some(0)).collect();
         // SAFETY: structures initialisées à zéro puis remplies par l'API ; ligne de commande modifiable, terminée par
         // un zéro ; handles du processus fermés après l'attente.
-        let (waited, code) = unsafe {
+        let (waited, wait_error, code) = unsafe {
             let mut startup: STARTUPINFOW = std::mem::zeroed();
             startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
             let mut info: PROCESS_INFORMATION = std::mem::zeroed();
@@ -340,6 +340,8 @@ mod tests {
             );
             assert_ne!(created, 0, "{}", std::io::Error::last_os_error());
             let waited = WaitForSingleObject(info.hProcess, LIMIT.as_millis() as u32);
+            // `WAIT_FAILED` : l'erreur est lue tout de suite, avant tout autre appel.
+            let wait_error = (waited == WAIT_FAILED).then(std::io::Error::last_os_error);
             if waited != WAIT_OBJECT_0 {
                 TerminateProcess(info.hProcess, 1);
             }
@@ -347,8 +349,11 @@ mod tests {
             GetExitCodeProcess(info.hProcess, &mut code);
             CloseHandle(info.hThread);
             CloseHandle(info.hProcess);
-            (waited, code)
+            (waited, wait_error, code)
         };
+        if let Some(error) = wait_error {
+            panic!("attente de l'enfant impossible ({error}) : tué");
+        }
         assert_eq!(waited, WAIT_OBJECT_0, "l'enfant ne s'est pas terminé en {LIMIT:?} : tué");
         assert_eq!(code, 0, "l'enfant a échoué (code {code})");
     }

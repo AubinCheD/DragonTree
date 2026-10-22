@@ -714,7 +714,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
     - Lancé par la bibliothèque standard (`STARTF_USESTDHANDLES`, comme Git Bash) avec une console parente, sorties standard et d'erreur sur un handle jamais ouvert : `Attached`, les deux sorties sur un même handle `CONOUT$` utilisable.
     - Sans console parente : `NoConsole`, sans panique.
     - Vu rouge sans la remise des flux : sortie standard remplacée par la console, compte rendu de l'enfant perdu ; et avec un `CONOUT$` ouvert par sortie : deux handles différents.
-    - Chaque attente d'un processus relancé est bornée (30 s pour l'enfant, 60 s pour le relais) : au-delà, il est tué et le test échoue au lieu de bloquer la suite. Le message d'échec reprend les sorties du relais et les paniques de l'enfant.
+    - Chaque attente d'un processus relancé est bornée (30 s pour l'enfant, 60 s pour le relais) : au-delà, il est tué et le test échoue au lieu de bloquer la suite ; une attente elle-même en échec (`WAIT_FAILED`) le dit, avec l'erreur de Windows. Le message d'échec reprend les sorties du relais et les paniques de l'enfant.
   - L'exécutable release n'est pas construit par la suite de tests (vérification manuelle ci-dessus).
 - **À faire :** lancer `dragontree.exe --help` dans cmd et dans PowerShell. Si rien ne s'affiche, s'attacher à la console parente (`AttachConsole`) avant d'écrire (fait).
 - **Critère de fin (atteint) :** l'aide s'affiche depuis cmd et PowerShell avec l'exécutable release ; tube de Git Bash inchangé.
