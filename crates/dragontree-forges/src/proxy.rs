@@ -4,8 +4,9 @@
 //!
 //! - Détection automatique (WPAD) ou script de configuration (PAC) : WinHTTP donne le proxy de chaque URL
 //!   (`WinHttpGetProxyForUrl`, qui trouve, télécharge et exécute le script). Sans réponse (aucun script trouvé),
-//!   les réglages manuels s'appliquent, comme pour Windows. Une détection automatique sans résultat n'est retentée
-//!   qu'après [`AUTO_DETECT_RETRY`].
+//!   les réglages manuels s'appliquent, comme pour Windows. Une configuration automatique sans réponse (détection
+//!   sans résultat, script injoignable) n'est redemandée qu'après [`AUTO_RETRY`] ([`AutoFailures`]) ; les identifiants
+//!   de la session Windows ne sont envoyés au serveur du script que s'il les demande ([`with_auto_logon`]).
 //! - Proxy manuel : `hôte:port` pour tous les protocoles, ou un serveur par protocole (`http=hôte:port;https=…`).
 //!   Le proxy est joint en HTTP (`CONNECT` pour une forge en HTTPS). Un proxy SOCKS n'est pas pris en charge : la
 //!   connexion est alors directe.
@@ -15,10 +16,85 @@
 //!
 //! L'accès à Windows passe par [`ProxySource`] : la logique se teste sans lire la configuration de la machine.
 
-use std::net::IpAddr;
+#![cfg_attr(not(windows), allow(dead_code))]
 
-/// Délai avant de retenter une détection automatique (WPAD) restée sans réponse.
-pub(crate) const AUTO_DETECT_RETRY: std::time::Duration = std::time::Duration::from_secs(300);
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
+/// Délai avant de redemander une configuration automatique (détection ou script) restée sans réponse, ou de rouvrir
+/// la session WinHTTP qui l'interroge.
+pub(crate) const AUTO_RETRY: Duration = Duration::from_secs(300);
+
+/// Erreur de WinHTTP : le serveur du script de configuration demande une authentification
+/// (`ERROR_WINHTTP_LOGIN_FAILURE`).
+pub(crate) const LOGIN_FAILURE: u32 = 12015;
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Échecs récents de la configuration automatique, par réglage (détection automatique, adresse du script) : un script
+/// injoignable ou une détection sans résultat ne sont pas redemandés à chaque requête (jusqu'à 10 s d'attente chacune).
+#[derive(Default)]
+pub(crate) struct AutoFailures(Mutex<HashMap<(bool, Option<String>), Instant>>);
+
+impl AutoFailures {
+    /// Réponse de `ask` ; `None` sans la redemander si ce réglage est resté sans réponse il y a moins de
+    /// [`AUTO_RETRY`] (à l'instant `now`).
+    pub(crate) fn ask(
+        &self,
+        auto_detect: bool,
+        config_url: Option<&str>,
+        now: Instant,
+        ask: impl FnOnce() -> Option<AutoProxy>,
+    ) -> Option<AutoProxy> {
+        let key = (auto_detect, config_url.map(str::to_string));
+        if lock(&self.0).get(&key).is_some_and(|at| now.saturating_duration_since(*at) < AUTO_RETRY) {
+            return None;
+        }
+        let answer = ask();
+        match answer {
+            Some(_) => lock(&self.0).remove(&key),
+            None => lock(&self.0).insert(key, now),
+        };
+        answer
+    }
+}
+
+/// Ressource ouverte une fois puis gardée (son handle) ; un échec n'est retenté qu'après [`AUTO_RETRY`].
+pub(crate) struct OpenOnce(Mutex<Option<Result<usize, Instant>>>);
+
+impl OpenOnce {
+    pub(crate) const fn new() -> OpenOnce {
+        OpenOnce(Mutex::new(None))
+    }
+
+    /// Handle ouvert par `open` (à l'instant `now`), gardé pour les appels suivants.
+    pub(crate) fn get(&self, now: Instant, open: impl FnOnce() -> Option<usize>) -> Option<usize> {
+        let mut state = lock(&self.0);
+        match *state {
+            Some(Ok(handle)) => return Some(handle),
+            Some(Err(at)) if now.saturating_duration_since(at) < AUTO_RETRY => return None,
+            _ => {}
+        }
+        let opened = open();
+        *state = Some(opened.ok_or(now));
+        opened
+    }
+}
+
+/// Demande le proxy d'une URL sans identifiants (`call(false)`), puis avec ceux de la session Windows (`call(true)`)
+/// seulement si le serveur du script les exige ([`LOGIN_FAILURE`]), comme Microsoft le recommande pour
+/// `fAutoLogonIfChallenged`. `call` renvoie le code d'erreur de WinHTTP en cas d'échec.
+pub(crate) fn with_auto_logon(mut call: impl FnMut(bool) -> Result<AutoProxy, u32>) -> Option<AutoProxy> {
+    match call(false) {
+        Ok(answer) => Some(answer),
+        Err(LOGIN_FAILURE) => call(true).ok(),
+        Err(_) => None,
+    }
+}
 
 /// Réglages proxy de l'utilisateur, tels que Windows les donne.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -195,19 +271,24 @@ pub(crate) static SYSTEM: WinHttp = WinHttp;
 
 #[cfg(windows)]
 mod windows {
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::LazyLock;
     use std::time::Instant;
 
-    use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL};
+    use windows_sys::Win32::Foundation::{GetLastError, GlobalFree, HGLOBAL};
     use windows_sys::Win32::Networking::WinHttp::{
-        WINHTTP_ACCESS_TYPE_NAMED_PROXY, WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_AUTO_DETECT_TYPE_DHCP,
-        WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL,
-        WINHTTP_AUTOPROXY_OPTIONS, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO,
-        WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen, WinHttpSetTimeouts,
+        ERROR_WINHTTP_LOGIN_FAILURE, WINHTTP_ACCESS_TYPE_NAMED_PROXY, WINHTTP_ACCESS_TYPE_NO_PROXY,
+        WINHTTP_AUTO_DETECT_TYPE_DHCP, WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_AUTOPROXY_AUTO_DETECT,
+        WINHTTP_AUTOPROXY_CONFIG_URL, WINHTTP_AUTOPROXY_OPTIONS, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG,
+        WINHTTP_PROXY_INFO, WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen,
+        WinHttpSetTimeouts,
     };
     use windows_sys::core::PWSTR;
 
-    use super::{AUTO_DETECT_RETRY, AutoProxy, ProxySource, SystemSettings, WinHttp};
+    use super::{
+        AutoFailures, AutoProxy, LOGIN_FAILURE, OpenOnce, ProxySource, SystemSettings, WinHttp, with_auto_logon,
+    };
+
+    const _: () = assert!(LOGIN_FAILURE == ERROR_WINHTTP_LOGIN_FAILURE);
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(Some(0)).collect()
@@ -235,23 +316,24 @@ mod windows {
         (!text.is_empty()).then_some(text)
     }
 
-    /// Session WinHTTP de la détection automatique, ouverte une fois (sans proxy) et gardée jusqu'à la fin du
-    /// processus ; délais de 10 s pour le téléchargement du script.
+    /// Session WinHTTP de la configuration automatique, ouverte une fois (sans proxy) et gardée jusqu'à la fin du
+    /// processus ; délais de 10 s pour le téléchargement du script. Une ouverture refusée est retentée plus tard.
     fn session() -> Option<*mut core::ffi::c_void> {
-        static SESSION: OnceLock<usize> = OnceLock::new();
-        let handle = *SESSION.get_or_init(|| {
+        static SESSION: OpenOnce = OpenOnce::new();
+        let handle = SESSION.get(Instant::now(), || {
             let agent = wide(crate::http::USER_AGENT);
             // SAFETY: chaînes terminées par un zéro ; pointeurs nuls pour « pas de proxy ».
             let session = unsafe {
                 WinHttpOpen(agent.as_ptr(), WINHTTP_ACCESS_TYPE_NO_PROXY, std::ptr::null(), std::ptr::null(), 0)
             };
-            if !session.is_null() {
-                // SAFETY: session valide.
-                unsafe { WinHttpSetTimeouts(session, 10_000, 10_000, 10_000, 10_000) };
+            if session.is_null() {
+                return None;
             }
-            session as usize
-        });
-        (handle != 0).then_some(handle as *mut core::ffi::c_void)
+            // SAFETY: session valide.
+            unsafe { WinHttpSetTimeouts(session, 10_000, 10_000, 10_000, 10_000) };
+            Some(session as usize)
+        })?;
+        Some(handle as *mut core::ffi::c_void)
     }
 
     impl ProxySource for WinHttp {
@@ -273,44 +355,40 @@ mod windows {
         }
 
         fn auto_proxy(&self, url: &str, auto_detect: bool, config_url: Option<&str>) -> Option<AutoProxy> {
-            // Détection automatique seule, restée sans réponse il y a peu : pas de nouvelle attente.
-            static AUTO_DETECT_FAILED: Mutex<Option<Instant>> = Mutex::new(None);
-            let lock = || AUTO_DETECT_FAILED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let detect_only = auto_detect && config_url.is_none();
-            if detect_only && lock().is_some_and(|at| at.elapsed() < AUTO_DETECT_RETRY) {
-                return None;
-            }
-            let session = session()?;
-            let url = wide(url);
-            let config_url = config_url.map(wide);
-            let mut options = WINHTTP_AUTOPROXY_OPTIONS {
-                dwFlags: if auto_detect { WINHTTP_AUTOPROXY_AUTO_DETECT } else { 0 }
-                    | if config_url.is_some() { WINHTTP_AUTOPROXY_CONFIG_URL } else { 0 },
-                dwAutoDetectFlags: if auto_detect {
-                    WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
-                } else {
-                    0
-                },
-                lpszAutoConfigUrl: config_url.as_ref().map_or(std::ptr::null(), |u| u.as_ptr()),
-                lpvReserved: std::ptr::null_mut(),
-                dwReserved: 0,
-                // Script sur un serveur d'entreprise authentifié : identifiants de la session Windows.
-                fAutoLogonIfChallenged: 1,
-            };
-            let mut info = WINHTTP_PROXY_INFO::default();
-            // SAFETY: session ouverte ; chaînes terminées par un zéro, vivantes pendant l'appel ; `info` rempli par
-            // WinHTTP, ses chaînes prises ci-dessous.
-            if unsafe { WinHttpGetProxyForUrl(session, url.as_ptr(), &mut options, &mut info) } == 0 {
-                if detect_only {
-                    *lock() = Some(Instant::now());
-                }
-                return None;
-            }
-            // SAFETY: chaînes allouées par WinHTTP pour l'appelant, prises une seule fois.
-            let (proxy, bypass) = unsafe { (take(info.lpszProxy), take(info.lpszProxyBypass)) };
-            Some(match (info.dwAccessType, proxy) {
-                (WINHTTP_ACCESS_TYPE_NAMED_PROXY, Some(proxy)) => AutoProxy::Named { proxy, bypass },
-                _ => AutoProxy::Direct,
+            static FAILURES: LazyLock<AutoFailures> = LazyLock::new(AutoFailures::default);
+            FAILURES.ask(auto_detect, config_url, Instant::now(), || {
+                let session = session()?;
+                let url = wide(url);
+                let config_url = config_url.map(wide);
+                let mut options = WINHTTP_AUTOPROXY_OPTIONS {
+                    dwFlags: if auto_detect { WINHTTP_AUTOPROXY_AUTO_DETECT } else { 0 }
+                        | if config_url.is_some() { WINHTTP_AUTOPROXY_CONFIG_URL } else { 0 },
+                    dwAutoDetectFlags: if auto_detect {
+                        WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
+                    } else {
+                        0
+                    },
+                    lpszAutoConfigUrl: config_url.as_ref().map_or(std::ptr::null(), |u| u.as_ptr()),
+                    lpvReserved: std::ptr::null_mut(),
+                    dwReserved: 0,
+                    fAutoLogonIfChallenged: 0,
+                };
+                with_auto_logon(|auto_logon| {
+                    options.fAutoLogonIfChallenged = i32::from(auto_logon);
+                    let mut info = WINHTTP_PROXY_INFO::default();
+                    // SAFETY: session ouverte ; chaînes terminées par un zéro, vivantes pendant l'appel ; `info`
+                    // rempli par WinHTTP, ses chaînes prises ci-dessous.
+                    if unsafe { WinHttpGetProxyForUrl(session, url.as_ptr(), &mut options, &mut info) } == 0 {
+                        // SAFETY: lit l'erreur de l'appel précédent, sur ce thread.
+                        return Err(unsafe { GetLastError() });
+                    }
+                    // SAFETY: chaînes allouées par WinHTTP pour l'appelant, prises une seule fois.
+                    let (proxy, bypass) = unsafe { (take(info.lpszProxy), take(info.lpszProxyBypass)) };
+                    Ok(match (info.dwAccessType, proxy) {
+                        (WINHTTP_ACCESS_TYPE_NAMED_PROXY, Some(proxy)) => AutoProxy::Named { proxy, bypass },
+                        _ => AutoProxy::Direct,
+                    })
+                })
             })
         }
     }
@@ -459,6 +537,91 @@ mod tests {
         let empty = Fixed { settings: Some(SystemSettings::default()), auto: None };
         assert_eq!(proxy_of(&empty, "https://api.github.com/"), None);
         assert_eq!(proxy_of(&manual("proxy:8080", None), "pas une url"), None);
+    }
+
+    /// Un script injoignable ou une détection sans résultat ne sont pas redemandés à chaque requête, dans les deux modes ;
+    /// un autre réglage, ou le même après le délai, l'est.
+    #[test]
+    fn an_unanswered_automatic_configuration_is_not_asked_again_for_a_while() {
+        let failures = AutoFailures::default();
+        let now = Instant::now();
+        let asked = std::cell::Cell::new(0);
+        let ask = |answer: Option<AutoProxy>| {
+            asked.set(asked.get() + 1);
+            answer
+        };
+        let pac = Some("http://wpad.contoso.test/proxy.pac");
+        assert_eq!(failures.ask(false, pac, now, || ask(None)), None);
+        assert_eq!(failures.ask(false, pac, now + Duration::from_secs(60), || ask(Some(AutoProxy::Direct))), None);
+        assert_eq!(asked.get(), 1, "script injoignable : pas redemandé");
+        assert_eq!(failures.ask(true, None, now, || ask(None)), None);
+        assert_eq!(failures.ask(true, None, now, || ask(None)), None);
+        assert_eq!(asked.get(), 2, "détection automatique : pas redemandée");
+        let other = Some("http://autre.contoso.test/proxy.pac");
+        assert_eq!(failures.ask(false, other, now, || ask(Some(AutoProxy::Direct))), Some(AutoProxy::Direct));
+        assert_eq!(asked.get(), 3, "autre script : demandé");
+        let later = now + AUTO_RETRY + Duration::from_secs(1);
+        assert_eq!(failures.ask(false, pac, later, || ask(Some(AutoProxy::Direct))), Some(AutoProxy::Direct));
+        assert_eq!(asked.get(), 4, "redemandé après le délai");
+        // Une réponse efface l'échec : un nouvel échec repart du moment où il arrive.
+        assert_eq!(failures.ask(false, pac, later, || ask(None)), None);
+        assert_eq!(failures.ask(false, pac, later, || ask(None)), None);
+        assert_eq!(asked.get(), 5);
+    }
+
+    #[test]
+    fn a_session_that_could_not_be_opened_is_tried_again_later_and_an_open_one_is_kept() {
+        let session = OpenOnce::new();
+        let now = Instant::now();
+        let mut opened = 0;
+        assert_eq!(
+            session.get(now, || {
+                opened += 1;
+                None
+            }),
+            None
+        );
+        assert_eq!(session.get(now + Duration::from_secs(10), || panic!("pas avant le délai")), None);
+        let later = now + AUTO_RETRY;
+        assert_eq!(
+            session.get(later, || {
+                opened += 1;
+                Some(42)
+            }),
+            Some(42)
+        );
+        assert_eq!(session.get(later + AUTO_RETRY * 10, || panic!("gardée")), Some(42));
+        assert_eq!(opened, 2);
+    }
+
+    /// Les identifiants de Windows ne partent que si le serveur du script les demande.
+    #[test]
+    fn the_windows_credentials_are_sent_only_when_the_script_server_asks() {
+        let mut calls = Vec::new();
+        assert_eq!(
+            with_auto_logon(|logon| {
+                calls.push(logon);
+                Ok(AutoProxy::Direct)
+            }),
+            Some(AutoProxy::Direct)
+        );
+        assert_eq!(calls, [false]);
+        calls.clear();
+        let answer = with_auto_logon(|logon| {
+            calls.push(logon);
+            if logon { Ok(AutoProxy::Named { proxy: "p:3128".into(), bypass: None }) } else { Err(LOGIN_FAILURE) }
+        });
+        assert_eq!(answer, Some(AutoProxy::Named { proxy: "p:3128".into(), bypass: None }));
+        assert_eq!(calls, [false, true]);
+        calls.clear();
+        assert_eq!(
+            with_auto_logon(|logon| {
+                calls.push(logon);
+                Err(12167) // ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT
+            }),
+            None
+        );
+        assert_eq!(calls, [false], "autre erreur : pas d'identifiants");
     }
 
     #[test]
