@@ -184,12 +184,12 @@ impl CloneWindow {
         }
     }
 
-    /// État de la fenêtre à la fin de son clonage (le reste est fait par [`finish_clone`]).
     /// Annulation du clonage en cours, s'il y en a un.
     pub fn running(&self) -> Option<&CancelToken> {
         self.running.as_ref().map(|(_, cancel)| cancel)
     }
 
+    /// État de la fenêtre à la fin de son clonage (le reste est fait par [`finish_clone`]).
     pub fn on_done(&mut self, done: &CloneDone) {
         if self.running.as_ref().is_none_or(|(id, _)| *id != done.id) {
             return;

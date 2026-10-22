@@ -358,13 +358,20 @@ mod tests {
     /// résultat précédent reste affiché.
     #[test]
     fn a_failed_filter_job_does_not_leave_the_filter_pending() {
-        let (mut tab, mut shared, _events, _dir) = tab_with(100);
+        let (mut tab, mut shared, events, _dir) = tab_with(100);
         tab.history.filter = "numéro 4".into();
+        tab.apply_filter(&shared);
+        until_filtered(&mut tab, &mut shared, &events);
+        let shown = summaries(&tab);
+        assert_eq!(shown, numbered([4].into_iter().chain(40..=49)));
+
+        tab.history.filter = "numéro 42".into();
         tab.apply_filter(&shared);
         assert!(tab.history.filter_pending);
         tab.handle_event(RepoEvent::Filtered { generation: tab.gens.filter, rows: None }, &mut shared);
         assert!(!tab.history.filter_pending, "plus de calcul attendu");
         assert!(shared.toasts.has_error(), "l'échec est signalé");
+        assert_eq!(summaries(&tab), shown, "le résultat précédent reste affiché");
     }
 
     #[test]

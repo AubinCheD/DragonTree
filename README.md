@@ -150,7 +150,10 @@ et une capture d'écran (`--screenshot`) est toujours une instance à part.
 
 **Fermeture** : si des opérations (fetch, pull, push, commit, clonage…) attendent ou tournent, fermer la fenêtre
 demande d'attendre leur fin (la fenêtre se ferme ensuite d'elle-même) ou de quitter quand même (elles sont arrêtées) ;
-le fetch automatique est arrêté sans question. Aucun processus git ne survit à DragonTree.
+le fetch automatique est arrêté sans question. Aucune opération git en cours ne survit à DragonTree ; ce que git
+laisse tourner après une commande terminée (démon fsmonitor, éditeur que `git mergetool` a démarré) n'est pas
+touché. Limite : un outil de diff encore ouvert par « Ouvrir dans l'outil de diff externe » (qui
+n'est pas une opération du dépôt) est fermé avec DragonTree, sans question.
 
 ### Raccourcis
 

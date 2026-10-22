@@ -81,6 +81,25 @@ fn runner_cancel_kills_process_tree() {
     assert!(start.elapsed() < Duration::from_secs(5), "annulation trop lente : {:?}", start.elapsed());
 }
 
+/// RV4a : la limite du job (processus tués à sa fermeture) ne vaut que pendant la commande. Ce que git laisse tourner
+/// en partant (démon fsmonitor, outil lancé par `git mergetool`, navigateur du Gestionnaire d'identifiants) lui
+/// survit ; seuls l'annulation, la limite de sortie et la fin de DragonTree arrêtent une commande en cours.
+#[test]
+fn a_program_git_leaves_running_outlives_the_command() {
+    let dir = tempfile::tempdir().unwrap();
+    // L'alias lance un sous-shell en arrière-plan, sans les tubes de sortie, puis rend la main aussitôt.
+    let alias = "alias.bg=!(sleep 1; echo fini > marque.txt) > /dev/null 2>&1 &";
+    let start = Instant::now();
+    git().cmd(dir.path()).args(["-c", alias, "bg"]).run().unwrap();
+    assert!(start.elapsed() < Duration::from_secs(10), "la commande n'attend pas son programme");
+    let marker = dir.path().join("marque.txt");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "le programme laissé par git n'a pas survécu à la commande");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 #[test]
 fn a_bounded_output_stops_reading_and_stops_git_at_the_limit() {
     const LIMIT: usize = 1024 * 1024;

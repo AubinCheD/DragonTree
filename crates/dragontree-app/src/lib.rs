@@ -9,6 +9,7 @@ pub mod app;
 pub mod app_icon;
 pub mod clone;
 pub mod closed_tabs;
+pub mod closing;
 pub mod commands;
 pub mod custom_commands;
 pub mod diff_style;

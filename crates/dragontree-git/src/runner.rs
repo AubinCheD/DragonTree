@@ -294,8 +294,8 @@ pub(crate) struct Finished {
 }
 
 /// Exécution surveillée d'un processus : sans fenêtre, rattaché à un Job Object (l'annulation tue aussi ses
-/// sous-processus, et aucun ne survit à DragonTree : voir `job::JobGuard`), entrée standard fournie ou vide, sorties
-/// lues jusqu'à la fin.
+/// sous-processus, et une commande en cours ne survit pas à DragonTree : voir `job::JobGuard`), entrée standard fournie
+/// ou vide, sorties lues jusqu'à la fin.
 pub(crate) struct Supervised<'a> {
     pub stdin: Option<Vec<u8>>,
     pub cancel: Option<&'a CancelToken>,
@@ -435,11 +435,10 @@ impl Supervised<'_> {
                 None => std::thread::sleep(Duration::from_millis(5)),
             }
         };
-        // Commande terminée : un programme qu'elle a lancé en arrière-plan (`start`) lui survit, à elle comme à
-        // DragonTree. Pendant qu'elle tourne, la limite du job la lie à l'application.
-        if self.detach_after_exit
-            && let Some(job) = &job
-        {
+        // Commande terminée : ce qu'elle laisse tourner lui survit, à elle comme à DragonTree (démon fsmonitor, outil
+        // lancé par `git mergetool`, navigateur du Gestionnaire d'identifiants, programme lancé par `start`). La
+        // limite du job ne lie à l'application que la commande en cours.
+        if let Some(job) = &job {
             job.let_survive();
         }
         Ok(Finished {
@@ -564,9 +563,10 @@ mod job {
         SetInformationJobObject, TerminateJobObject,
     };
 
-    /// Job Windows contenant git et tous ses descendants. Créé avec `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` : ses
-    /// processus meurent à la fermeture de son handle, que ce soit à la fin de la commande ou à la fin du processus de
-    /// DragonTree (Windows ferme alors tous ses handles) ; aucun processus git ne survit à l'application (RV4a).
+    /// Job Windows contenant git et tous ses descendants. Créé avec `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` : tant que la
+    /// commande tourne, ses processus meurent à la fermeture du handle, à la fin du processus de DragonTree (Windows
+    /// ferme alors tous ses handles) : aucune opération git en cours ne survit à l'application (RV4a). Une commande
+    /// terminée lève la limite (`let_survive`) : ce qu'elle laisse tourner lui survit.
     pub struct JobGuard(HANDLE);
 
     impl JobGuard {
@@ -654,8 +654,8 @@ mod job {
             self.limits().is_some_and(|i| i.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0)
         }
 
-        /// Laisse vivre, à la fermeture du handle, les processus restés dans le job : un programme qu'une commande
-        /// terminée a lancé en arrière-plan (`start` de cmd, éditeur ouvert par une commande personnalisée).
+        /// Laisse vivre, à la fermeture du handle, les processus restés dans le job : ce qu'une commande terminée a
+        /// laissé tourner (démon fsmonitor, outil de `git mergetool`, programme lancé par `start`…).
         pub fn let_survive(&self) {
             if let Some(mut info) = self.limits() {
                 info.BasicLimitInformation.LimitFlags &= !JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -692,8 +692,8 @@ mod job {
                 .expect("ping lancé")
         }
 
-        /// RV4a : un processus git ne survit pas à DragonTree. Le job est créé avec
-        /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` : quand son handle se ferme (fin de la commande, ou fin du processus
+        /// RV4a : une opération git en cours ne survit pas à DragonTree. Le job est créé avec
+        /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` : quand son handle se ferme pendant la commande (fin du processus
         /// de DragonTree, dont Windows ferme alors les handles), ses processus sont tués.
         #[test]
         fn a_process_dies_when_its_job_handle_closes() {

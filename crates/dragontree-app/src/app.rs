@@ -12,6 +12,7 @@ use egui::{Frame, Key, KeyboardShortcut, Modifiers};
 use crate::accounts::{AccountsWindow, ForgeEvent};
 use crate::clone::{CloneEvent, CloneWindow};
 use crate::closed_tabs::ClosedTabs;
+use crate::closing::Operations;
 use crate::commands::{self, Command, CommandContext, Scope};
 use crate::jobs::Jobs;
 use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsWindow};
@@ -220,19 +221,6 @@ pub enum TabKind {
     Repo(Box<RepoTab>),
 }
 
-/// Fermeture de l'application pendant des opérations (RV4a, voir `DragonTreeApp::intercept_close`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Closing {
-    #[default]
-    No,
-    /// Des opérations visibles tournent : le dialogue demande d'attendre leur fin ou de quitter quand même.
-    Asking,
-    /// « Attendre » : la fenêtre se ferme d'elle-même à la fin des opérations visibles.
-    Waiting,
-    /// Fermeture décidée : la demande de fermeture suivante n'est plus suspendue, aucune opération ne démarre plus.
-    Quitting,
-}
-
 pub struct Tab {
     pub id: TabId,
     pub kind: TabKind,
@@ -270,7 +258,8 @@ pub struct DragonTreeApp {
     /// Onglets de dépôt fermés pendant la session (Ctrl+Maj+T).
     closed_tabs: ClosedTabs,
     workspace_dialog: crate::workspace_dialog::WorkspaceDialog,
-    closing: Closing,
+    /// Fermeture pendant des opérations (RV4a, voir `closing`).
+    closing: crate::closing::Closing,
     /// Première instance du profil (RV4b, posée par `main`) : reçoit les dépôts des instances lancées ensuite.
     instance: Option<crate::single_instance::PrimaryInstance>,
 }
@@ -365,7 +354,7 @@ impl DragonTreeApp {
             window_title: String::new(),
             closed_tabs: ClosedTabs::default(),
             workspace_dialog: Default::default(),
-            closing: Closing::No,
+            closing: Default::default(),
             instance: None,
         };
 
@@ -1107,132 +1096,6 @@ impl DragonTreeApp {
         }
     }
 
-    /// Opérations visibles en attente ou en cours : celles des files des dépôts (`Shared::queues`) et un clonage ;
-    /// leur titre et leur annulation.
-    fn visible_operations(&self) -> Vec<(String, dragontree_git::CancelToken)> {
-        let queued = self.shared.queues.pending().into_iter().filter(|op| !op.silent).map(|op| (op.title, op.cancel));
-        let clone = self.clone.as_ref().and_then(CloneWindow::running).map(|c| (tr!("Clonage").to_string(), c.clone()));
-        queued.chain(clone).collect()
-    }
-
-    /// Annule toutes les opérations, silencieuses comprises : chacune arrête son git et ses sous-processus. Ce qui
-    /// tournerait encore à la fin du processus meurt avec lui (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, voir le runner
-    /// de `dragontree_git`).
-    fn stop_operations(&self) {
-        for op in self.shared.queues.pending() {
-            op.cancel.cancel();
-        }
-        if let Some(cancel) = self.clone.as_ref().and_then(CloneWindow::running) {
-            cancel.cancel();
-        }
-    }
-
-    /// Ferme pour de bon : opérations arrêtées, puis `ViewportCommand::Close`, que `intercept_close` laisse passer.
-    fn quit_now(&mut self, ctx: &egui::Context) {
-        self.stop_operations();
-        self.closing = Closing::Quitting;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-    }
-
-    /// Fermeture de la fenêtre (croix, Alt+F4, Fichier › Quitter, barre des tâches) : si des opérations visibles
-    /// attendent ou tournent, elle est suspendue (`ViewportCommand::CancelClose`) et un dialogue demande d'attendre
-    /// leur fin ou de quitter quand même ; les opérations silencieuses (fetch automatique) sont arrêtées sans rien
-    /// demander. Appelée par `logic`, qui tourne aussi quand la fenêtre est réduite. Quand il n'y a plus d'opération
-    /// visible, la question n'a plus d'objet : la fenêtre se ferme.
-    fn intercept_close(&mut self, ctx: &egui::Context) {
-        if matches!(self.closing, Closing::Asking | Closing::Waiting) {
-            if self.visible_operations().is_empty() {
-                self.quit_now(ctx);
-            } else {
-                // La fin d'une opération réveille l'interface avant qu'elle ne quitte sa file : on revérifie.
-                ctx.request_repaint_after(Duration::from_millis(100));
-            }
-        }
-        // Capture d'écran : la fermeture qu'elle demande n'est jamais suspendue.
-        if !ctx.input(|i| i.viewport().close_requested())
-            || self.closing == Closing::Quitting
-            || self.screenshot_requested
-        {
-            return;
-        }
-        if self.visible_operations().is_empty() {
-            self.stop_operations();
-            self.closing = Closing::Quitting;
-            return;
-        }
-        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        self.closing = Closing::Asking;
-        // Fermée depuis la barre des tâches : la fenêtre réduite est rendue visible pour la question.
-        if ctx.input(|i| i.viewport().minimized == Some(true)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        }
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-    }
-
-    /// Dialogue de fermeture pendant des opérations (`Closing::Asking`, puis `Closing::Waiting` après « Attendre »).
-    /// Destructeur : Entrée ne quitte pas ; Échap ou un clic à côté renonce à fermer.
-    fn closing_dialog(&mut self, ctx: &egui::Context, p: &Palette) {
-        if !matches!(self.closing, Closing::Asking | Closing::Waiting) {
-            return;
-        }
-        let waiting = self.closing == Closing::Waiting;
-        let ops = self.visible_operations();
-        const SHOWN: usize = 8;
-        enum Choice {
-            Quit,
-            Wait,
-            Stay,
-        }
-        let mut choice = None;
-        let response = egui::Modal::new(egui::Id::unique("closing-dialog")).show(ctx, |ui| {
-            ui.set_width(420.0);
-            let title = format!("{} {}", crate::icons::WARNING, tr!("Des opérations sont en cours"));
-            ui.label(egui::RichText::new(title).strong().size(16.0));
-            ui.add_space(8.0);
-            for (title, _) in ops.iter().take(SHOWN) {
-                ui.label(format!("• {title}"));
-            }
-            if ops.len() > SHOWN {
-                ui.label(dragontree_i18n::trn!(ops.len() - SHOWN, "… et {n} autre", "… et {n} autres"));
-            }
-            ui.add_space(8.0);
-            if waiting {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(tr!("DragonTree se fermera à la fin des opérations."));
-                });
-            } else {
-                let risk = tr!(
-                    "Quitter maintenant les interrompt : un dépôt peut rester dans un état intermédiaire (opération à reprendre, fichier index.lock à supprimer)."
-                );
-                ui.label(egui::RichText::new(risk).color(p.weak));
-            }
-            ui.add_space(14.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let quit = egui::Button::new(
-                    egui::RichText::new(tr!("Quitter quand même")).strong().color(egui::Color32::WHITE),
-                )
-                .fill(p.removed_fg)
-                .min_size(egui::vec2(140.0, 28.0));
-                if ui.add(quit).clicked() {
-                    choice = Some(Choice::Quit);
-                }
-                let (label, other) =
-                    if waiting { (tr!("Ne pas quitter"), Choice::Stay) } else { (tr!("Attendre"), Choice::Wait) };
-                if ui.add(egui::Button::new(label).min_size(egui::vec2(110.0, 28.0))).clicked() {
-                    choice = Some(other);
-                }
-            });
-        });
-        match choice {
-            Some(Choice::Quit) => self.quit_now(ctx),
-            Some(Choice::Wait) => self.closing = Closing::Waiting,
-            Some(Choice::Stay) => self.closing = Closing::No,
-            None if response.should_close() => self.closing = Closing::No,
-            None => {}
-        }
-    }
-
     fn maybe_screenshot(&mut self, ctx: &egui::Context) {
         let Some(path) = self.start.screenshot.clone() else { return };
         if self.screenshot_requested {
@@ -1262,7 +1125,8 @@ impl DragonTreeApp {
 impl eframe::App for DragonTreeApp {
     /// Appelée à chaque image, avant `ui`, et seule quand la fenêtre est réduite.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.intercept_close(ctx);
+        let ops = Operations::new(&self.shared.queues, self.clone.as_ref());
+        self.closing.intercept(ctx, &ops, self.screenshot_requested);
         self.receive_forwarded(ctx);
     }
 
@@ -1336,9 +1200,11 @@ impl eframe::App for DragonTreeApp {
         egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| {
             let active = self.active;
             // Fermeture décidée : plus de rafraîchissement ni de fetch automatique.
-            for (i, tab) in self.tabs.iter_mut().enumerate().filter(|_| self.closing != Closing::Quitting) {
-                if let TabKind::Repo(r) = &mut tab.kind {
-                    r.tick(&mut self.shared, i == active);
+            if !self.closing.quitting() {
+                for (i, tab) in self.tabs.iter_mut().enumerate() {
+                    if let TabKind::Repo(r) = &mut tab.kind {
+                        r.tick(&mut self.shared, i == active);
+                    }
                 }
             }
             match self.tabs.get_mut(active).map(|t| &mut t.kind) {
@@ -1403,7 +1269,8 @@ impl eframe::App for DragonTreeApp {
                 self.quick_open = None;
             }
         }
-        self.closing_dialog(&ctx, &p);
+        let ops = Operations::new(&self.shared.queues, self.clone.as_ref());
+        self.closing.dialog(&ctx, &ops, &p);
         if let Some(action) = self.shared.toasts.show(&ctx, &p) {
             match action {
                 crate::toasts::ToastAction::OpenGitIdentity => self.shared.actions.push(AppAction::ShowGitIdentity),
@@ -1423,7 +1290,7 @@ impl eframe::App for DragonTreeApp {
     /// autre voie que la fenêtre), et les onglets ne font rien attendre en se fermant ; le processus se termine
     /// aussitôt après, et Windows tue avec lui ce qui resterait de git (Job Object).
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.stop_operations();
+        Operations::new(&self.shared.queues, self.clone.as_ref()).stop_all();
         for tab in &mut self.tabs {
             if let TabKind::Repo(r) = &mut tab.kind {
                 r.on_app_exit();
