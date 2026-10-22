@@ -116,23 +116,8 @@ impl SettingsWindow {
             if d.language != self.opened.language {
                 shared.lang_override = None;
             }
-            let rescan = merged.scan_roots != shared.settings.scan_roots
-                || merged.scan_max_depth != shared.settings.scan_max_depth
-                || merged.scan_skip_dirs != shared.settings.scan_skip_dirs
-                || merged.scan_deep != shared.settings.scan_deep
-                || merged.hidden_repos != shared.settings.hidden_repos;
-            if merged.git_path != shared.settings.git_path {
-                shared.git = match &merged.git_path {
-                    Some(p) => Some(Git::with_exe(p.clone())),
-                    None => Git::discover().ok(),
-                };
-            }
-            // Thème, taille, langue et police du diff s'appliquent à l'image suivante, s'ils ont changé.
-            shared.settings = merged;
+            shared.adopt_settings(merged);
             shared.save_settings();
-            if rescan {
-                shared.actions.push(AppAction::Rescan);
-            }
             return false;
         }
         open && !cancel

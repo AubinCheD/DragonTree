@@ -227,7 +227,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | P4 | `--help` en build release depuis une console Windows (corrigé ; l'invite revient avant le texte, limite documentée) | relevé en vérifiant le code | basse |
 | L1 | Dépôts SHA-256 non pris en charge (limite documentée : erreur explicite à l'ouverture et au clonage) | limite connue (README) | basse |
 | L2 | Éditeur de conflits limité aux fichiers UTF-8 (corrigé : fichiers Windows-1252 résolus sur leurs octets) | limite constatée dans le code | moyenne |
-| L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session | arbitrage de la revue (M9) | basse |
+| L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session (corrigé : fichier relu à chaque enregistrement puis fusionné, indicateur « Réglages non enregistrés ») | arbitrage de la revue (M9) | basse |
 | L4 | Échec d'authentification du fetch automatique signalé une seule fois | arbitrage de la revue (M2) | basse |
 | L5 | Amend d'un commit déjà poussé avec « Pousser après » : pas de push | arbitrage de la revue (I7b) | basse |
 | L6 | Option « Espaces » active : diff des changements en lecture seule | arbitrage de la revue (M1) | basse |
@@ -761,11 +761,44 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** test d'intégration : un conflit dans un fichier Latin-1 est résolu région par région, et les octets hors conflit sont préservés.
 - **Priorité :** moyenne.
 
-#### L3 à L6 — Arbitrages de la revue au coût assumé
+#### L3 — Réglages illisibles au démarrage (corrigé)
+
+- **Contexte :** arbitrage de la revue (M9) au coût assumé : un fichier de réglages illisible au démarrage n'est jamais écrasé, mais rien de la session n'était alors enregistré. Piste : retenter la lecture plus tard et prévenir à chaque modification non enregistrée.
+- **État :** corrigé.
+  - Avant : `SettingsFile::load` (`crates/dragontree-app/src/settings.rs`) rendait le fichier non inscriptible pour toute la session s'il était illisible (verrouillé, droits) ou invalide sans pouvoir être mis de côté ; `save` ne faisait plus rien, sans le redire après la notification du démarrage.
+  - Réalisé, lecture (`settings.rs`) : un fichier non lu est relu à chaque enregistrement (`SettingsFile::save`) : à chaque réglage modifié, à l'enregistrement périodique d'eframe (toutes les 30 s) et à la fermeture.
+    - Toujours illisible : rien n'est écrit (`Saved::NotWritten`). Un fichier existant n'est jamais écrit sans avoir été lu.
+    - Relu : fusion (`merge_session`), écrite puis reprise par la session (`Saved::Recovered`).
+    - Disparu : réglages de la session écrits. Toujours invalide mais renommable : mis de côté comme au démarrage, réglages de la session écrits (`Saved::SetAside`, notification).
+  - Règle de fusion, sur trois versions : départ de la session (réglages par défaut), session, fichier relu.
+    - Un réglage que la session n'a pas changé prend la valeur du fichier ; un réglage changé garde celle de la session.
+    - Tables (réglages par dépôt, espaces de travail…) : la même règle, entrée par entrée.
+    - Listes (dépôts récents, favoris, comptes, dossiers scannés, commandes…) : ajouts de la session en tête, puis la liste du fichier sans ce que la session a retiré ; plafonds des dépôts récents et des messages récents respectés.
+    - Onglets ouverts : même règle, puis réécrits d'après les onglets de la fenêtre à l'enregistrement périodique suivant, comme dans toute session.
+    - Repli, si une valeur fusionnée ne se relit pas (énumération à données fusionnée entrée par entrée ; aucune aujourd'hui) : la règle au premier niveau seulement, puis le fichier tel quel.
+  - Réalisé, avertissement (`app.rs`, `menu_bar.rs`) :
+    - indicateur « Réglages non enregistrés » à droite de la barre de menus, tant que la session a des modifications que le fichier n'a pas reçues ; infobulle avec le chemin et l'erreur, un clic relance l'enregistrement (donc la relecture) ;
+    - notification « Modifications des réglages non enregistrées » à la première modification refusée, une seule par série (l'indicateur, lui, reste visible à chaque modification) ;
+    - à la relecture : notification « Réglages relus… », indicateur effacé ; l'application reprend les réglages fusionnés (`Shared::adopt_settings`, partagé avec la fenêtre Réglages : thème, taille, langue, police, comptes… ; git imposé et nouveau scan des dossiers si leurs réglages changent).
+  - Capture d'écran (`--screenshot`, `Shared::settings_read_only`) : ni relecture, ni écriture, ni indicateur. `--theme` et `--lang` restent hors des réglages : la fusion ne peut pas les écrire.
+  - README, « Utilisation ».
+- **Tests :**
+  - `crates/dragontree-app/src/settings.rs` :
+    - `a_locked_settings_file_is_never_overwritten_and_is_merged_once_it_can_be_read` : fichier verrouillé (aucun partage) au chargement ; deux modifications, `NotWritten`, fichier intact ; verrou levé : `Recovered`, valeurs du fichier gardées (thème, tags), modifications de la session (branches distantes, favori ajouté en tête du favori du fichier), fusion écrite ; ensuite `Written`.
+    - `an_invalid_settings_file_that_cannot_be_set_aside_is_never_overwritten` : fichier invalide tenu ouvert en lecture partagée (renommage impossible) : `NotWritten`, fichier intact ; relâché : mis de côté, réglages de la session écrits.
+    - `the_merge_keeps_the_file_values_the_session_did_not_change` : réglages simples, listes (ajouts, retraits, ordre), tables par dépôt, énumération à données, session sans modification, plafond des dépôts récents.
+  - Interface (`crates/dragontree-app/tests/ui_settings_file.rs`), avec `--lang fr` :
+    - `a_locked_settings_file_is_never_overwritten_then_receives_the_session_changes` : deux modifications par le menu Affichage, indicateur et une seule notification, fichier intact ; verrou levé, clic sur l'indicateur : fichier fusionné (valeurs du fichier, modifications de la session, langue du fichier et non celle de `--lang`), indicateur effacé, menu Affichage avec les tags masqués du fichier.
+    - `an_invalid_settings_file_held_open_is_never_overwritten_then_merged_once_repaired` : même chose avec un fichier invalide tenu ouvert, réparé à la main, relu à la modification suivante.
+  - Vus rouges avec la relecture désactivée (`save` qui n'écrit jamais, comme avant) : les deux tests du fichier en échec, et le test d'interface du fichier verrouillé arrêté sur « délai dépassé en attendant : fichier relu et enregistré ».
+- **À faire :** retenter la lecture plus tard et prévenir à chaque modification non enregistrée (fait).
+- **Critère de fin (atteint) :** fichier verrouillé ou invalide au démarrage : une modification affiche l'avertissement et le fichier reste intact ; redevenu lisible, l'enregistrement suivant l'écrit en gardant ses autres valeurs.
+- **Priorité :** basse.
+
+#### L4 à L6 — Arbitrages de la revue au coût assumé
 
 Chacun de ces arbitrages a un coût annoncé. Ce sont des pistes d'amélioration, de priorité basse.
 
-- **L3. Réglages illisibles au démarrage :** si le fichier est verrouillé, rien n'est enregistré de la session (`crates/dragontree-app/src/settings.rs:118-131`, `:163-169`). Piste : retenter la lecture plus tard et prévenir à chaque modification non enregistrée.
 - **L4. Échec d'authentification du fetch automatique :** il n'est signalé qu'une fois par série d'échecs (`crates/dragontree-app/src/repo/mod.rs:638-655`). Piste : un indicateur persistant dans l'onglet.
 - **L5. Amend d'un commit déjà poussé avec « Pousser après » :** rien n'est poussé, une notification s'affiche (`crates/dragontree-app/src/repo/actions.rs:224-243`). Piste : proposer explicitement un push forcé dans un dialogue de confirmation.
 - **L6. Option « Espaces » active :** le diff des changements passe en lecture seule (`crates/dragontree-app/src/repo/changes.rs:510-524`). Piste : recalculer le diff sans `-w` pour construire le patch, comme la revue le suggérait.

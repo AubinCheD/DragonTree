@@ -1,13 +1,16 @@
 //! Barre de menus Fichier / Affichage / Dépôt / Configuration, construite depuis le registre de commandes
 //! (`commands::MENUS`) : libellés, raccourcis, coches et entrées grisées viennent du registre.
 
+use std::path::Path;
+
 use dragontree_i18n::{tr, tr_str};
 use egui::class::HasClasses as _;
 use egui::menu::SubMenuButton;
-use egui::{Align2, Atom, Atoms, Button, FontId, Response, Ui, Vec2};
+use egui::{Align, Align2, Atom, Atoms, Button, FontId, Layout, Response, RichText, Ui, Vec2};
 
 use crate::commands::{self, Command, CommandContext, MENUS, MenuItem, submenu_disabled_hint};
 use crate::icons;
+use crate::theme::Palette;
 
 /// Affiche la barre ; renvoie la commande choisie.
 pub fn show(ui: &mut Ui, cx: &CommandContext) -> Option<Command> {
@@ -18,6 +21,22 @@ pub fn show(ui: &mut Ui, cx: &CommandContext) -> Option<Command> {
         }
     });
     chosen
+}
+
+/// Indicateur « Réglages non enregistrés » (L3), à droite de la barre : le fichier de réglages `path`, illisible au
+/// démarrage, n'a pas encore pu être relu (`error`), et des réglages ont été modifiés. Infobulle : le détail ; renvoie
+/// vrai au clic (nouvel essai demandé).
+pub fn unsaved_settings(ui: &mut Ui, path: &Path, error: &str, p: &Palette) -> bool {
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let text = format!("{} {}", icons::WARNING, tr!("Réglages non enregistrés"));
+        let detail = tr!(
+            "{path} n'a pas pu être lu ({error}) : vos modifications des réglages ne sont pas enregistrées, pour ne pas l'écraser. DragonTree le relit à chaque enregistrement et y ajoute alors vos modifications. Cliquez pour réessayer maintenant.",
+            path = path.display(),
+            error
+        );
+        ui.add(Button::new(RichText::new(text).color(p.removed_fg)).frame(false)).on_hover_text(detail).clicked()
+    })
+    .inner
 }
 
 /// Entrées d'un menu ou d'un sous-menu.

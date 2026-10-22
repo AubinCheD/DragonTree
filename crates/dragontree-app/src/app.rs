@@ -18,7 +18,7 @@ use crate::jobs::Jobs;
 use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsWindow};
 use crate::repo::{RepoEvent, RepoTab};
 use crate::repo_list::{RepoListState, ScanEvent};
-use crate::settings::{Settings, SettingsFile, ThemeChoice, path_key};
+use crate::settings::{Saved, Settings, SettingsFile, ThemeChoice, path_key};
 use crate::settings_ui::{SettingsTab, SettingsWindow};
 use crate::ssh_keys::{SshEvent, SshKeysWindow};
 use crate::tabbar::{self, TabBarAction, TabInfo};
@@ -103,6 +103,9 @@ pub struct Shared {
     pub settings: Settings,
     pub settings_store: SettingsFile,
     pub settings_dirty: bool,
+    /// Notification « modifications non enregistrées » déjà montrée pour les modifications en attente (L3, voir
+    /// `save_settings`).
+    settings_unsaved_warned: bool,
     pub jobs: Jobs,
     pub toasts: Toasts,
     pub log: CommandLog,
@@ -152,6 +155,7 @@ impl Shared {
             settings,
             settings_store,
             settings_dirty: false,
+            settings_unsaved_warned: false,
             jobs,
             toasts: Toasts::default(),
             log,
@@ -187,15 +191,76 @@ impl Shared {
         self.lang_override.or(self.settings.language)
     }
 
+    /// Remplace les réglages de la session (fenêtre Réglages, fichier relu) : git imposé repris et nouveau scan des
+    /// dossiers si leurs réglages changent ; thème, taille, langue et police du diff s'appliquent à l'image suivante.
+    pub fn adopt_settings(&mut self, new: Settings) {
+        let old = &self.settings;
+        let rescan = new.scan_roots != old.scan_roots
+            || new.scan_max_depth != old.scan_max_depth
+            || new.scan_skip_dirs != old.scan_skip_dirs
+            || new.scan_deep != old.scan_deep
+            || new.hidden_repos != old.hidden_repos;
+        if new.git_path != old.git_path {
+            self.git = match &new.git_path {
+                Some(p) => Some(Git::with_exe(p.clone())),
+                None => Git::discover().ok(),
+            };
+        }
+        self.settings = new;
+        if rescan {
+            self.actions.push(AppAction::Rescan);
+        }
+    }
+
+    /// Réglages non enregistrés (L3) : erreur de lecture du fichier quand la session a modifié des réglages que le
+    /// fichier, illisible au démarrage et pas encore relu, n'a pas reçus (voir `SettingsFile`). Jamais en capture
+    /// d'écran, où rien n'est enregistré.
+    pub fn unsaved_settings(&self) -> Option<&str> {
+        if self.settings_read_only || !self.settings_store.unsaved(&self.settings) {
+            return None;
+        }
+        self.settings_store.read_error()
+    }
+
+    /// Enregistre les réglages. Si le fichier n'a pas pu être lu au démarrage, il est relu d'abord (L3) : toujours
+    /// illisible, rien n'est écrit, une notification le dit à la première modification en attente et l'indicateur de
+    /// la barre de menus reste affiché ; relu, la session reprend la fusion de ses réglages et de ceux du fichier.
     pub fn save_settings(&mut self) {
+        self.settings_dirty = false;
         if self.settings_read_only {
-            self.settings_dirty = false;
             return;
         }
-        if let Err(e) = self.settings_store.save(&self.settings) {
-            self.toasts.push(Toast::error(tr!("Impossible d'enregistrer les réglages"), e.to_string()));
+        match self.settings_store.save(&self.settings) {
+            Ok(Saved::Written) => self.settings_unsaved_warned = false,
+            Ok(Saved::NotWritten) => {
+                if !self.settings_unsaved_warned
+                    && let Some(error) = self.unsaved_settings().map(str::to_string)
+                {
+                    self.settings_unsaved_warned = true;
+                    let path = self.settings_file();
+                    self.toasts.push(Toast::error(
+                        tr!("Modifications des réglages non enregistrées"),
+                        tr!(
+                            "{path} n'a pas pu être lu ({error}) : vos modifications des réglages ne sont pas enregistrées, pour ne pas l'écraser. Elles le seront dès qu'il pourra être relu (« Réglages non enregistrés », en haut à droite).",
+                            path = path.display(),
+                            error
+                        ),
+                    ));
+                }
+            }
+            Ok(Saved::Recovered(merged)) => {
+                self.settings_unsaved_warned = false;
+                self.adopt_settings(*merged);
+                self.toasts.push(Toast::success(tr!(
+                    "Réglages relus : ceux du fichier sont rétablis, avec vos modifications de cette session"
+                )));
+            }
+            Ok(Saved::SetAside(msg)) => {
+                self.settings_unsaved_warned = false;
+                self.toasts.push(Toast::error(tr!("Réglages invalides mis de côté"), msg));
+            }
+            Err(e) => self.toasts.push(Toast::error(tr!("Impossible d'enregistrer les réglages"), e.to_string())),
         }
-        self.settings_dirty = false;
     }
 
     pub fn toast(&mut self, t: Toast) {
@@ -1194,12 +1259,26 @@ impl eframe::App for DragonTreeApp {
             self.window_title = title;
         }
 
-        let chosen = egui::Panel::top("menu-bar")
+        let unsaved = self.shared.unsaved_settings().map(|error| (self.shared.settings_file(), error.to_string()));
+        let (chosen, retry) = egui::Panel::top("menu-bar")
             .frame(Frame::new().fill(p.sidebar).inner_margin(egui::Margin { left: 6, right: 6, top: 2, bottom: 0 }))
-            .show(ui, |ui| crate::menu_bar::show(ui, &self.command_context()))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let chosen = crate::menu_bar::show(ui, &self.command_context());
+                    let retry = unsaved
+                        .as_ref()
+                        .is_some_and(|(path, error)| crate::menu_bar::unsaved_settings(ui, path, error, &p));
+                    (chosen, retry)
+                })
+                .inner
+            })
             .inner;
         if let Some(cmd) = chosen {
             self.run_command(cmd);
+        }
+        if retry {
+            // Nouvel essai : l'enregistrement relit le fichier (voir `Shared::save_settings`).
+            self.shared.settings_dirty = true;
         }
 
         egui::Panel::top("tab-bar")

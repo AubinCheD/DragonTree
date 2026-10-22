@@ -149,6 +149,11 @@ ou `Start-Process -NoNewWindow -Wait` (PowerShell) attendent. Dans un tube (Git 
 
 `--profile` isole réglages, cache et état de fenêtre (pratique pour tester sans toucher à votre profil).
 Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALAPPDATA%\DragonTree\`.
+Un fichier de réglages invalide est mis de côté (`settings.illisible-<horodatage>.json`). Illisible au démarrage
+(verrouillé par un autre programme, ou invalide et impossible à mettre de côté), il n'est jamais écrasé : DragonTree
+part des réglages par défaut, affiche « Réglages non enregistrés » en haut à droite dès qu'un réglage change (un clic
+réessaie) et relit le fichier à chaque enregistrement. Relu, il reçoit les modifications de la session et garde ses
+autres valeurs ; dans ses listes et ses réglages par dépôt, les ajouts et retraits de la session s'ajoutent aux siens.
 `--theme` et `--lang` valent pour ce lancement seulement et ne sont pas enregistrés ; un thème ou une langue choisis
 ensuite dans les menus ou dans Réglages › Apparence sont enregistrés et les remplacent. Leur valeur même est déjà
 sélectionnée dans Réglages : pour l'enregistrer, la choisir dans le menu (Affichage › Thème, Configuration › Langue).

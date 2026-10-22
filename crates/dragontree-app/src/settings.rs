@@ -259,11 +259,69 @@ pub fn cache_dir() -> PathBuf {
     dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("DragonTree")
 }
 
-/// Fichier de réglages : il n'est jamais écrasé s'il existait mais n'a pas pu être lu.
+/// Fichier de réglages : il n'est jamais écrasé s'il existait mais n'a pas pu être lu (L3).
+///
+/// Illisible au démarrage (verrouillé par un autre programme, invalide sans pouvoir être mis de côté), la session part
+/// des réglages par défaut et le fichier est relu à chaque enregistrement (`save`). Tant qu'il reste illisible, rien
+/// n'est écrit ; une fois relu, les réglages du fichier et ceux de la session sont fusionnés (voir [`merge_session`]),
+/// puis écrits.
 #[derive(Debug, Clone)]
 pub struct SettingsFile {
     path: PathBuf,
-    writable: bool,
+    /// `Some` tant que le fichier existant n'a pas pu être lu.
+    unread: Option<Unread>,
+}
+
+/// Fichier pas encore lu : réglages de départ de la session et dernière erreur de lecture.
+#[derive(Debug, Clone)]
+struct Unread {
+    base: Settings,
+    error: String,
+}
+
+/// Résultat de [`SettingsFile::save`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Saved {
+    /// Réglages écrits.
+    Written,
+    /// Fichier illisible au démarrage enfin relu : réglages fusionnés (voir [`merge_session`]) et écrits, à reprendre
+    /// dans la session.
+    Recovered(Box<Settings>),
+    /// Fichier illisible au démarrage, relu invalide et mis de côté : réglages de la session écrits ; message à afficher.
+    SetAside(String),
+    /// Fichier toujours illisible : rien n'est écrit.
+    NotWritten,
+}
+
+/// Lecture du fichier de réglages.
+enum Read {
+    Absent,
+    Valid(Box<Settings>),
+    /// Contenu invalide, fichier renommé en `backup` : message d'erreur et nom de la copie.
+    SetAside(String, PathBuf),
+    /// Illisible (verrouillé, droits…) ou invalide sans pouvoir être mis de côté : message d'erreur.
+    Unreadable(String),
+}
+
+fn read(path: &Path) -> Read {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Read::Absent,
+        Err(e) => return Read::Unreadable(e.to_string()),
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(s) => Read::Valid(Box::new(s)),
+        Err(e) => {
+            let stamp =
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let backup = path.with_file_name(format!("settings.illisible-{stamp}.json"));
+            if std::fs::rename(path, &backup).is_ok() {
+                Read::SetAside(e.to_string(), backup)
+            } else {
+                Read::Unreadable(e.to_string())
+            }
+        }
+    }
 }
 
 impl SettingsFile {
@@ -271,45 +329,28 @@ impl SettingsFile {
     ///
     /// - absent : réglages par défaut ;
     /// - contenu invalide : le fichier est mis de côté (`settings.illisible-<horodatage>.json`) ;
-    /// - illisible (verrouillé, droits…) : réglages par défaut et aucun enregistrement pendant la
-    ///   session, pour ne jamais écraser un fichier qu'on n'a pas pu lire.
+    /// - illisible (verrouillé, droits…), ou invalide sans pouvoir être mis de côté : réglages par défaut, et rien
+    ///   n'est écrit tant que le fichier n'a pas pu être relu (voir [`SettingsFile::save`]).
     pub fn load(path: &Path) -> (SettingsFile, Settings, Option<String>) {
-        let file = |writable| SettingsFile { path: path.to_path_buf(), writable };
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (file(true), Settings::default(), None),
-            Err(e) => {
+        let file = |unread| SettingsFile { path: path.to_path_buf(), unread };
+        match read(path) {
+            Read::Absent => (file(None), Settings::default(), None),
+            Read::Valid(s) => (file(None), *s, None),
+            Read::SetAside(e, backup) => {
                 let msg = tr!(
-                    "Réglages illisibles ({e}) : réglages par défaut utilisés, et rien ne sera enregistré pendant cette session pour ne pas écraser {path}.",
+                    "Réglages illisibles ({e}) : fichier mis de côté dans {backup} — réglages par défaut utilisés.",
+                    e,
+                    backup = backup.display()
+                );
+                (file(None), Settings::default(), Some(msg))
+            }
+            Read::Unreadable(e) => {
+                let msg = tr!(
+                    "Réglages illisibles ({e}) : réglages par défaut utilisés. {path} n'est pas écrasé : vos modifications seront enregistrées quand il aura pu être relu.",
                     e,
                     path = path.display()
                 );
-                return (file(false), Settings::default(), Some(msg));
-            }
-        };
-        match serde_json::from_slice(&bytes) {
-            Ok(s) => (file(true), s, None),
-            Err(e) => {
-                let stamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let backup = path.with_file_name(format!("settings.illisible-{stamp}.json"));
-                if std::fs::rename(path, &backup).is_ok() {
-                    let msg = tr!(
-                        "Réglages illisibles ({e}) : fichier mis de côté dans {backup} — réglages par défaut utilisés.",
-                        e,
-                        backup = backup.display()
-                    );
-                    (file(true), Settings::default(), Some(msg))
-                } else {
-                    let msg = tr!(
-                        "Réglages illisibles ({e}) : réglages par défaut utilisés, et rien ne sera enregistré pendant cette session pour ne pas écraser {path}.",
-                        e,
-                        path = path.display()
-                    );
-                    (file(false), Settings::default(), Some(msg))
-                }
+                (file(Some(Unread { base: Settings::default(), error: e })), Settings::default(), Some(msg))
             }
         }
     }
@@ -318,12 +359,139 @@ impl SettingsFile {
         &self.path
     }
 
-    /// Enregistre (sauf si le fichier d'origine n'a pas pu être lu).
-    pub fn save(&self, settings: &Settings) -> std::io::Result<()> {
-        if !self.writable {
-            return Ok(());
+    /// Dernière erreur de lecture, tant que le fichier n'a pas pu être lu.
+    pub fn read_error(&self) -> Option<&str> {
+        self.unread.as_ref().map(|u| u.error.as_str())
+    }
+
+    /// Vrai si `settings` contient des modifications de la session que le fichier, pas encore lu, n'a pas reçues.
+    pub fn unsaved(&self, settings: &Settings) -> bool {
+        self.unread.as_ref().is_some_and(|u| u.base != *settings)
+    }
+
+    /// Enregistre `settings`. Si le fichier n'a pas pu être lu au démarrage, il est d'abord relu : toujours illisible,
+    /// rien n'est écrit ; relu, la fusion de ses réglages et de ceux de la session est écrite et renvoyée ; absent ou
+    /// mis de côté, les réglages de la session sont écrits.
+    pub fn save(&mut self, settings: &Settings) -> std::io::Result<Saved> {
+        let Some(unread) = &mut self.unread else {
+            settings.save_to(&self.path)?;
+            return Ok(Saved::Written);
+        };
+        let saved = match read(&self.path) {
+            Read::Unreadable(e) => {
+                unread.error = e;
+                return Ok(Saved::NotWritten);
+            }
+            Read::Absent => {
+                settings.save_to(&self.path)?;
+                Saved::Written
+            }
+            Read::SetAside(e, backup) => {
+                settings.save_to(&self.path)?;
+                Saved::SetAside(tr!(
+                    "Réglages relus invalides ({e}) : fichier mis de côté dans {backup} — réglages de cette session enregistrés.",
+                    e,
+                    backup = backup.display()
+                ))
+            }
+            Read::Valid(theirs) => {
+                let merged = merge_session(&unread.base, settings, &theirs);
+                merged.save_to(&self.path)?;
+                Saved::Recovered(Box::new(merged))
+            }
+        };
+        // Écrit : le fichier est désormais celui de la session.
+        self.unread = None;
+        Ok(saved)
+    }
+}
+
+/// Fusion à la relecture d'un fichier illisible au démarrage (L3) : `base` (réglages de départ de la session, ceux par
+/// défaut), `mine` (ceux de la session) et `theirs` (ceux du fichier relu).
+/// - Un réglage que la session n'a pas changé prend la valeur du fichier ; un réglage changé garde celle de la session.
+/// - Tables (réglages par dépôt, espaces de travail…) : la même règle, entrée par entrée.
+/// - Listes (dépôts récents, favoris, comptes, dossiers scannés, commandes…) : ce que la session a ajouté, en tête,
+///   puis la liste du fichier sans ce que la session a retiré.
+///
+/// Onglets ouverts et onglet actif suivent la même règle ; l'application les réécrit d'après ses onglets au prochain
+/// enregistrement périodique.
+pub fn merge_session(base: &Settings, mine: &Settings, theirs: &Settings) -> Settings {
+    use serde_json::Value;
+    let json = |s: &Settings| serde_json::to_value(s).ok();
+    let deep = || {
+        let merged = merge_value(Some(&json(base)?), &json(mine)?, Some(&json(theirs)?))?;
+        serde_json::from_value(merged).ok()
+    };
+    // Forme inattendue (énumération à données fusionnée entrée par entrée…) : la règle au premier niveau seulement.
+    let shallow = || {
+        let (Value::Object(b), Value::Object(m), Value::Object(t)) = (json(base)?, json(mine)?, json(theirs)?) else {
+            return None;
+        };
+        let fields = m.into_iter().map(|(k, v)| {
+            let unchanged = b.get(&k) == Some(&v);
+            let value = if unchanged { t.get(&k).cloned().unwrap_or(v) } else { v };
+            (k, value)
+        });
+        serde_json::from_value(Value::Object(fields.collect())).ok()
+    };
+    // En dernier recours, le fichier tel quel : les modifications de la session sont perdues, jamais le fichier.
+    let mut merged: Settings = deep().or_else(shallow).unwrap_or_else(|| theirs.clone());
+    // Plafonds des listes (voir `push_recent` et `remember_message`).
+    merged.recent_repos.truncate(20);
+    for list in merged.recent_messages.values_mut() {
+        list.truncate(RECENT_MESSAGES_MAX);
+    }
+    merged
+}
+
+/// Fusion à trois d'une valeur JSON (voir [`merge_session`]) ; `None` : entrée absente du résultat.
+fn merge_value(
+    base: Option<&serde_json::Value>,
+    mine: &serde_json::Value,
+    theirs: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    use serde_json::Value;
+    if base == Some(mine) {
+        // Inchangé pendant la session : la valeur du fichier, ou rien s'il ne l'a plus.
+        return theirs.cloned();
+    }
+    let Some(theirs) = theirs else { return Some(mine.clone()) };
+    match (base, mine, theirs) {
+        (None | Some(Value::Object(_)), Value::Object(m), Value::Object(t)) => {
+            let empty = serde_json::Map::new();
+            let b = match base {
+                Some(Value::Object(b)) => b,
+                _ => &empty,
+            };
+            let mut out = serde_json::Map::new();
+            for (key, value) in m {
+                if let Some(v) = merge_value(b.get(key), value, t.get(key)) {
+                    out.insert(key.clone(), v);
+                }
+            }
+            // Entrées du fichier seul, sauf celles que la session a retirées.
+            for (key, value) in t {
+                if !m.contains_key(key) && !b.contains_key(key) {
+                    out.insert(key.clone(), value.clone());
+                }
+            }
+            Some(Value::Object(out))
         }
-        settings.save_to(&self.path)
+        (None | Some(Value::Array(_)), Value::Array(m), Value::Array(t)) => {
+            let b = match base {
+                Some(Value::Array(b)) => b.as_slice(),
+                _ => &[],
+            };
+            let mut out: Vec<Value> = m.iter().filter(|v| !b.contains(v)).cloned().collect();
+            for v in t {
+                let removed = b.contains(v) && !m.contains(v);
+                if !removed && !out.contains(v) {
+                    out.push(v.clone());
+                }
+            }
+            Some(Value::Array(out))
+        }
+        _ => Some(mine.clone()),
     }
 }
 
@@ -514,21 +682,135 @@ mod tests {
         assert_eq!((s, err), (Settings::default(), None));
     }
 
+    /// Fichier tenu ouvert par un autre programme (antivirus, synchronisation…) : `share` est ce qu'il laisse faire
+    /// aux autres (0 : rien, pas même lire).
+    #[cfg(windows)]
+    fn hold_open(file: &Path, share: u32) -> std::fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).share_mode(share).open(file).unwrap()
+    }
+
     #[cfg(windows)]
     #[test]
-    fn locked_settings_file_is_never_overwritten() {
-        use std::os::windows::fs::OpenOptionsExt;
+    fn a_locked_settings_file_is_never_overwritten_and_is_merged_once_it_can_be_read() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("settings.json");
-        std::fs::write(&file, r#"{"theme":"Dark"}"#).unwrap();
-        // Fichier verrouillé par un autre programme (antivirus, synchronisation…) au démarrage.
-        let lock = std::fs::OpenOptions::new().read(true).share_mode(0).open(&file).unwrap();
-        let (store, settings, error) = SettingsFile::load(&file);
-        drop(lock);
+        let original = r#"{"theme":"Dark","show_tags":false,"favorites":["C:\\DEV\\Fabrikam"]}"#;
+        std::fs::write(&file, original).unwrap();
+        // Verrouillé au démarrage : réglages par défaut, erreur signalée.
+        let lock = hold_open(&file, 0);
+        let (mut store, mut settings, error) = SettingsFile::load(&file);
         assert_eq!(settings, Settings::default());
         assert!(error.is_some(), "l'erreur de lecture est signalée");
-        store.save(&Settings::default()).unwrap();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), r#"{"theme":"Dark"}"#, "le fichier n'est jamais écrasé");
+        assert!(store.read_error().is_some());
+        assert!(!store.unsaved(&settings), "rien de modifié pour l'instant");
+
+        // Modifications de la session, fichier toujours verrouillé : rien n'est écrit.
+        settings.show_remote_branches = false;
+        settings.favorites.push(PathBuf::from(r"C:\DEV\Contoso"));
+        assert!(store.unsaved(&settings));
+        assert_eq!(store.save(&settings).unwrap(), Saved::NotWritten);
+        drop(lock);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original, "le fichier n'est jamais écrasé");
+        assert!(store.unsaved(&settings), "modifications toujours en attente");
+
+        // Lisible : relu à l'enregistrement suivant, fusionné puis écrit.
+        let saved = store.save(&settings).unwrap();
+        let Saved::Recovered(merged) = saved else { panic!("fichier relu attendu : {saved:?}") };
+        assert_eq!(merged.theme, ThemeChoice::Dark, "réglage que la session n'a pas changé : celui du fichier");
+        assert!(!merged.show_tags, "idem");
+        assert!(!merged.show_remote_branches, "réglage changé pendant la session : celui de la session");
+        assert_eq!(merged.favorites, [PathBuf::from(r"C:\DEV\Contoso"), PathBuf::from(r"C:\DEV\Fabrikam")]);
+        assert_eq!(Settings::load_from(&file), *merged, "fusion écrite");
+        assert!(store.read_error().is_none() && !store.unsaved(&merged));
+        assert_eq!(store.save(&merged).unwrap(), Saved::Written, "ensuite, enregistrements habituels");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_invalid_settings_file_that_cannot_be_set_aside_is_never_overwritten() {
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, "{ contenu invalide").unwrap();
+        // Lisible mais impossible à renommer pendant qu'un autre programme le tient ouvert.
+        let held = hold_open(&file, FILE_SHARE_READ);
+        let (mut store, mut settings, error) = SettingsFile::load(&file);
+        assert!(error.is_some());
+        settings.show_tags = false;
+        assert_eq!(store.save(&settings).unwrap(), Saved::NotWritten);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ contenu invalide");
+        drop(held);
+
+        // Toujours invalide, mais déplaçable : mis de côté comme au démarrage, réglages de la session écrits.
+        let Saved::SetAside(msg) = store.save(&settings).unwrap() else { panic!("fichier mis de côté attendu") };
+        assert_eq!(Settings::load_from(&file), settings);
+        let backup = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .find(|p| p != &file)
+            .expect("copie du fichier invalide");
+        assert!(msg.contains(&backup.display().to_string()), "{msg}");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), "{ contenu invalide");
+        assert!(!store.unsaved(&settings));
+    }
+
+    #[test]
+    fn the_merge_keeps_the_file_values_the_session_did_not_change() {
+        use crate::external_tools::ToolPreset;
+        let base = Settings::default();
+        let account = |id: &str| Account { id: id.into(), ..account("x") };
+        let repo_a = Path::new(r"C:\DEV\Fabrikam");
+        let repo_b = Path::new(r"C:\DEV\Contoso");
+        let mut theirs = Settings {
+            theme: ThemeChoice::Dark,
+            ui_scale: 1.2,
+            show_tags: false,
+            recent_repos: vec![repo_a.into(), repo_b.into()],
+            accounts: vec![account("compte-fichier")],
+            ..Settings::default()
+        };
+        theirs.scan_skip_dirs.push("vendor".into());
+        theirs.diff_tool = ToolChoice::Preset(ToolPreset::WinMerge);
+        theirs.merge_tool = ToolChoice::Preset(ToolPreset::KDiff3);
+        theirs.toggle_hidden_ref(repo_a, "refs/heads/fichier");
+        theirs.toggle_hidden_ref(repo_b, "refs/heads/autre");
+        theirs.set_account_for_repo(repo_b, Some("compte-fichier"));
+
+        let mut mine = base.clone();
+        mine.theme = ThemeChoice::Light;
+        mine.push_recent(Path::new(r"C:\DEV\Northwind"));
+        mine.accounts.push(account("compte-session"));
+        let removed = mine.scan_skip_dirs.remove(0);
+        mine.toggle_hidden_ref(repo_a, "refs/heads/session");
+        mine.diff_tool = ToolChoice::Preset(ToolPreset::VsCode);
+
+        let merged = merge_session(&base, &mine, &theirs);
+        // Réglages simples : la session pour ceux qu'elle a changés, le fichier pour les autres.
+        assert_eq!(merged.theme, ThemeChoice::Light);
+        // Énumérations à données : `{"Preset": …}` contre "Git" au départ.
+        assert_eq!(merged.diff_tool, ToolChoice::Preset(ToolPreset::VsCode));
+        assert_eq!(merged.merge_tool, ToolChoice::Preset(ToolPreset::KDiff3));
+        assert_eq!((merged.ui_scale, merged.show_tags), (1.2, false));
+        // Listes : ajouts de la session en tête, puis celle du fichier sans ce que la session a retiré.
+        assert_eq!(merged.recent_repos, [Path::new(r"C:\DEV\Northwind"), repo_a, repo_b]);
+        let ids: Vec<_> = merged.accounts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["compte-session", "compte-fichier"]);
+        assert!(!merged.scan_skip_dirs.contains(&removed), "retiré pendant la session");
+        assert!(merged.scan_skip_dirs.iter().any(|d| d == "vendor"), "ajouté dans le fichier");
+        // Tables par dépôt : entrée par entrée.
+        assert_eq!(merged.hidden_refs_of(repo_a), ["refs/heads/session", "refs/heads/fichier"]);
+        assert_eq!(merged.hidden_refs_of(repo_b), ["refs/heads/autre"]);
+        assert_eq!(merged.account_for_repo(repo_b).map(|a| a.id.as_str()), Some("compte-fichier"));
+
+        // Session sans modification : les réglages du fichier tels quels ; plafonds des listes respectés.
+        assert_eq!(merge_session(&base, &base, &theirs), theirs);
+        let mut many = base.clone();
+        for i in 0..20 {
+            many.push_recent(&PathBuf::from(format!(r"C:\DEV\r{i}")));
+        }
+        assert_eq!(merge_session(&base, &many, &theirs).recent_repos.len(), 20);
     }
 
     #[test]
