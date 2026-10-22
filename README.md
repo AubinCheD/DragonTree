@@ -250,7 +250,7 @@ dépôt (pas de collision sur `index.lock`), résultats périmés ignorés.
 cargo test --workspace
 ```
 
-870 tests : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
+1 032 tests : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
 temporaires (y compris remotes locaux), API des forges sur des réponses JSON représentatives, et parcours
 d'interface de bout en bout (egui_kittest : indexer puis commiter, indexer un hunk, ouvrir un dépôt depuis la
 liste, créer une branche, résoudre un conflit, rebase interactif, stash/pop, annulation, menus, worktrees, bisect,
@@ -272,3 +272,8 @@ des fichiers `tests/live*.rs`.
   ainsi reste appelé en HTTPS. Un dépôt dont le remote est en `http://` garde les identifiants habituels de git :
   l'en-tête du compte ne vise que HTTPS.
 - Dépôts SHA-256 non pris en charge.
+
+## Licence
+
+MIT, voir [`LICENSE`](LICENSE). La police d'icônes Phosphor (`assets/fonts/Phosphor.ttf`) a sa propre licence MIT :
+`assets/fonts/LICENSE-Phosphor.txt`.

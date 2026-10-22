@@ -221,7 +221,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 | # | Point | Origine | Priorité |
 |---|---|---|---|
-| P1 | Publication open source : licence, vérification du nom, README | objectif annoncé par l'utilisateur | moyenne |
+| P1 | Publication open source : licence, vérification du nom, README (fait ; EUIPO et INPI à vérifier à la main) | objectif annoncé par l'utilisateur | moyenne |
 | P2 | Cases du plan jamais cochées | état du plan | basse |
 | P3 | Stabilité de `ui_network` vérifiée sur 3 passages seulement | correction des tests instables | basse |
 | P4 | `--help` en build release depuis une console Windows (à vérifier) | relevé en vérifiant le code | basse |
@@ -621,21 +621,45 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 ### Pistes et limites connues
 
-#### P1 — Publication open source
+#### P1 — Publication open source (fait)
 
 - **Contexte :** l'objectif annoncé par l'utilisateur est de publier l'outil en open source.
-  - Les vérifications du nom proposées pendant le choix du nom n'ont pas été faites : noms de domaine, registres de marques (INPI, EUIPO, USPTO), identifiants winget et Scoop.
-  - Pour « Dragontree », seuls crates.io, GitHub (9 dépôts vides) et une recherche web ont été consultés.
-- **État :**
-  - le manifeste déclare la licence MIT (`Cargo.toml:9`), mais le dépôt n'a pas de fichier `LICENSE` ;
-  - la licence de la police Phosphor est présente (`assets/fonts/LICENSE-Phosphor.txt`) ;
-  - le README annonce 870 tests (nombre réel au 2026-10-20 ; 277 le 2026-10-17).
+  - Les vérifications du nom proposées pendant le choix du nom n'avaient pas été faites : noms de domaine, registres de marques (INPI, EUIPO, USPTO), identifiants winget et Scoop.
+  - Pour « Dragontree », seuls crates.io, GitHub (9 dépôts vides) et une recherche web avaient été consultés.
+- **État :** réalisé.
+  - Avant : le manifeste déclarait la licence MIT (`Cargo.toml:9`), mais le dépôt n'avait pas de fichier `LICENSE`.
+  - `LICENSE` à la racine : texte MIT standard, « Copyright (c) 2026 DragonTree contributors ». La licence de la police Phosphor reste à part (`assets/fonts/LICENSE-Phosphor.txt`) ; le README les cite toutes deux (section « Licence »).
+  - Le README annonce 1 032 tests (nombre réel au 2026-10-22 ; 870 le 2026-10-20, 277 le 2026-10-17).
+  - Vérification du nom consignée ci-dessous ; aucune démarche d'achat, de dépôt ni d'inscription (décision du plan).
+- **Vérification du nom (2026-10-22, recherche web uniquement) :**
+  - **Domaines** (registres RDAP publics) :
+    - `dragontree.com` : enregistré depuis le 1996-03-29, expire le 2029-03-30. Le site n'a pas répondu ; contenu non identifié.
+    - `dragontree.io` : enregistré depuis le 2018-02-06, expire le 2027-02-06. Page d'accueil vide ; contenu non identifié.
+    - `dragontree.app` et `dragontree.dev` : non enregistrés (le RDAP de Google Registry répond « introuvable » ; contrôle de la méthode : `web.dev` y est bien trouvé).
+  - **Marques :**
+    - USPTO : la recherche officielle (tmsearch.uspto.gov) ne s'affiche qu'en JavaScript, sans résultat lisible. Consulté à la place : Trademarkia, qui reprend les données de l'USPTO.
+      - « dragontree » : trois marques vivantes, toutes d'un même titulaire américain, dans le bien-être : THE DRAGONTREE (n° 5838098, classes 35 et 41 : vente en ligne de produits de soin, formations au bien-être), THE DRAGONTREE (série 85763560, classe 44 : spa), DRAGONTREE LIFE COACHING (série 88019117, classe 41). Une marque figurative DRAGONTREE (classe 31, plantes vivantes, titulaire néerlandais) est radiée.
+      - « dragon tree » : une seule marque vivante proche, DRAGON TREE LABS (n° 6546097, classe 42 : services de recherche et développement, « laboratoire de technologies de rupture », titulaire établi à Moscou). DRAGON TREE pour des vins (33), un shampoing (3) et des produits horticoles (31) : radiées ou abandonnées.
+      - Aucune marque « dragontree » ou « dragon tree » en classe 9 (logiciels).
+    - EUIPO (eSearch) et TMview : interfaces JavaScript seules (eSearch : connexion coupée ; TMview : page vide). Non interrogés.
+    - INPI (data.inpi.fr) : accès refusé aux requêtes automatiques (HTTP 403). Non interrogé.
+    - Base mondiale des marques de l'OMPI : derrière un captcha. Non interrogée.
+  - **Paquets :**
+    - winget : aucune issue ni pull request de `microsoft/winget-pkgs` ne contient « dragontree » (recherche de l'API GitHub ; la même recherche trouve 69 résultats pour GitExtensions) ; pas de dossier `manifests/d/DragonTree`.
+    - Scoop : pas de manifeste `dragontree.json` dans les buckets officiels Main et Extras (contrôle de la méthode : `sourcetree.json` est trouvé dans Extras) ; aucune issue ni pull request de l'organisation ScoopInstaller ne contient « dragontree ». L'index des buckets communautaires (scoop.sh) ne s'affiche qu'en JavaScript : non interrogé.
+    - crates.io : pas de crate `dragontree` ; aucune crate pour « dragontree » ni « dragon-tree » (la recherche « dragon » en trouve 379).
+  - **Autres :** GitHub compte 13 dépôts « dragontree » ; aucun n'est un client git ni un logiciel de bureau, hors celui du projet. La recherche web ne trouve aucun logiciel nommé DragonTree. Les homonymes sont l'arbre (*Dracaena draco*), un bâtiment du jeu Dragalia Lost, une société australienne de conseil aux entreprises et l'application Android DragTree (nom différent).
+  - **Verdict :** aucun conflit trouvé pour un logiciel.
+    - Les trois marques vivantes « dragontree » visent le bien-être (classes 35, 41, 44), pas les classes 9 ni 42.
+    - La plus proche est DRAGON TREE LABS (classe 42, recherche et développement) : nom distinct (« Labs », en deux mots), services et non produit logiciel. Risque jugé faible, à faire confirmer avant tout dépôt de marque.
+    - Restent à vérifier à la main, faute d'accès automatique : EUIPO/TMview et INPI, classes 9 et 42.
+    - `.app` et `.dev` sont libres ; `.com` et `.io` sont pris.
 - **À faire :**
-  1. Ajouter `LICENSE`.
-  2. Vérifier le nom (domaines, marques, winget, Scoop).
-  3. (fait le 2026-10-20) Nombre de tests du README à jour.
+  1. Ajouter `LICENSE` (fait).
+  2. Vérifier le nom : domaines, marques, winget, Scoop (fait, ci-dessus ; EUIPO/TMview et INPI à vérifier à la main).
+  3. Nombre de tests du README à jour (fait le 2026-10-20, puis le 2026-10-22).
   4. Ajouter l'icône (N3, fait).
-- **Critère de fin :** fichier `LICENSE` présent ; résultat des vérifications du nom consigné.
+- **Critère de fin (atteint) :** fichier `LICENSE` présent ; résultat des vérifications du nom consigné.
 - **Priorité :** moyenne.
 
 #### P2 — Cases du plan jamais cochées
