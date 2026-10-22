@@ -144,20 +144,26 @@ impl RepoTab {
     }
 
     /// Indicateur « Authentification refusée » à côté du bouton Fetch (L4) : le dernier fetch, automatique ou non, a été
-    /// refusé ; il reste jusqu'au prochain fetch réussi. L'infobulle donne l'erreur ; un clic relance le fetch.
+    /// refusé ; il reste jusqu'au prochain fetch de tous les remotes réussi. L'infobulle donne l'erreur ; un clic relance
+    /// le fetch de tous les remotes, s'il peut partir (sinon l'infobulle ne le propose pas et le clic ne fait rien).
     fn fetch_auth_badge(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette, can_fetch: bool) {
         let Some(error) = self.fetch_auth_error.clone() else { return };
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 46.0), Sense::click());
-        crate::widgets::a11y(&resp, tr!("Authentification refusée"), true);
-        if resp.hovered() {
+        let sense = if can_fetch { Sense::click() } else { Sense::hover() };
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 46.0), sense);
+        crate::widgets::a11y(&resp, tr!("Authentification refusée"), can_fetch);
+        if can_fetch && resp.hovered() {
             ui.painter().rect_filled(rect, CornerRadius::same(6), p.hover);
         }
         let center = rect.center_top() + egui::vec2(0.0, 15.0);
         ui.painter().text(center, Align2::CENTER_CENTER, icons::WARNING, FontId::proportional(18.0), p.removed_fg);
-        let tip = tr!(
-            "Authentification refusée au dernier fetch :\n{error}\n\nVérifiez le compte associé à ce dépôt (Comptes) ou vos identifiants git. L'indicateur disparaît au prochain fetch réussi ; clic : fetch maintenant.",
+        let mut tip = tr!(
+            "Authentification refusée au dernier fetch :\n{error}\n\nVérifiez le compte associé à ce dépôt (Comptes) ou vos identifiants git. L'indicateur disparaît au prochain fetch de tous les remotes réussi.",
             error
-        );
+        )
+        .to_string();
+        if can_fetch {
+            tip = format!("{tip}\n{}", tr!("Clic : fetch de tous les remotes maintenant."));
+        }
         if resp.on_hover_text(tip).clicked() && can_fetch {
             self.run_command(Command::Fetch, shared);
         }

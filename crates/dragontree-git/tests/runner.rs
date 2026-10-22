@@ -1,8 +1,10 @@
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 mod common;
 
 use common::git;
+use dragontree_git::runner::{GitCommand, Output};
 use dragontree_git::{CancelToken, GitError};
 
 #[test]
@@ -131,4 +133,60 @@ fn display_quotes_args_with_spaces() {
     let dir = tempfile::tempdir().unwrap();
     let cmd = git().cmd(dir.path()).args(["log", "--grep", "two words"]);
     assert_eq!(cmd.display(), "git log --grep \"two words\"");
+}
+
+/// Programme « askpass » de test : note chaque question dans `appels.txt` et répond « ada ».
+fn askpass_script(dir: &Path) -> (String, PathBuf) {
+    let marker = dir.join("appels.txt");
+    let script = dir.join("askpass.sh");
+    let marker_sh = marker.display().to_string().replace('\\', "/");
+    std::fs::write(&script, format!("#!/bin/sh\necho \"$1\" >> '{marker_sh}'\necho ada\n")).unwrap();
+    (script.display().to_string().replace('\\', "/"), marker)
+}
+
+/// `git credential fill` : git demande l'identifiant puis le mot de passe (aucun assistant d'identifiants, donc pas de
+/// Gestionnaire d'identifiants : `credential.helper` vide).
+fn credential_fill(cmd: GitCommand) -> Result<Output, GitError> {
+    cmd.args(["-c", "credential.helper=", "credential", "fill"])
+        .stdin(b"protocol=https\nhost=forge.contoso.test\n\n".to_vec())
+        .run()
+}
+
+/// Une commande non interactive (opérations en arrière-plan) ne lance jamais de programme « askpass », qu'il vienne
+/// de l'environnement (`GIT_ASKPASS`, `SSH_ASKPASS` : terminal de VS Code…) ou de la configuration (`core.askPass`) :
+/// git les consulte dans cet ordre et ignore une valeur vide, si bien qu'un `GIT_ASKPASS` vide arrête la recherche.
+#[test]
+fn a_non_interactive_command_never_runs_an_askpass_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let (script, marker) = askpass_script(dir.path());
+    let calls = || std::fs::read_to_string(&marker).unwrap_or_default();
+    let base = || git().cmd(dir.path());
+    let core_askpass = format!("core.askPass={script}");
+
+    // Témoin : avec `GIT_ASKPASS`, git lance le programme pour l'identifiant et le mot de passe.
+    let out = credential_fill(base().env("GIT_ASKPASS", &script)).unwrap();
+    assert!(out.stdout_str().contains("username=ada"), "{}", out.stdout_str());
+    assert_eq!(calls().lines().count(), 2, "{}", calls());
+    std::fs::remove_file(&marker).unwrap();
+
+    let cases = [
+        // Environnement des tests (`NO_CREDENTIAL_PROMPT`, posé avec la configuration globale de test) : hérité.
+        ("core.askPass, environnement des tests", base().args(["-c", &core_askpass])),
+        ("core.askPass, GIT_ASKPASS vide", base().args(["-c", &core_askpass]).env("GIT_ASKPASS", "")),
+        ("SSH_ASKPASS, GIT_ASKPASS vide", base().env("SSH_ASKPASS", &script).env("GIT_ASKPASS", "")),
+        (
+            "non interactive, tout hérité",
+            base()
+                .args(["-c", &core_askpass])
+                .env("GIT_ASKPASS", &script)
+                .env("SSH_ASKPASS", &script)
+                .non_interactive(),
+        ),
+    ];
+    for (what, cmd) in cases {
+        let err = credential_fill(cmd).unwrap_err();
+        let GitError::Failed { stderr, .. } = &err else { panic!("{what} : {err:?}") };
+        assert!(stderr.contains("terminal prompts disabled"), "{what} : {stderr}");
+        assert_eq!(calls(), "", "{what} : aucun programme askpass lancé");
+    }
 }

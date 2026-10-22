@@ -96,7 +96,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   fait pas attendre les écritures ; un fetch, pull ou push lancé à la main attend la fin de celui qui tourne, sans
   l'interrompre, et le dit ; en HTTP, il abandonne une connexion restée presque muette pendant une minute ; une
   authentification refusée est notifiée une fois, puis signalée par un avertissement à côté du bouton Fetch et sur
-  l'onglet, avec l'erreur en infobulle, jusqu'au prochain fetch réussi), palette
+  l'onglet, avec l'erreur en infobulle, jusqu'au prochain fetch de tous les remotes réussi ; en arrière-plan, git
+  ne demande jamais d'identifiants : ni Gestionnaire d'identifiants interactif, ni programme « askpass »), palette
   **Ctrl+P** (dépôts, branches, commandes), journal des commandes git, thèmes clair/sombre. Les opérations d'un dépôt
   ouvert dans plusieurs onglets passent par une seule file, dans l'ordre des clics.
 - **Interface en français ou en anglais** (Réglages › Apparence › Langue), changement immédiat sans redémarrer.

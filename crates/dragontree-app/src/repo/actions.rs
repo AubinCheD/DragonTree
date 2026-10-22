@@ -197,10 +197,15 @@ impl RepoTab {
     // --- Réseau -------------------------------------------------------------------------
 
     pub(crate) fn op_fetch(&mut self, shared: &Shared, remote: Option<String>, prune: bool, silent: bool) {
+        let (all_remotes, before) = (remote.is_none(), self.next_op_id);
         self.run_net_as(shared, OpKind::Fetch, "Fetch", Refresh::REFS.with_extras(), silent, move |r, n, on| {
             r.fetch(remote.as_deref(), prune, n, on)?;
             Ok(Some(tr!("Fetch terminé").into()))
         });
+        // Seul un fetch de tous les remotes réussi efface l'authentification refusée (L4, voir `fetch_auth_error`).
+        if all_remotes && self.next_op_id != before {
+            self.fetches_of_all_remotes.insert(self.next_op_id);
+        }
     }
 
     /// Teste la connexion à un remote (`git ls-remote --heads`, avec le compte associé comme pour un fetch) ; la
@@ -916,8 +921,8 @@ mod tests {
         assert!(queues.background.cancel_and_wait(Duration::from_secs(10)));
     }
 
-    /// L4 : un fetch refusé (automatique ou non) laisse l'indicateur de l'onglet jusqu'au prochain fetch réussi ; le
-    /// fetch automatique ne notifie que le premier refus d'une série.
+    /// L4 : un fetch refusé (automatique ou non) laisse l'indicateur de l'onglet jusqu'au prochain fetch de tous les
+    /// remotes réussi ; le fetch automatique ne notifie que le premier refus d'une série.
     #[test]
     fn a_fetch_authentication_failure_stays_shown_until_the_next_successful_fetch() {
         let dir = tempfile::tempdir().unwrap();
@@ -925,48 +930,72 @@ mod tests {
         let tab = &mut tabs[0];
         let failed = |stderr: &str| GitError::Failed { cmd: "git fetch".into(), code: 128, stderr: stderr.into() };
         let refused = || Err(failed("fatal: Authentication failed for 'https://forge.test/contoso/depot.git/'"));
-        // Fin d'une opération du type donné, sans git : comme l'application la reçoit de la file.
-        let finish = |tab: &mut RepoTab, shared: &mut Shared, kind, silent, result| {
+        /// Opération terminée : fetch de tous les remotes (automatique ou bouton Fetch), d'un seul, ou pull.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Op {
+            AllRemotes,
+            OneRemote,
+            Pull,
+        }
+        // Fin d'une opération, sans git : comme l'application la reçoit de la file.
+        let finish = |tab: &mut RepoTab, shared: &mut Shared, op: Op, silent, result| {
             tab.next_op_id += 1;
             let id = tab.next_op_id;
+            if op == Op::AllRemotes {
+                tab.fetches_of_all_remotes.insert(id);
+            }
+            let kind = if op == Op::Pull { OpKind::Pull } else { OpKind::Fetch };
             let (title, cancel) = ("Fetch".to_string(), CancelToken::new());
-            tab.running.push(RunningOp {
-                id,
-                title: title.clone(),
-                kind,
-                progress: None,
-                cancel,
-                silent,
-                waiting: false,
-            });
+            let running = RunningOp { id, title: title.clone(), kind, progress: None, cancel, silent, waiting: false };
+            tab.running.push(running);
             tab.handle_event(RepoEvent::OpDone { id, title, result, refresh: Refresh::NONE }, shared);
         };
         let toasts = |shared: &Shared| shared.toasts.titles().len();
 
         // Fetchs automatiques refusés : indicateur avec l'erreur, une seule notification pour la série.
-        finish(tab, &mut shared, OpKind::Fetch, true, refused());
-        finish(tab, &mut shared, OpKind::Fetch, true, refused());
+        finish(tab, &mut shared, Op::AllRemotes, true, refused());
+        finish(tab, &mut shared, Op::AllRemotes, true, refused());
         assert!(tab.fetch_auth_error.as_deref().is_some_and(|e| e.contains("Authentication failed")));
         assert_eq!(toasts(&shared), 1, "une notification par série");
-        // Un autre échec (réseau) ou un pull réussi ne l'effacent pas.
-        finish(tab, &mut shared, OpKind::Fetch, true, Err(failed("fatal: Could not resolve host: forge.test")));
-        finish(tab, &mut shared, OpKind::Pull, false, Ok(None));
-        assert!(tab.fetch_auth_error.is_some(), "seul un fetch réussi efface l'indicateur");
-        // Fetch manuel réussi : effacé.
-        finish(tab, &mut shared, OpKind::Fetch, false, Ok(None));
+        // Un autre échec (réseau), un pull réussi ou le fetch réussi d'un seul remote ne l'effacent pas.
+        finish(tab, &mut shared, Op::AllRemotes, true, Err(failed("fatal: Could not resolve host: forge.test")));
+        finish(tab, &mut shared, Op::Pull, false, Ok(None));
+        finish(tab, &mut shared, Op::OneRemote, false, Ok(None));
+        assert!(tab.fetch_auth_error.is_some(), "seul un fetch de tous les remotes réussi efface l'indicateur");
+        // Fetch manuel de tous les remotes réussi : effacé.
+        finish(tab, &mut shared, Op::AllRemotes, false, Ok(None));
         assert!(tab.fetch_auth_error.is_none());
+        assert!(tab.fetches_of_all_remotes.is_empty(), "opérations terminées oubliées");
 
-        // Fetch manuel refusé : sa notification d'erreur habituelle, et l'indicateur ; le fetch automatique refusé
-        // ensuite ne notifie pas (même série), celui qui réussit efface l'indicateur.
-        finish(tab, &mut shared, OpKind::Fetch, false, refused());
+        // Fetch manuel d'un remote refusé : sa notification d'erreur habituelle, et l'indicateur ; le fetch automatique
+        // refusé ensuite ne notifie pas (même série), celui qui réussit efface l'indicateur.
+        finish(tab, &mut shared, Op::OneRemote, false, refused());
         assert!(tab.fetch_auth_error.is_some());
         assert_eq!(toasts(&shared), 2);
-        finish(tab, &mut shared, OpKind::Fetch, true, refused());
+        finish(tab, &mut shared, Op::AllRemotes, true, refused());
         assert_eq!(toasts(&shared), 2, "même série");
-        finish(tab, &mut shared, OpKind::Fetch, true, Ok(None));
+        finish(tab, &mut shared, Op::AllRemotes, true, Ok(None));
         assert!(tab.fetch_auth_error.is_none(), "fetch automatique réussi");
         // Nouvelle série : nouvelle notification.
-        finish(tab, &mut shared, OpKind::Fetch, true, refused());
+        finish(tab, &mut shared, Op::AllRemotes, true, refused());
         assert_eq!(toasts(&shared), 3);
+    }
+
+    /// Le bouton Fetch et le fetch automatique fetchent tous les remotes ; « Fetch <remote> » de la barre latérale, un
+    /// seul.
+    #[test]
+    fn only_a_fetch_of_every_remote_is_marked_as_such() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, _events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let tab = &mut tabs[0];
+        tab.op_fetch(&shared, None, true, true);
+        tab.op_fetch(&shared, Some("origin".into()), true, false);
+        let ids: Vec<u64> = tab.running.iter().map(|op| op.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(tab.fetches_of_all_remotes.contains(&ids[0]), "fetch de tous les remotes");
+        assert!(!tab.fetches_of_all_remotes.contains(&ids[1]), "fetch d'un seul remote");
+        for op in &tab.running {
+            op.cancel.cancel();
+        }
     }
 }

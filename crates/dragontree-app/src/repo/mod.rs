@@ -491,9 +491,11 @@ pub struct RepoTab {
     next_op_id: u64,
     quick_dirty: bool,
     /// Erreur d'authentification du dernier fetch, automatique ou non (L4) : indicateur permanent dans l'onglet (barre
-    /// d'outils, barre d'onglets), effacé au prochain fetch réussi. Le fetch automatique ne notifie que le premier échec
-    /// d'une série.
+    /// d'outils, barre d'onglets), effacé au prochain fetch de tous les remotes réussi (`fetches_of_all_remotes`) : le
+    /// fetch d'un seul remote ne dit rien des autres. Le fetch automatique ne notifie que le premier échec d'une série.
     pub(crate) fetch_auth_error: Option<String>,
+    /// Opérations en cours (numéros) qui fetchent tous les remotes (`fetch --all`) : fetch automatique, bouton Fetch.
+    fetches_of_all_remotes: HashSet<u64>,
     /// Dossier à ouvrir dans un onglet quand l'opération (numéro) réussit : un worktree qui vient d'être créé.
     open_after_op: Option<(u64, PathBuf)>,
     /// Révision à fusionner (dialogue de fusion) quand le checkout (numéro) réussit : dépôt d'une branche sur une autre.
@@ -549,6 +551,7 @@ impl RepoTab {
             next_op_id: 0,
             quick_dirty: false,
             fetch_auth_error: None,
+            fetches_of_all_remotes: HashSet::new(),
             open_after_op: None,
             merge_after_op: None,
             branch_drop: None,
@@ -1023,11 +1026,13 @@ impl RepoTab {
                 self.running.retain(|o| o.id != id);
                 let succeeded = result.is_ok();
                 // Authentification du fetch (L4), automatique ou non : l'indicateur de l'onglet reste jusqu'au prochain
-                // fetch réussi.
+                // fetch de tous les remotes réussi.
+                let all_remotes = self.fetches_of_all_remotes.remove(&id);
                 let mut first_auth_failure = false;
                 if kind == actions::OpKind::Fetch {
                     match &result {
-                        Ok(_) => self.fetch_auth_error = None,
+                        Ok(_) if all_remotes => self.fetch_auth_error = None,
+                        Ok(_) => {}
                         Err(e) if is_auth_error(e) => {
                             first_auth_failure = self.fetch_auth_error.is_none();
                             self.fetch_auth_error = Some(e.to_string());
@@ -1474,7 +1479,9 @@ fn status_event(id: TabId, generation: u64, read: impl FnOnce() -> Result<Status
     Some(AppEvent::Repo(id, RepoEvent::Status(generation, crate::jobs::guarded(read))))
 }
 
-/// Erreur d'authentification (jeton expiré, accès refusé) : à signaler même en arrière-plan.
+/// Erreur d'authentification (jeton expiré, accès refusé) : à signaler même en arrière-plan. Reconnue aux messages
+/// anglais de git : en arrière-plan, git est lancé avec `LC_ALL=C` (`dragontree_git::net`) ; une opération visible
+/// garde la langue de l'utilisateur, et le refus d'une installation de git traduite n'y est pas reconnu.
 pub fn is_auth_error(e: &GitError) -> bool {
     const SIGNS: [&str; 8] = [
         "authentication failed",

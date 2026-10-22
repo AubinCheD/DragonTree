@@ -183,3 +183,33 @@ fn force_with_lease_refuses_after_background_fetch() {
     let top = remote.git.cmd(remote.path()).args(["log", "-1", "--format=%s", "main"]).run().unwrap().stdout_str();
     assert_eq!(top.trim(), "travail d'alice");
 }
+
+/// Environnement que reçoit le transport d'un fetch (ssh simulé par `core.sshCommand`, qui le note puis échoue) : en
+/// arrière-plan, git parle anglais (son message d'authentification refusée se reconnaît) et aucune invite
+/// d'identifiants n'est possible ; un fetch visible garde la langue de l'utilisateur.
+#[test]
+fn a_background_fetch_runs_git_in_english_without_any_credential_prompt() {
+    let work = TestRepo::new();
+    let slashes = |p: std::path::PathBuf| p.display().to_string().replace('\\', "/");
+    let (script, marker) = (slashes(work.file("ssh.sh")), work.file("env.txt"));
+    let report = "LC_ALL=$LC_ALL GIT_ASKPASS=[$GIT_ASKPASS] SSH_ASKPASS=[$SSH_ASKPASS] \
+                  SSH_ASKPASS_REQUIRE=$SSH_ASKPASS_REQUIRE GCM_INTERACTIVE=$GCM_INTERACTIVE";
+    let body = format!("#!/bin/sh\necho \"{report}\" > '{}'\nexit 1\n", slashes(marker.clone()));
+    std::fs::write(work.file("ssh.sh"), body).unwrap();
+    work.run(&["config", "core.sshCommand", &format!("sh '{script}'")]);
+    work.run(&["remote", "add", "origin", "ssh://git@forge.contoso.test/depot.git"]);
+    let repo = Repo::open(&work.git, work.path()).unwrap();
+    // Langue de l'utilisateur (simulée).
+    let fetch = |non_interactive| {
+        let env = vec![("LC_ALL".to_string(), "fr_FR.UTF-8".to_string())];
+        let n = NetOptions { env, non_interactive, ..NetOptions::default() };
+        assert!(repo.fetch(None, true, &n, &mut |_| {}).is_err(), "le transport simulé échoue");
+        std::fs::read_to_string(&marker).unwrap()
+    };
+    let background = fetch(true);
+    assert!(background.starts_with("LC_ALL=C "), "{background}");
+    let no_prompt = "GIT_ASKPASS=[] SSH_ASKPASS=[] SSH_ASKPASS_REQUIRE=never GCM_INTERACTIVE=never";
+    assert!(background.contains(no_prompt), "{background}");
+    let visible = fetch(false);
+    assert!(visible.starts_with("LC_ALL=fr_FR.UTF-8 "), "{visible}");
+}

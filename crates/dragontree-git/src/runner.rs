@@ -166,9 +166,17 @@ impl GitCommand {
         self.env("GIT_OPTIONAL_LOCKS", "0")
     }
 
-    /// Interdit toute fenêtre d'authentification (opérations en arrière-plan).
+    /// Interdit toute fenêtre ou invite d'authentification (opérations en arrière-plan) : ni Gestionnaire d'identifiants
+    /// interactif (`GCM_INTERACTIVE=never`), ni programme « askpass » venu de l'environnement (celui de VS Code dans son
+    /// terminal) ou de la configuration (`core.askPass`). git consulte `GIT_ASKPASS`, puis `core.askPass`, puis
+    /// `SSH_ASKPASS`, et ignore une valeur vide : `GIT_ASKPASS` vide arrête donc la recherche ; ssh n'en lance aucun
+    /// (`SSH_ASKPASS_REQUIRE=never`, `SSH_ASKPASS` vide). Sans invite au terminal non plus (`GIT_TERMINAL_PROMPT=0`,
+    /// toujours posé), une authentification manquante échoue aussitôt.
     pub fn non_interactive(self) -> Self {
         self.env("GCM_INTERACTIVE", "never")
+            .env("GIT_ASKPASS", "")
+            .env("SSH_ASKPASS", "")
+            .env("SSH_ASKPASS_REQUIRE", "never")
     }
 
     /// Codes de sortie acceptés en plus de 0 (ex. `diff --no-index` renvoie 1).

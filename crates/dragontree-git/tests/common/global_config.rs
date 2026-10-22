@@ -2,7 +2,8 @@
 //! désigne un fichier d'un dossier temporaire, qui sert aussi de `HOME`, de `USERPROFILE` et de `XDG_CONFIG_HOME` —
 //! git avant 2.32 ignore `GIT_CONFIG_GLOBAL` (2.31 est pris en charge) et lirait puis écrirait sinon le vrai
 //! `~/.gitconfig` ou `~/.config/git/config`. La configuration système (celle de Git pour Windows) n'est pas celle de
-//! l'utilisateur : elle reste lue.
+//! l'utilisateur : elle reste lue. Les invites d'identifiants (askpass, Gestionnaire d'identifiants interactif) sont
+//! neutralisées en même temps (voir [`NO_CREDENTIAL_PROMPT`]).
 //!
 //! Isolation par défaut : les helpers partagés (dépôt de test, commande git, harnais de l'interface) appellent
 //! [`isolate_git_config_for_this_test`] avant toute commande git, et le test qui les appelle tient la configuration
@@ -23,6 +24,13 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
+
+/// Aucune invite d'identifiants pour git lancé par les tests, ni par l'application qu'ils pilotent (même
+/// neutralisation que `GitCommand::non_interactive`) : pas de Gestionnaire d'identifiants interactif, pas de programme
+/// « askpass » hérité (terminal de VS Code…) ou configuré — un `GIT_ASKPASS` vide arrête la recherche de git (puis
+/// `core.askPass`, `SSH_ASKPASS`) — ni pour ssh. Posé avec la configuration globale de test.
+pub const NO_CREDENTIAL_PROMPT: [(&str, &str); 4] =
+    [("GCM_INTERACTIVE", "never"), ("GIT_ASKPASS", ""), ("SSH_ASKPASS", ""), ("SSH_ASKPASS_REQUIRE", "never")];
 
 /// Configuration git globale de test : son dossier temporaire est supprimé quand le dernier test qui la tient se
 /// termine.
@@ -85,6 +93,9 @@ pub fn isolate_global_git_config(initial: &str) -> Arc<GlobalGitConfig> {
                 std::env::set_var("HOME", config.dir.path());
                 std::env::set_var("USERPROFILE", config.dir.path());
                 std::env::set_var("XDG_CONFIG_HOME", config.dir.path());
+                for (key, value) in NO_CREDENTIAL_PROMPT {
+                    std::env::set_var(key, value);
+                }
             }
             let config = Arc::new(config);
             *current = Arc::downgrade(&config);

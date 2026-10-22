@@ -29,9 +29,12 @@ const BACKGROUND_LOW_SPEED: (&str, &str) = ("http.lowSpeedLimit=1000", "http.low
 pub(crate) fn with_net(cmd: GitCommand, n: &NetOptions) -> GitCommand {
     let cmd = cmd.env("GIT_EDITOR", "true").envs(&n.env).cancel(n.cancel.clone());
     if n.non_interactive {
+        // Messages de git en anglais (`LC_ALL=C`) : une authentification refusée se reconnaît à son texte
+        // (`is_auth_error` de l'application), quelle que soit la langue de l'utilisateur. En arrière-plan, git n'affiche
+        // rien d'autre que l'erreur notifiée.
         // Options de git avant la sous-commande, que l'appelant ajoute ensuite.
         let (limit, time) = BACKGROUND_LOW_SPEED;
-        cmd.non_interactive().args(["-c", limit, "-c", time])
+        cmd.non_interactive().env("LC_ALL", "C").args(["-c", limit, "-c", time])
     } else {
         cmd
     }

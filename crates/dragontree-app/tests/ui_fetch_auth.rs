@@ -1,8 +1,9 @@
 //! Fetch automatique refusé par le serveur (L4) : indicateur permanent dans l'onglet (à côté du bouton Fetch, icône
-//! et infobulle de l'onglet) jusqu'au prochain fetch réussi, et une seule notification par série d'échecs.
-//! Serveur HTTP local qui répond 401 à tout ; aucun identifiant réel : le dépôt vide la liste des assistants
+//! et infobulle de l'onglet) jusqu'au prochain fetch de tous les remotes réussi, et une seule notification par série
+//! d'échecs. Serveur HTTP local qui répond 401 à tout ; aucun identifiant réel : le dépôt vide la liste des assistants
 //! d'identifiants (`credential.helper` vide, donc pas de Gestionnaire d'identifiants), git ne demande rien
-//! (`GIT_TERMINAL_PROMPT=0`, et `GCM_INTERACTIVE=never` pour le fetch automatique).
+//! (`GIT_TERMINAL_PROMPT=0` ; pour le fetch automatique, `GitCommand::non_interactive` : ni Gestionnaire interactif ni
+//! programme askpass ; pour tout le test, la même neutralisation posée par `common`, `NO_CREDENTIAL_PROMPT`).
 
 mod common;
 
@@ -15,7 +16,7 @@ use std::time::Duration;
 use common::*;
 use dragontree_app::{DragonTreeApp, StartOptions};
 use egui::accesskit::Role;
-use egui_kittest::kittest::{AccessKitNode, Queryable};
+use egui_kittest::kittest::{AccessKitNode, NodeT, Queryable};
 use egui_kittest::{Harness, Node};
 
 const INDICATOR: &str = "Authentification refusée";
@@ -97,14 +98,23 @@ fn a_refused_automatic_fetch_shows_a_lasting_indicator_until_a_fetch_succeeds() 
         .is_some()
     });
     tab(&h, "depot").hover();
+    // Première ligne de l'infobulle de l'onglet : le chemin du dépôt.
+    let mut path_line = String::new();
     wait_until(&mut h, "infobulle de l'onglet", |h| {
-        h.query_by_label_contains("Authentification refusée au dernier fetch : ").is_some()
+        let tip =
+            h.query_by(|n| text_of(n).is_some_and(|t| t.contains("Authentification refusée au dernier fetch : ")));
+        if let Some(text) = tip.and_then(|n| text_of(&n.accesskit_node())) {
+            path_line = text.lines().next().unwrap_or_default().to_string();
+        }
+        !path_line.is_empty()
     });
 
-    // Remote valide : le fetch suivant réussit et efface l'indicateur.
+    // Remote valide : le fetch suivant réussit et efface l'indicateur, puis la ligne de l'infobulle de l'onglet.
     git(&repo, &["remote", "set-url", "origin", bare.to_str().unwrap()]);
     wait_until(&mut h, "indicateur effacé par un fetch réussi", |h| indicator(h).is_none());
     tab(&h, "depot").hover();
-    h.run_steps(30);
+    wait_until(&mut h, "infobulle de l'onglet réduite au chemin du dépôt", |h| {
+        h.query_by(|n| text_of(n).as_deref() == Some(path_line.as_str())).is_some()
+    });
     assert!(h.query_by_label_contains("Authentification refusée au dernier fetch").is_none(), "plus dans l'onglet");
 }
