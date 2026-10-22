@@ -5,10 +5,13 @@ mod common;
 
 use common::*;
 
+/// `start` passe `--lang fr` : l'interface ne passe en anglais que si le choix du menu met fin au remplacement de la
+/// langue par la ligne de commande (`Command::Language`, RV5a).
 #[test]
 fn language_menu_switches_the_interface_to_english() {
     let tmp = tempfile::tempdir().unwrap();
     let mut h = harness(start(tmp.path()));
+    assert_eq!(start(tmp.path()).lang, Some(dragontree_i18n::Lang::Fr), "langue imposée par la ligne de commande");
 
     open_menu(&mut h, "Configuration");
     open_menu(&mut h, "Langue");

@@ -7,6 +7,7 @@ use dragontree_git::{BranchOutcome, GitError, StaleBranch, StaleReason};
 use dragontree_i18n::{tr, trn};
 use egui::{RichText, Ui};
 
+use super::actions::OpKind;
 use super::dialogs::warning;
 use super::{Dialog, Refresh, RepoEvent, RepoTab};
 use crate::app::{AppEvent, Shared};
@@ -203,7 +204,9 @@ impl RepoTab {
             .into_iter()
             .filter_map(|i| refs.upstream_parts(&i.upstream).map(|(remote, branch)| (i.name.clone(), remote, branch)))
             .collect();
-        self.run_net(shared, tr!("Push de plusieurs branches"), Refresh::REFS, false, move |r, n, on| {
+        // Un push : il occupe le bouton Push, comme avant RV5b (dans les deux langues désormais).
+        let title = tr!("Push de plusieurs branches");
+        self.run_net_as(shared, OpKind::Push, title, Refresh::REFS, false, move |r, n, on| {
             let outcomes = plan
                 .iter()
                 .map(|(local, remote, remote_branch)| BranchOutcome {

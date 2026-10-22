@@ -24,6 +24,8 @@ fn wait_until(
     panic!("délai dépassé : {what}");
 }
 
+/// Démarrage avec `--lang en` : l'interface ne passe en français que si la langue changée dans la fenêtre Réglages met
+/// fin au remplacement de la langue par la ligne de commande (RV5a).
 #[test]
 fn language_can_be_switched_from_the_settings() {
     let tmp = tempfile::tempdir().unwrap();

@@ -19,14 +19,14 @@ type OpFn = dyn FnOnce(&Repo, &NetOptions, &mut dyn FnMut(Progress)) -> Result<O
 /// lancée (bouton, menu, raccourci, palette, push après un commit).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum OpKind {
-    /// Toute autre opération : push d'un tag ou de plusieurs branches, fetch et pull LFS, renommage d'un stash…
+    /// Toute autre opération : push d'un tag, fetch et pull LFS, renommage d'un stash…
     #[default]
     Other,
     /// Fetch des remotes (bouton Fetch ; le fetch automatique, silencieux, n'occupe pas le bouton).
     Fetch,
     /// Pull de la branche suivie ou choisie.
     Pull,
-    /// Push d'une branche : dialogue Push, push rapide, push après un commit.
+    /// Push : dialogue Push, push rapide, push après un commit, push de plusieurs branches (branches en avance).
     Push,
     Commit,
     /// Mise de côté par le dialogue Stash (stash ou snapshot) ou des fichiers choisis.
@@ -181,7 +181,7 @@ impl RepoTab {
     }
 
     /// Opération réseau d'un type donné (état « occupé » des boutons).
-    fn run_net_as(
+    pub(super) fn run_net_as(
         &mut self,
         shared: &Shared,
         kind: OpKind,
@@ -833,18 +833,22 @@ mod tests {
 
     /// L'état « occupé » des boutons vient du type de l'opération, jamais de son titre traduit (RV5b) : une opération
     /// dont le titre commence comme celui d'un bouton dans une langue (« Push du tag », « Fetch LFS », « Pull LFS » en
-    /// français, « Stash rename » en anglais) ne l'occupe pas ; celle du bouton, si. Les titres sont d'abord en
-    /// français (langue des tests unitaires : elle est globale au processus), puis remplacés par leur traduction
-    /// anglaise : même résultat.
+    /// français, « Stash rename » en anglais) ne l'occupe pas ; celle du bouton, si, comme le push de plusieurs
+    /// branches occupe Push. Les titres sont d'abord en français (langue des tests unitaires : elle est globale au
+    /// processus), puis remplacés par leur traduction anglaise : même résultat.
     #[test]
     fn the_busy_buttons_follow_the_kind_of_operation_in_every_language() {
+        use super::super::branch_batch::BranchChoice;
         use dragontree_i18n::{Lang, translate};
 
         let dir = tempfile::tempdir().unwrap();
         let (shared, _events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
         let tab = &mut tabs[0];
-        // File des écritures occupée : les opérations y restent en attente ; annulées à la fin, elles ne lancent pas
-        // git.
+        // Branches du dépôt (le push de plusieurs branches en a besoin).
+        tab.refs = Some(Arc::new(tab.repo.as_ref().unwrap().refs().unwrap()));
+        // File des écritures occupée : les opérations visibles y restent en attente ; annulées à la fin, elles ne
+        // lancent pas git. Le fetch automatique, silencieux, passe par la file du réseau silencieux, libre : il lance
+        // vraiment `git fetch` sur le dépôt temporaire, qui n'a pas de remote (aucun accès réseau).
         let queues = tab.queues(&shared).unwrap();
         let (gate_tx, gate_rx) = mpsc::channel::<()>();
         queues.writes.then(move || {
@@ -854,7 +858,14 @@ mod tests {
         let busy = |tab: &RepoTab| kinds.into_iter().filter(|k| tab.op_running(*k)).collect::<Vec<_>>();
         // Titres anglais des opérations lancées (« Fetch », « Push », « Commit »… ne sont pas traduits).
         let in_english = |tab: &mut RepoTab| {
-            let french = ["Push du tag", "Fetch LFS", "Pull LFS", "Renommage du stash", "Pop du stash"];
+            let french = [
+                "Push du tag",
+                "Fetch LFS",
+                "Pull LFS",
+                "Renommage du stash",
+                "Push de plusieurs branches",
+                "Pop du stash",
+            ];
             for op in &mut tab.running {
                 if let Some(fr) = french.iter().find(|fr| **fr == op.title) {
                     op.title = translate(Lang::En, fr).to_string();
@@ -873,6 +884,18 @@ mod tests {
         assert_eq!(busy(tab), [], "titres en français");
         assert_eq!(in_english(tab), ["Tag push", "LFS fetch", "LFS pull", "Stash rename", "Fetch"]);
         assert_eq!(busy(tab), [], "titres en anglais");
+
+        // Le push de plusieurs branches occupe Push, et lui seul, dans les deux langues.
+        let feature = BranchChoice {
+            name: "feature".into(),
+            upstream: "origin/feature".into(),
+            detail: String::new(),
+            checked: true,
+        };
+        tab.op_push_branches(&shared, vec![feature]);
+        assert_eq!(busy(tab), [OpKind::Push], "titres en français");
+        assert_eq!(in_english(tab).last().map(String::as_str), Some("Pushing several branches"));
+        assert_eq!(busy(tab), [OpKind::Push], "titres en anglais");
 
         // Les opérations des boutons les occupent, dans les deux langues.
         tab.op_fetch(&shared, None, true, false);

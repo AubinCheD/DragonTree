@@ -299,31 +299,30 @@ impl DragonTreeApp {
             None => Settings::file(),
         };
         let (settings_store, mut settings, settings_error) = SettingsFile::load(&settings_path);
-        // `--theme` et `--lang` : pour cette exécution seulement, jamais écrits dans les réglages (voir
-        // `Shared::theme_override`).
-        let theme = start.theme.unwrap_or(settings.theme);
-        let system_lang = Lang::system();
-        dragontree_i18n::set_lang(start.lang.or(settings.language).unwrap_or(system_lang));
         if let Some(root) = &start.add_root
             && !settings.scan_roots.iter().any(|r| path_key(r) == path_key(root))
         {
             settings.scan_roots.push(root.clone());
         }
-        theme::install_fonts(&ctx, settings.diff_font);
-        theme::apply(&ctx, theme, settings.ui_scale);
-
         let git = match &settings.git_path {
             Some(p) => Some(Git::with_exe(p.clone())).filter(|g| g.version().is_ok()).or_else(|| Git::discover().ok()),
             None => Git::discover().ok(),
         };
         let repo_list = RepoListState::load_cache(start.profile_dir.as_deref());
-        let applied_theme = (theme, settings.ui_scale);
-        let applied_diff_font = settings.diff_font;
         let (mut shared, rx) = Shared::new(ctx.clone(), settings, settings_store, start.profile_dir.clone(), git);
         shared.auto_fetch_every = start.auto_fetch_every;
         shared.settings_read_only = start.screenshot.is_some();
+        // `--theme` et `--lang` : pour cette exécution seulement, jamais écrits dans les réglages (voir
+        // `Shared::theme_override`). Le choix en vigueur se lit sur `Shared::theme` et `Shared::language`, ici comme à
+        // chaque image (`update`).
         shared.theme_override = start.theme;
         shared.lang_override = start.lang;
+        let system_lang = Lang::system();
+        dragontree_i18n::set_lang(shared.language().unwrap_or(system_lang));
+        let applied_theme = (shared.theme(), shared.settings.ui_scale);
+        let applied_diff_font = shared.settings.diff_font;
+        theme::install_fonts(&ctx, applied_diff_font);
+        theme::apply(&ctx, applied_theme.0, applied_theme.1);
         if let Some(msg) = settings_error {
             shared.toasts.push(Toast::error(tr!("Réglages réinitialisés"), msg));
         }

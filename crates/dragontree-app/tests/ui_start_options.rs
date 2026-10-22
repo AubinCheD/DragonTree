@@ -1,6 +1,6 @@
 //! `--theme` et `--lang` valent pour cette exécution seulement (RV5a) : en vigueur (cochés dans les menus, montrés
 //! par la fenêtre Réglages) mais jamais enregistrés, même quand d'autres réglages le sont ; un thème choisi dans
-//! l'application (menu, Réglages) est enregistré et remplace celui de la ligne de commande.
+//! l'application (menu, Réglages) est enregistré et remplace celui de la ligne de commande ; de même pour la langue.
 //! La langue reste le français dans tout ce binaire (`start` passe `--lang fr`) : elle est globale au processus.
 //! Le harnais impose son propre thème (sombre) après la création de l'application : le thème appliqué au démarrage
 //! ne s'observe pas ici, seulement le choix en vigueur et les changements faits ensuite.
@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use common::*;
 use dragontree_app::settings::{Settings, ThemeChoice};
 use dragontree_app::{DragonTreeApp, StartOptions};
+use dragontree_i18n::Lang;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
@@ -90,6 +91,26 @@ fn a_theme_chosen_in_the_menu_is_saved_even_if_it_is_the_command_line_one() {
     click_menu_item(&mut h, "Sombre");
     wait_until(&mut h, "thème du menu enregistré", |_| saved(tmp.path()).theme == ThemeChoice::Dark);
     assert_eq!(checked_theme(&mut h), ["Sombre"]);
+}
+
+/// Langue : comme le thème, l'entrée du menu est enregistrée même si c'est celle de `--lang` (`start` passe
+/// `--lang fr`). Le choix d'une autre langue, qui changerait celle du processus, se vérifie dans des binaires à part :
+/// `ui_menus_lang` (menu) et `ui_lang` (fenêtre Réglages) partent d'un `--lang` et passent à l'autre langue, ce qui
+/// n'arrive que si le choix met fin au remplacement.
+#[test]
+fn a_language_chosen_in_the_menu_is_saved_even_if_it_is_the_command_line_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut h = harness(start(tmp.path()));
+
+    open_menu(&mut h, "Configuration");
+    open_menu(&mut h, "Langue");
+    click_menu_item(&mut h, "Français");
+    wait_until(&mut h, "langue du menu enregistrée", |_| saved(tmp.path()).language == Some(Lang::Fr));
+    open_menu(&mut h, "Configuration");
+    open_menu(&mut h, "Langue");
+    wait_until(&mut h, "sous-menu Langue", |h| menu_item(h, "English").is_some());
+    assert_eq!(menu_item_checked(&h, "Français"), Some(true));
+    assert_eq!(menu_item_checked(&h, "Système"), Some(false));
 }
 
 #[test]
