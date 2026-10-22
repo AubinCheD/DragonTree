@@ -639,7 +639,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - **Marques :**
     - USPTO : la recherche officielle (tmsearch.uspto.gov) ne s'affiche qu'en JavaScript, sans résultat lisible. Consulté à la place : Trademarkia, qui reprend les données de l'USPTO.
       - « dragontree » : trois marques vivantes, toutes d'un même titulaire américain, dans le bien-être : THE DRAGONTREE (n° 5838098, classes 35 et 41 : vente en ligne de produits de soin, formations au bien-être), THE DRAGONTREE (série 85763560, classe 44 : spa), DRAGONTREE LIFE COACHING (série 88019117, classe 41). Une marque figurative DRAGONTREE (classe 31, plantes vivantes, titulaire néerlandais) est radiée.
-      - « dragon tree » : une seule marque vivante proche, DRAGON TREE LABS (n° 6546097, classe 42 : services de recherche et développement, « laboratoire de technologies de rupture », titulaire établi à Moscou). DRAGON TREE pour des vins (33), un shampoing (3) et des produits horticoles (31) : radiées ou abandonnées.
+      - « dragon tree » : une seule marque vivante proche, DRAGON TREE LABS (n° 6546097, classe 42 : services de recherche et développement, « laboratoire de technologies de rupture »). DRAGON TREE pour des vins (33), un shampoing (3) et des produits horticoles (31) : radiées ou abandonnées.
       - Aucune marque « dragontree » ou « dragon tree » en classe 9 (logiciels).
     - EUIPO (eSearch) et TMview : interfaces JavaScript seules (eSearch : connexion coupée ; TMview : page vide). Non interrogés.
     - INPI (data.inpi.fr) : accès refusé aux requêtes automatiques (HTTP 403). Non interrogé.
@@ -666,7 +666,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 - **Contexte :** le plan a été suivi grâce à un journal d'exécution non versionné, et ses cases n'ont pas été cochées.
 - **État :** réalisé.
-  - Avant : `docs/superpowers/plans/2026-10-16-dragontree.md` comptait 58 cases, toutes vides, alors que les tâches 0 à 24 sont terminées (voir État du plan). De même, `docs/superpowers/plans/2026-10-19-options-fork.md` comptait 91 cases vides, alors que ses 48 tâches sont terminées (branche `options-fork`).
+  - Avant : `docs/superpowers/plans/2026-10-16-dragontree.md` comptait 57 cases, toutes vides, alors que les tâches 0 à 24 sont terminées (voir État du plan). De même, `docs/superpowers/plans/2026-10-19-options-fork.md` comptait 90 cases vides, alors que ses 48 tâches sont terminées (branche `options-fork`).
   - Les deux plans portent en tête un avertissement : plan historique et réalisé, cases jamais cochées et laissées telles quelles, document plus tenu à jour, renvoi à ce document (sections « État du plan d'implémentation » ou « Branche `options-fork` », et « Reste à faire »). Les cases ne sont pas cochées.
   - Le plan en cours (`docs/superpowers/plans/2026-10-21-points-restants.md`) n'est pas concerné.
 - **À faire :** cocher les étapes faites, ou signaler en tête du plan qu'il est historique et renvoyer à ce document (fait : avertissement en tête des deux plans).
@@ -687,14 +687,14 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 #### P4 — `--help` en build release depuis une console Windows (fait)
 
 - **Contexte :** relevé en vérifiant le code, ce point n'a pas été discuté.
-  - L'exécutable release utilise le sous-système Windows (`crates/dragontree-app/src/main.rs:1`), et l'aide est écrite sur la sortie d'erreur (`:110`).
+  - L'exécutable release utilise le sous-système Windows (attribut `windows_subsystem` en tête de `crates/dragontree-app/src/main.rs`), et l'aide est écrite sur la sortie d'erreur (`eprintln!` de `main`, quand `parse_args` renvoie l'aide ou une erreur d'option).
   - L'aide a été vérifiée à travers un tube, depuis Git Bash. Dans une console cmd ou PowerShell interactive, elle risque de ne pas s'afficher.
 - **État :** corrigé.
   - Avant (vérifié le 2026-10-22 avec l'exécutable release) : `dragontree.exe --help` tapé dans cmd ou dans PowerShell, `cmd /c`, `Start-Process -NoNewWindow -Wait` : rien ne s'affichait. Une application graphique n'a ni console ni flux standard (handles nuls).
   - Réalisé (`crates/dragontree-app/src/console.rs`) : avant d'écrire l'aide ou une erreur d'argument, `main` appelle `console::attach_parent_console`.
     - Il ne fait rien si la sortie d'erreur est déjà utilisable : console, tube (Git Bash dans mintty), fichier, `NUL`.
     - Sinon il se rattache à la console du parent (`AttachConsole(ATTACH_PARENT_PROCESS)`), puis remet les flux qui étaient redirigés : constaté, depuis cmd, `--help > aide.txt` voyait sa sortie standard remplacée par la console, car cmd transmet les flux sans `STARTF_USESTDHANDLES` et `AttachConsole` les remplace alors tous.
-    - Un flux de sortie encore inutilisable après l'attache est ouvert sur `CONOUT$` : c'est le cas de Git Bash lancé dans une console, qui transmet un handle de sortie d'erreur invalide chez l'application graphique, et `AttachConsole` ne le remplace pas.
+    - Un flux de sortie encore inutilisable après l'attache est ouvert sur `CONOUT$` (un seul handle, partagé si les deux sorties en ont besoin) : c'est le cas de Git Bash lancé dans une console, qui transmet un handle de sortie d'erreur invalide chez l'application graphique, et `AttachConsole` ne le remplace pas (flux transmis avec `STARTF_USESTDHANDLES`).
     - La bibliothèque standard relit `GetStdHandle` à chaque écriture et écrit dans une console en UTF-16 : `eprintln!` suffit ensuite, accents compris.
     - Sans console à rejoindre (lancement depuis l'Explorateur), le message est perdu comme avant ; le code de sortie (2) ne change pas.
     - Le message « instance unique impossible », écrit au démarrage d'une application qui continue, ne se rattache pas : une application rattachée à une console en reçoit les Ctrl+C.
@@ -709,10 +709,12 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Tests** (`crates/dragontree-app/src/console.rs`) :
   - `only_a_missing_error_output_attaches_and_redirections_are_kept` : décision selon l'état des flux.
   - `handles_are_classified_by_what_windows_knows_of_them` : handles nul, invalide, inconnu, fichier, tube.
-  - `without_a_console_the_call_does_not_panic_and_keeps_the_redirected_output` : le test se relance en processus sans console, sortie standard dans un tube, sans sortie d'erreur.
+  - `without_a_console_the_call_does_not_panic_and_keeps_the_redirected_output` : le test se relance en processus sans console, sortie standard dans un tube, sans sortie d'erreur utilisable.
     - Lancé comme cmd lance un programme, avec une console parente : `Attached`, et la sortie standard garde son tube.
+    - Lancé par la bibliothèque standard (`STARTF_USESTDHANDLES`, comme Git Bash) avec une console parente, sorties standard et d'erreur sur un handle jamais ouvert : `Attached`, les deux sorties sur un même handle `CONOUT$` utilisable.
     - Sans console parente : `NoConsole`, sans panique.
-    - Vu rouge sans la remise des flux : sortie standard remplacée par la console, compte rendu de l'enfant perdu.
+    - Vu rouge sans la remise des flux : sortie standard remplacée par la console, compte rendu de l'enfant perdu ; et avec un `CONOUT$` ouvert par sortie : deux handles différents.
+    - Chaque attente d'un processus relancé est bornée (30 s pour l'enfant, 60 s pour le relais) : au-delà, il est tué et le test échoue au lieu de bloquer la suite. Le message d'échec reprend les sorties du relais et les paniques de l'enfant.
   - L'exécutable release n'est pas construit par la suite de tests (vérification manuelle ci-dessus).
 - **À faire :** lancer `dragontree.exe --help` dans cmd et dans PowerShell. Si rien ne s'affiche, s'attacher à la console parente (`AttachConsole`) avant d'écrire (fait).
 - **Critère de fin (atteint) :** l'aide s'affiche depuis cmd et PowerShell avec l'exécutable release ; tube de Git Bash inchangé.
