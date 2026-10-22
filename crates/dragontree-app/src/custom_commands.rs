@@ -1021,7 +1021,7 @@ mod tests {
         use dragontree_git::CancelToken;
         use dragontree_git::shell::run_shell;
 
-        let git = dragontree_git::Git::discover().expect("git doit être installé pour les tests");
+        let git = crate::test_git();
         let dir = tempfile::tempdir().unwrap();
         let pwned = dir.path().join("pwned.txt");
         let hostile = [

@@ -257,7 +257,6 @@ fn contributors(ui: &mut Ui, stats: &RepoStats, p: &Palette) {
 
 #[cfg(test)]
 mod tests {
-    use dragontree_git::Git;
 
     use super::*;
     use crate::settings::SettingsFile;
@@ -265,7 +264,7 @@ mod tests {
     #[test]
     fn a_result_from_a_replaced_calculation_is_ignored_and_a_cancelled_one_is_reported() {
         let dir = tempfile::tempdir().unwrap();
-        let git = Git::discover().unwrap();
+        let git = crate::test_git();
         git.cmd(dir.path()).args(["init", "-q"]).run().unwrap();
         let (store, settings, _) = SettingsFile::load(&dir.path().join("settings.json"));
         let (shared, _events) = Shared::new(egui::Context::default(), settings, store, None, None);

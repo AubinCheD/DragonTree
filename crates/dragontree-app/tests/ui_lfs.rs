@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 
 use common::*;
 use dragontree_app::{DragonTreeApp, StartOptions};
-use dragontree_git::Git;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
@@ -15,7 +14,7 @@ type H = Harness<'static, DragonTreeApp>;
 
 /// Git LFS est installé ; sinon un message explique pourquoi le test s'arrête.
 fn lfs_installed() -> bool {
-    let ok = dragontree_git::lfs_available(&Git::discover().unwrap());
+    let ok = dragontree_git::lfs_available(&test_git());
     if !ok {
         eprintln!("git lfs est absent : test ignoré");
     }

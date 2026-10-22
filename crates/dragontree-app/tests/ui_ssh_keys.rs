@@ -5,7 +5,6 @@ mod common;
 
 use common::*;
 use dragontree_app::StartOptions;
-use dragontree_git::Git;
 use dragontree_git::ssh::{self, KeyType};
 use egui_kittest::kittest::Queryable;
 
@@ -18,7 +17,7 @@ fn ssh_keys_window_lists_a_test_key_and_selects_it_for_git() {
     let ssh_dir = tmp.path().join("ssh-test");
     let key = ssh::generate_key(
         &ssh_dir,
-        &ssh::find_ssh_keygen(Git::discover().unwrap().exe()),
+        &ssh::find_ssh_keygen(test_git().exe()),
         "id_ed25519",
         KeyType::Ed25519,
         "jean@fabrikam.test",

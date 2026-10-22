@@ -575,7 +575,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("alpha");
         std::fs::create_dir_all(&repo).unwrap();
-        let git = Git::discover().unwrap();
+        let git = crate::test_git();
         git_in(&git, &repo, &["init", "-q", "-b", "main"]);
         git_in(
             &git,

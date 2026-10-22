@@ -6,22 +6,13 @@ use common::TestRepo;
 use dragontree_git::identity::{self, Identity};
 use dragontree_git::{GitError, Repo};
 
-/// `GIT_CONFIG_GLOBAL` est un état du processus : un seul test de ce fichier le positionne (jamais ~/.gitconfig).
-/// `useConfigOnly` empêche git de deviner l'identité à partir du nom de la machine : sans configuration, le commit
-/// échoue de la même façon partout.
+/// La configuration globale de test est un état du processus (`isolate_global_git_config`, jamais ~/.gitconfig) :
+/// un seul test dans ce fichier. `useConfigOnly` empêche git de deviner l'identité à partir du nom de la machine :
+/// sans configuration, le commit échoue de la même façon partout.
 #[test]
 fn global_identity_round_trips_and_a_commit_without_identity_is_recognised() {
-    // Dossier temporaire pour le fichier global ET pour HOME / USERPROFILE : GIT_CONFIG_GLOBAL n'existe qu'à partir de
-    // git 2.32 (2.31 est pris en charge), une version plus ancienne écrirait sinon dans le vrai ~/.gitconfig.
-    let home = tempfile::tempdir().unwrap();
-    let global = home.path().join("gitconfig-global");
-    std::fs::write(&global, "[user]\n\tuseConfigOnly = true\n").unwrap();
-    // SAFETY : positionné avant toute commande git de ce fichier, qui ne contient que ce test.
-    unsafe {
-        std::env::set_var("GIT_CONFIG_GLOBAL", &global);
-        std::env::set_var("HOME", home.path());
-        std::env::set_var("USERPROFILE", home.path());
-    }
+    let global_config = common::isolate_global_git_config("[user]\n\tuseConfigOnly = true\n");
+    let global = global_config.file();
     let t = TestRepo::new();
     let cwd = std::env::temp_dir();
 

@@ -4,11 +4,11 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
+use dragontree_git::GitError;
 use dragontree_git::ssh::{self, ConfigScope, KeyType};
-use dragontree_git::{Git, GitError};
 
 fn keygen() -> PathBuf {
-    ssh::find_ssh_keygen(Git::discover().unwrap().exe())
+    ssh::find_ssh_keygen(common::git().exe())
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn core_ssh_command_is_written_then_removed_in_the_global_and_local_config() {
     let global_config = common::isolate_global_git_config("[user]\n\temail = jean@fabrikam.test\n");
     let global = global_config.file();
 
-    let git = Git::discover().unwrap();
+    let git = common::git();
     let repo = common::TestRepo::new();
     let key = Path::new(r"C:\Users\Contoso User\.ssh\id_ed25519");
     let wanted = r#"ssh -i "C:/Users/Contoso User/.ssh/id_ed25519" -o IdentitiesOnly=yes"#;

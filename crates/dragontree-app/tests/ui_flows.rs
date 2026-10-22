@@ -4,110 +4,12 @@
 mod common;
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use common::SilentServer;
+use common::*;
 use dragontree_app::{DragonTreeApp, StartOptions};
-use dragontree_git::Git;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    Git::discover().unwrap().cmd(dir).args(args).run().unwrap_or_else(|e| panic!("git {args:?} : {e}")).stdout_str()
-}
-
-/// Comme `git`, pour une attente : `None` si git échoue, par exemple en lisant `refs/stash` pendant que
-/// l'application le réécrit.
-fn try_git(dir: &Path, args: &[&str]) -> Option<String> {
-    Git::discover().unwrap().cmd(dir).args(args).run().ok().map(|o| o.stdout_str())
-}
-
-fn init_repo(dir: &Path) {
-    std::fs::create_dir_all(dir).unwrap();
-    git(dir, &["init", "-q", "-b", "main"]);
-    for (k, v) in [
-        ("user.name", "Testeur"),
-        ("user.email", "t@example.com"),
-        ("core.autocrlf", "false"),
-        ("commit.gpgsign", "false"),
-    ] {
-        git(dir, &["config", k, v]);
-    }
-}
-
-fn commit_file(dir: &Path, file: &str, content: &str, msg: &str) {
-    let p = dir.join(file);
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(p, content).unwrap();
-    git(dir, &["add", "-A"]);
-    git(dir, &["commit", "-q", "-m", msg]);
-}
-
-/// Dépôt avec historique, un fichier modifié et un fichier non suivi.
-fn demo_repo(base: &Path) -> PathBuf {
-    let dir = base.join("demo");
-    init_repo(&dir);
-    commit_file(&dir, "src/calc.rs", "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n", "Initial");
-    commit_file(
-        &dir,
-        "src/calc.rs",
-        "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn mul(a: i32, b: i32) -> i32 {\n    a * b\n}\n",
-        "Ajout de la multiplication",
-    );
-    std::fs::write(dir.join("src/calc.rs"), "fn add(a: i32, b: i32) -> i32 {\n    a.checked_add(b).unwrap()\n}\n\nfn mul(a: i32, b: i32) -> i32 {\n    a * b\n}\n").unwrap();
-    std::fs::write(dir.join("notes.txt"), "à faire\n").unwrap();
-    dir
-}
-
-fn harness(start: StartOptions) -> Harness<'static, DragonTreeApp> {
-    Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| DragonTreeApp::new(cc, start))
-}
-
-fn start(base: &Path) -> StartOptions {
-    StartOptions {
-        profile_dir: Some(base.join("profil")),
-        screenshot_after: Duration::ZERO,
-        // Les libellés cherchés par les tests sont ceux de l'interface en français.
-        lang: Some(dragontree_i18n::Lang::Fr),
-        ..Default::default()
-    }
-}
-
-/// Fait tourner l'interface jusqu'à ce que `cond` soit vraie.
-fn wait_until(
-    h: &mut Harness<'static, DragonTreeApp>,
-    what: &str,
-    mut cond: impl FnMut(&Harness<'static, DragonTreeApp>) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(40);
-    while Instant::now() < deadline {
-        h.step();
-        if cond(h) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    panic!("délai dépassé en attendant : {what}");
-}
-
-fn wait_git(h: &mut Harness<'static, DragonTreeApp>, what: &str, mut cond: impl FnMut() -> bool) {
-    wait_until(h, what, |_| cond());
-}
-
-/// Fait tourner l'interface pendant `duration` au plus ; renvoie vrai si `cond` est devenue vraie.
-fn becomes_true(h: &mut Harness<'static, DragonTreeApp>, duration: Duration, mut cond: impl FnMut() -> bool) -> bool {
-    let deadline = Instant::now() + duration;
-    while Instant::now() < deadline {
-        h.step();
-        if cond() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    false
-}
 
 /// Texte copié dans le presse-papiers pendant les prochaines images.
 fn copied_text(h: &mut Harness<'static, DragonTreeApp>) -> Option<String> {
@@ -122,15 +24,39 @@ fn copied_text(h: &mut Harness<'static, DragonTreeApp>) -> Option<String> {
     None
 }
 
-/// Un champ de saisie contient exactement `value`.
-fn has_text_input(h: &Harness<'static, DragonTreeApp>, value: &str) -> bool {
-    h.query_by(|n| n.role() == egui::accesskit::Role::TextInput && n.value().as_deref() == Some(value)).is_some()
-}
-
 /// Le champ « Résumé du commit » est vide (son texte indicatif est alors exposé).
 fn subject_is_empty(h: &Harness<'static, DragonTreeApp>) -> bool {
     h.query_by(|n| n.placeholder() == Some("Résumé du commit (obligatoire)"))
         .is_some_and(|n| n.accesskit_node().value().unwrap_or_default().is_empty())
+}
+
+/// Contrainte 6 du plan : sans rien demander, les helpers des tests d'interface (dépôt de test, commandes git, harnais)
+/// isolent la configuration git globale. git, celui du test comme celui de l'application (même environnement de
+/// processus), lit pour la portée globale un fichier temporaire et lui seul, jamais le `~/.gitconfig` de
+/// l'utilisateur.
+#[test]
+fn ui_tests_never_read_the_users_global_git_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = demo_repo(tmp.path());
+    let mut h = harness(StartOptions { open: vec![repo.clone()], ..start(tmp.path()) });
+    wait_until(&mut h, "dépôt chargé", |h| h.query_by_label("main").is_some());
+    // Vérifié avant toute écriture : en cas d'échec, rien n'est écrit dans la vraie configuration.
+    let global = std::env::var_os("GIT_CONFIG_GLOBAL")
+        .map(PathBuf::from)
+        .filter(|f| f.starts_with(std::env::temp_dir()))
+        .expect("GIT_CONFIG_GLOBAL désigne un fichier du dossier temporaire");
+    for var in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME"] {
+        assert_eq!(std::env::var_os(var).map(PathBuf::from).as_deref(), global.parent(), "{var} temporaire");
+    }
+
+    git(&repo, &["config", "--global", "dragontree.isolation", "oui"]);
+    let scopes = git(&repo, &["config", "--list", "--show-scope", "--show-origin"]);
+    let global_lines: Vec<&str> = scopes.lines().filter(|l| l.starts_with("global\t")).collect();
+    assert!(
+        global_lines.iter().any(|l| l.ends_with("dragontree.isolation=oui")),
+        "clé lue en portée globale : {scopes}"
+    );
+    assert!(global_lines.iter().all(|l| origin_is(l, &global)), "portée globale lue hors de {global:?} : {scopes}");
 }
 
 #[test]
@@ -315,10 +241,7 @@ fn conflicted_repo(base: &Path) -> PathBuf {
     commit_file(&dir, "config.ini", "ligne 1\nvaleur = 42\nligne 3\n", "valeur 42");
     git(&dir, &["checkout", "-q", "main"]);
     commit_file(&dir, "config.ini", "ligne 1\nvaleur = 7\nligne 3\n", "valeur 7");
-    assert!(
-        Git::discover().unwrap().cmd(&dir).args(["merge", "feature/reglages"]).run().is_err(),
-        "le merge doit être en conflit"
-    );
+    assert!(test_git().cmd(&dir).args(["merge", "feature/reglages"]).run().is_err(), "le merge doit être en conflit");
     dir
 }
 

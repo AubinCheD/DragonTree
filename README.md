@@ -262,6 +262,9 @@ temporaires (y compris remotes locaux), API des forges sur des réponses JSON re
 d'interface de bout en bout (egui_kittest : indexer puis commiter, indexer un hunk, ouvrir un dépôt depuis la
 liste, créer une branche, résoudre un conflit, rebase interactif, stash/pop, annulation, menus, worktrees, bisect,
 Git Flow, LFS, commandes personnalisées, pull requests de tous les comptes).
+Les tests ne lisent jamais votre configuration git globale : les helpers communs font désigner à `GIT_CONFIG_GLOBAL`,
+`HOME` et `USERPROFILE` un dossier temporaire avant toute commande git (la configuration système de Git pour Windows
+reste lue).
 Tests réels facultatifs (ignorés par défaut) : `cargo test -- --ignored` avec les variables décrites en tête
 des fichiers `tests/live*.rs`.
 

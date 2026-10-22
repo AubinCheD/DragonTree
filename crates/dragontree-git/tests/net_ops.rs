@@ -106,7 +106,7 @@ fn clone_reports_progress_and_init_works() {
 
 #[test]
 fn clone_bad_url_fails_without_hanging() {
-    let git = dragontree_git::Git::discover().unwrap();
+    let git = common::git();
     let work = tempfile::tempdir().unwrap();
     let err = clone_repo(
         &git,

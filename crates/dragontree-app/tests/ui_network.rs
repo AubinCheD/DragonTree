@@ -1,21 +1,13 @@
 //! Push, fetch et pull depuis la barre d'outils, avec un remote local (bare).
 
-use std::path::Path;
-use std::time::{Duration, Instant};
+mod common;
 
+use std::path::Path;
+
+use common::{git, harness, start, try_git, wait_until};
 use dragontree_app::{DragonTreeApp, StartOptions};
-use dragontree_git::Git;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    Git::discover().unwrap().cmd(dir).args(args).run().unwrap_or_else(|e| panic!("git {args:?} : {e}")).stdout_str()
-}
-
-/// Comme `git`, pour une attente : `None` si git échoue pendant que l'application modifie le dépôt.
-fn try_git(dir: &Path, args: &[&str]) -> Option<String> {
-    Git::discover().unwrap().cmd(dir).args(args).run().ok().map(|o| o.stdout_str())
-}
 
 fn configure(dir: &Path) {
     for (k, v) in [
@@ -26,22 +18,6 @@ fn configure(dir: &Path) {
     ] {
         git(dir, &["config", k, v]);
     }
-}
-
-fn wait_until(
-    h: &mut Harness<'static, DragonTreeApp>,
-    what: &str,
-    mut cond: impl FnMut(&Harness<'static, DragonTreeApp>) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(40);
-    while Instant::now() < deadline {
-        h.step();
-        if cond(h) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    panic!("délai dépassé en attendant : {what}");
 }
 
 fn enabled(h: &Harness<'static, DragonTreeApp>, label: &str) -> bool {
@@ -69,16 +45,7 @@ fn push_fetch_pull_from_toolbar() {
     git(&work, &["add", "-A"]);
     git(&work, &["commit", "-q", "-m", "local à pousser"]);
 
-    let start = StartOptions {
-        open: vec![work.clone()],
-        view: Some("history".into()),
-        profile_dir: Some(tmp.path().join("profil")),
-        screenshot_after: Duration::ZERO,
-        lang: Some(dragontree_i18n::Lang::Fr),
-        ..Default::default()
-    };
-    let mut h =
-        Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| DragonTreeApp::new(cc, start));
+    let mut h = harness(StartOptions { open: vec![work.clone()], view: Some("history".into()), ..start(tmp.path()) });
 
     // Push : bouton de la barre d'outils puis bouton du dialogue (même libellé).
     wait_until(&mut h, "Push actif", |h| enabled(h, "Push") && h.query_by_label("local à pousser").is_some());
@@ -127,16 +94,7 @@ fn amend_with_push_after_never_force_pushes() {
     let pushed = git(&bare, &["rev-parse", "main"]).trim().to_string();
     std::fs::write(work.join("b.txt"), "b\n").unwrap();
 
-    let start = StartOptions {
-        open: vec![work.clone()],
-        view: Some("changes".into()),
-        profile_dir: Some(tmp.path().join("profil")),
-        screenshot_after: Duration::ZERO,
-        lang: Some(dragontree_i18n::Lang::Fr),
-        ..Default::default()
-    };
-    let mut h =
-        Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| DragonTreeApp::new(cc, start));
+    let mut h = harness(StartOptions { open: vec![work.clone()], view: Some("changes".into()), ..start(tmp.path()) });
 
     wait_until(&mut h, "bouton « Tout indexer »", |h| h.query_by_label_contains("Tout indexer").is_some());
     h.get_by_label_contains("Tout indexer").click();

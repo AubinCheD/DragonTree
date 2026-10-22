@@ -643,9 +643,8 @@ mod tests {
 
     #[test]
     fn an_external_diff_extracts_both_versions_and_runs_the_fake_tool_on_them() {
-        use dragontree_git::Git;
         let dir = tempfile::tempdir().unwrap();
-        let git = Git::discover().unwrap();
+        let git = crate::test_git();
         let repo_dir = dir.path().join("depot");
         std::fs::create_dir_all(&repo_dir).unwrap();
         let run = |args: &[&str]| git.cmd(&repo_dir).args(args).run().unwrap().stdout_str();

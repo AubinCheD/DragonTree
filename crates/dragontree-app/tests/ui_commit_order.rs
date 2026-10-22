@@ -7,7 +7,6 @@ use std::path::Path;
 use common::*;
 use dragontree_app::StartOptions;
 use dragontree_app::settings::Settings;
-use dragontree_git::Git;
 use egui_kittest::kittest::Queryable;
 
 /// Commit daté (auteur et committeur) à `ts` secondes depuis l'époque.
@@ -19,8 +18,7 @@ fn commit_at(dir: &Path, file: &str, msg: &str, ts: i64) {
 
 fn run_dated(dir: &Path, args: &[&str], ts: i64) {
     let date = format!("@{ts} +0000");
-    Git::discover()
-        .unwrap()
+    test_git()
         .cmd(dir)
         .env("GIT_AUTHOR_DATE", &date)
         .env("GIT_COMMITTER_DATE", &date)

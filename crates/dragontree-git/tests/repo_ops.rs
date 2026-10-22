@@ -20,6 +20,31 @@ fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
     norm(a) == norm(b)
 }
 
+/// Contrainte 6 du plan : sans rien demander, un dépôt de test isole la configuration git globale ; git lit pour la
+/// portée globale un fichier temporaire et lui seul, jamais le `~/.gitconfig` de l'utilisateur.
+#[test]
+fn test_repositories_never_read_the_users_global_git_config() {
+    let t = TestRepo::new();
+    // Vérifié avant toute écriture : en cas d'échec, rien n'est écrit dans la vraie configuration.
+    let global = std::env::var_os("GIT_CONFIG_GLOBAL")
+        .map(std::path::PathBuf::from)
+        .filter(|f| f.starts_with(std::env::temp_dir()))
+        .expect("GIT_CONFIG_GLOBAL désigne un fichier du dossier temporaire");
+    assert_eq!(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref(), global.parent(), "HOME temporaire");
+
+    t.run(&["config", "--global", "dragontree.isolation", "oui"]);
+    let scopes = t.run(&["config", "--list", "--show-scope", "--show-origin"]);
+    let global_lines: Vec<&str> = scopes.lines().filter(|l| l.starts_with("global\t")).collect();
+    assert!(
+        global_lines.iter().any(|l| l.ends_with("dragontree.isolation=oui")),
+        "clé lue en portée globale : {scopes}"
+    );
+    assert!(
+        global_lines.iter().all(|l| common::origin_is(l, &global)),
+        "portée globale lue hors de {global:?} : {scopes}"
+    );
+}
+
 #[test]
 fn open_from_subdir_finds_toplevel() {
     let t = TestRepo::new();
@@ -49,7 +74,7 @@ fn a_linked_worktree_knows_the_root_of_the_main_worktree() {
 #[test]
 fn open_non_repo_reports_not_a_repository() {
     let dir = tempfile::tempdir().unwrap();
-    let git = dragontree_git::Git::discover().unwrap();
+    let git = common::git();
     match Repo::open(&git, dir.path()) {
         Err(GitError::NotARepository { .. }) => {}
         other => panic!("attendu NotARepository, obtenu {other:?}"),
@@ -497,7 +522,7 @@ fn submodules_empty_without_gitmodules() {
 #[ignore]
 fn real_repo_smoke_timings() {
     let Ok(path) = std::env::var("DRAGONTREE_REAL_REPO") else { return };
-    let git = dragontree_git::Git::discover().unwrap();
+    let git = common::git();
     let t0 = std::time::Instant::now();
     let repo = Repo::open(&git, std::path::Path::new(&path)).unwrap();
     let t_open = t0.elapsed();

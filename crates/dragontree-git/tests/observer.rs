@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 
-use dragontree_git::Git;
+mod common;
+
+use common::git;
 use dragontree_git::runner::{CommandRecord, set_command_observer};
 
 static SEEN: Mutex<Vec<CommandRecord>> = Mutex::new(Vec::new());
@@ -9,7 +11,7 @@ static SEEN: Mutex<Vec<CommandRecord>> = Mutex::new(Vec::new());
 fn observer_receives_every_command() {
     assert!(set_command_observer(|r| SEEN.lock().unwrap().push(r.clone())));
     let dir = tempfile::tempdir().unwrap();
-    let git = Git::discover().unwrap();
+    let git = git();
     git.cmd(dir.path()).args(["init", "-q"]).run().unwrap();
     let _ = git.cmd(dir.path()).read_only().args(["rev-parse", "--verify", "nope"]).run();
     let cut = git.cmd(dir.path()).read_only().arg("--version").stdout_limit(4).run().unwrap();

@@ -1,6 +1,8 @@
 //! Langue de l'interface : choisie au démarrage, puis changée dans les réglages sans redémarrer.
 //! Binaire de test à part : la langue est globale au processus et les autres tests attendent le français.
 
+mod common;
+
 use std::time::{Duration, Instant};
 
 use dragontree_app::{DragonTreeApp, StartOptions};
@@ -37,8 +39,7 @@ fn language_can_be_switched_from_the_settings() {
         window: Some("settings".into()),
         ..Default::default()
     };
-    let mut h =
-        Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| DragonTreeApp::new(cc, start));
+    let mut h = common::harness(start);
 
     wait_until(&mut h, "interface en anglais", |h| h.query_by_label_contains("Open a repository").is_some());
     assert!(h.query_by_label_contains("Ouvrir un dépôt").is_none(), "texte français resté affiché");

@@ -292,7 +292,7 @@ impl RepoTab {
 
 #[cfg(test)]
 mod tests {
-    use dragontree_git::{ChangeKind, Git};
+    use dragontree_git::ChangeKind;
 
     use super::*;
     use crate::settings::SettingsFile;
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn a_result_from_a_replaced_window_is_ignored() {
         let dir = tempfile::tempdir().unwrap();
-        let git = Git::discover().unwrap();
+        let git = crate::test_git();
         git.cmd(dir.path()).args(["init", "-q"]).run().unwrap();
         let (store, settings, _) = SettingsFile::load(&dir.path().join("settings.json"));
         let (mut shared, _events) = Shared::new(egui::Context::default(), settings, store, None, None);

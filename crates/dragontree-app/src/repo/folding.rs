@@ -183,13 +183,13 @@ mod tests {
 
     #[test]
     fn a_fold_requested_before_the_first_refs_spares_head_once_they_arrive() {
-        use dragontree_git::{Git, Repo};
+        use dragontree_git::Repo;
 
         use crate::settings::SettingsFile;
 
         // HEAD sur `feature`, que main a fusionnée ; `ancienne`, fusionnée aussi, existe encore.
         let dir = tempfile::tempdir().unwrap();
-        let git = Git::discover().unwrap();
+        let git = crate::test_git();
         let run = |args: &[&str]| {
             let identity = ["-c", "user.name=Testeur", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
             git.cmd(dir.path()).args(identity).args(args).run().unwrap_or_else(|e| panic!("git {args:?} : {e}"));

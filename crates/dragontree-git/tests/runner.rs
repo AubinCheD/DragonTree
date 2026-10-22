@@ -1,10 +1,9 @@
 use std::time::{Duration, Instant};
 
-use dragontree_git::{CancelToken, Git, GitError};
+mod common;
 
-fn git() -> Git {
-    Git::discover().expect("git doit être installé pour les tests")
-}
+use common::git;
+use dragontree_git::{CancelToken, GitError};
 
 #[test]
 fn runner_reports_version() {

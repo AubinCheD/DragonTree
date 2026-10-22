@@ -554,7 +554,7 @@ mod tests {
     use std::sync::mpsc::{self, Receiver};
     use std::sync::{Arc, Mutex};
 
-    use dragontree_git::{CancelToken, Git, Remote};
+    use dragontree_git::{CancelToken, Remote};
 
     use super::*;
     use crate::app::TabId;
@@ -562,7 +562,7 @@ mod tests {
 
     /// État partagé (sans git : aucune tâche d'ouverture) et onglets ouverts sur un même dépôt temporaire.
     fn tabs_on_one_repo(dir: &std::path::Path, ids: &[TabId]) -> (Shared, Receiver<AppEvent>, Vec<RepoTab>) {
-        let git = Git::discover().unwrap();
+        let git = crate::test_git();
         git.cmd(dir).args(["init", "-q"]).run().unwrap();
         let (store, settings, _) = SettingsFile::load(&dir.join("settings.json"));
         let (mut shared, events) = Shared::new(egui::Context::default(), settings, store, None, None);
@@ -772,7 +772,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut shared, events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
         let tab = &mut tabs[0];
-        let git = Git::discover().unwrap();
+        let git = crate::test_git();
         git.cmd(dir.path()).args(["remote", "add", "origin", "https://forge.test/contoso/depot.git"]).run().unwrap();
         let remotes = || git.cmd(dir.path()).arg("remote").run().unwrap().stdout_str();
         let (started_tx, started_rx) = mpsc::channel();
