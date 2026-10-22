@@ -56,6 +56,9 @@ pub enum ThemeChoice {
     Dark,
 }
 
+/// Nombre de dépôts récents gardés (voir [`Settings::push_recent`]).
+pub const RECENT_REPOS_MAX: usize = 20;
+
 /// Nombre de messages de commit gardés par dépôt (« Messages récents »).
 pub const RECENT_MESSAGES_MAX: usize = 20;
 
@@ -272,11 +275,39 @@ pub struct SettingsFile {
     unread: Option<Unread>,
 }
 
-/// Fichier pas encore lu : réglages de départ de la session et dernière erreur de lecture.
+/// Fichier pas encore écrit par la session : réglages de départ de la fusion (ceux par défaut, puis ceux du fichier
+/// relu si leur écriture a échoué) et pourquoi les modifications de la session ne l'ont pas atteint.
 #[derive(Debug, Clone)]
 struct Unread {
     base: Settings,
-    error: String,
+    error: Pending,
+}
+
+/// Pourquoi les modifications de la session n'ont pas atteint le fichier de réglages (voir [`SettingsFile::pending`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pending {
+    /// Le fichier n'a pas pu être lu : message d'erreur.
+    Unreadable(String),
+    /// Le fichier a été relu, mais la fusion n'a pas pu y être écrite : message d'erreur.
+    WriteFailed(String),
+}
+
+impl Pending {
+    /// Phrase qui l'explique, pour le fichier `path`.
+    pub fn describe(&self, path: &Path) -> String {
+        match self {
+            Pending::Unreadable(error) => tr!(
+                "{path} n'a pas pu être lu ({error}) : vos modifications des réglages ne sont pas enregistrées, pour ne pas l'écraser.",
+                path = path.display(),
+                error
+            ),
+            Pending::WriteFailed(error) => tr!(
+                "{path} a été relu, mais vos modifications des réglages n'ont pas pu y être écrites ({error}).",
+                path = path.display(),
+                error
+            ),
+        }
+    }
 }
 
 /// Résultat de [`SettingsFile::save`].
@@ -287,9 +318,12 @@ pub enum Saved {
     /// Fichier illisible au démarrage enfin relu : réglages fusionnés (voir [`merge_session`]) et écrits, à reprendre
     /// dans la session.
     Recovered(Box<Settings>),
+    /// Fichier illisible au démarrage, relu, mais la fusion n'a pas pu être écrite : réglages fusionnés à reprendre dans
+    /// la session ; nouvel essai au prochain enregistrement (voir [`SettingsFile::pending`]).
+    ReadNotWritten(Box<Settings>),
     /// Fichier illisible au démarrage, relu invalide et mis de côté : réglages de la session écrits ; message à afficher.
     SetAside(String),
-    /// Fichier toujours illisible : rien n'est écrit.
+    /// Fichier toujours illisible, ou écriture impossible : rien n'est écrit.
     NotWritten,
 }
 
@@ -350,7 +384,8 @@ impl SettingsFile {
                     e,
                     path = path.display()
                 );
-                (file(Some(Unread { base: Settings::default(), error: e })), Settings::default(), Some(msg))
+                let unread = Unread { base: Settings::default(), error: Pending::Unreadable(e) };
+                (file(Some(unread)), Settings::default(), Some(msg))
             }
         }
     }
@@ -359,44 +394,59 @@ impl SettingsFile {
         &self.path
     }
 
-    /// Dernière erreur de lecture, tant que le fichier n'a pas pu être lu.
-    pub fn read_error(&self) -> Option<&str> {
-        self.unread.as_ref().map(|u| u.error.as_str())
+    /// Pourquoi les modifications de la session n'ont pas encore atteint le fichier, tant qu'il n'a pas été écrit.
+    pub fn pending(&self) -> Option<&Pending> {
+        self.unread.as_ref().map(|u| &u.error)
     }
 
-    /// Vrai si `settings` contient des modifications de la session que le fichier, pas encore lu, n'a pas reçues.
+    /// Vrai si `settings` contient des modifications de la session que le fichier, pas encore écrit, n'a pas reçues.
     pub fn unsaved(&self, settings: &Settings) -> bool {
         self.unread.as_ref().is_some_and(|u| u.base != *settings)
     }
 
     /// Enregistre `settings`. Si le fichier n'a pas pu être lu au démarrage, il est d'abord relu : toujours illisible,
     /// rien n'est écrit ; relu, la fusion de ses réglages et de ceux de la session est écrite et renvoyée ; absent ou
-    /// mis de côté, les réglages de la session sont écrits.
+    /// mis de côté, les réglages de la session sont écrits. Dans ce mode, un échec d'écriture n'est pas une erreur : il
+    /// est retenu (voir [`SettingsFile::pending`]) et l'enregistrement suivant réessaie.
     pub fn save(&mut self, settings: &Settings) -> std::io::Result<Saved> {
         let Some(unread) = &mut self.unread else {
             settings.save_to(&self.path)?;
             return Ok(Saved::Written);
         };
+        let failed = |e: std::io::Error| Pending::WriteFailed(e.to_string());
         let saved = match read(&self.path) {
             Read::Unreadable(e) => {
-                unread.error = e;
+                unread.error = Pending::Unreadable(e);
                 return Ok(Saved::NotWritten);
             }
-            Read::Absent => {
-                settings.save_to(&self.path)?;
-                Saved::Written
-            }
-            Read::SetAside(e, backup) => {
-                settings.save_to(&self.path)?;
-                Saved::SetAside(tr!(
+            Read::Absent => match settings.save_to(&self.path) {
+                Ok(()) => Saved::Written,
+                Err(e) => {
+                    unread.error = failed(e);
+                    return Ok(Saved::NotWritten);
+                }
+            },
+            Read::SetAside(e, backup) => match settings.save_to(&self.path) {
+                Ok(()) => Saved::SetAside(tr!(
                     "Réglages relus invalides ({e}) : fichier mis de côté dans {backup} — réglages de cette session enregistrés.",
                     e,
                     backup = backup.display()
-                ))
-            }
+                )),
+                // Le fichier a été mis de côté : l'essai suivant le trouvera absent.
+                Err(write) => {
+                    unread.error = failed(write);
+                    return Ok(Saved::NotWritten);
+                }
+            },
             Read::Valid(theirs) => {
                 let merged = merge_session(&unread.base, settings, &theirs);
-                merged.save_to(&self.path)?;
+                if let Err(e) = merged.save_to(&self.path) {
+                    // Relu mais pas écrit : la session reprend la fusion, et le fichier tel que lu devient le départ de
+                    // la fusion suivante (ses modifications ultérieures restent alors les siennes).
+                    unread.base = *theirs;
+                    unread.error = failed(e);
+                    return Ok(Saved::ReadNotWritten(Box::new(merged)));
+                }
                 Saved::Recovered(Box::new(merged))
             }
         };
@@ -411,10 +461,12 @@ impl SettingsFile {
 /// - Un réglage que la session n'a pas changé prend la valeur du fichier ; un réglage changé garde celle de la session.
 /// - Tables (réglages par dépôt, espaces de travail…) : la même règle, entrée par entrée.
 /// - Listes (dépôts récents, favoris, comptes, dossiers scannés, commandes…) : ce que la session a ajouté, en tête,
-///   puis la liste du fichier sans ce que la session a retiré.
-///
-/// Onglets ouverts et onglet actif suivent la même règle ; l'application les réécrit d'après ses onglets au prochain
-/// enregistrement périodique.
+///   puis la liste du fichier sans ce que la session a retiré. Sans doublon : un chemin écrit autrement (casse,
+///   séparateurs) ou un compte ajouté des deux côtés (même forge, hôte et identifiant) ne compte qu'une fois, celui de
+///   la session gardé ; les dépôts associés au compte du fichier passent à celui de la session.
+/// - Onglets ouverts, onglet actif et espace de travail actif décrivent la fenêtre : ceux de la session. Si le fichier
+///   avait un autre espace actif, ses onglets ouverts y sont rangés ; l'espace que la fenêtre affiche prend les onglets
+///   de la fenêtre, comme dans toute session.
 pub fn merge_session(base: &Settings, mine: &Settings, theirs: &Settings) -> Settings {
     use serde_json::Value;
     let json = |s: &Settings| serde_json::to_value(s).ok();
@@ -422,7 +474,9 @@ pub fn merge_session(base: &Settings, mine: &Settings, theirs: &Settings) -> Set
         let merged = merge_value(Some(&json(base)?), &json(mine)?, Some(&json(theirs)?))?;
         serde_json::from_value(merged).ok()
     };
-    // Forme inattendue (énumération à données fusionnée entrée par entrée…) : la règle au premier niveau seulement.
+    // Forme inattendue (énumération à données fusionnée entrée par entrée…) : la règle au premier niveau seulement ;
+    // un réglage changé par la session y prend sa valeur entière, table ou liste comprise, sans les entrées que le
+    // fichier y avait.
     let shallow = || {
         let (Value::Object(b), Value::Object(m), Value::Object(t)) = (json(base)?, json(mine)?, json(theirs)?) else {
             return None;
@@ -434,14 +488,73 @@ pub fn merge_session(base: &Settings, mine: &Settings, theirs: &Settings) -> Set
         });
         serde_json::from_value(Value::Object(fields.collect())).ok()
     };
-    // En dernier recours, le fichier tel quel : les modifications de la session sont perdues, jamais le fichier.
+    // En dernier recours (réglages qui ne se relisent pas), le fichier tel quel : les modifications de la session sont
+    // alors perdues.
     let mut merged: Settings = deep().or_else(shallow).unwrap_or_else(|| theirs.clone());
+    window_state_of_the_session(&mut merged, mine, theirs);
+    for paths in [&mut merged.scan_roots, &mut merged.favorites, &mut merged.hidden_repos, &mut merged.recent_repos] {
+        dedup_paths(paths);
+    }
+    for workspace in merged.workspaces.values_mut() {
+        dedup_paths(&mut workspace.tabs);
+    }
+    dedup_accounts(&mut merged);
     // Plafonds des listes (voir `push_recent` et `remember_message`).
-    merged.recent_repos.truncate(20);
+    merged.recent_repos.truncate(RECENT_REPOS_MAX);
     for list in merged.recent_messages.values_mut() {
         list.truncate(RECENT_MESSAGES_MAX);
     }
     merged
+}
+
+/// Onglets ouverts, onglet actif et espace actif de la fusion : ceux de la fenêtre (`mine`). Les onglets que le fichier
+/// avait ouverts dans un autre espace y sont rangés, après ceux que la session y a rangés ; l'espace affiché par la
+/// fenêtre n'a pas d'onglets rangés (ses onglets sont `open_tabs`).
+fn window_state_of_the_session(merged: &mut Settings, mine: &Settings, theirs: &Settings) {
+    merged.open_tabs = mine.open_tabs.clone();
+    merged.active_tab = mine.active_tab;
+    merged.current_workspace = mine.current_workspace.clone();
+    if theirs.current_workspace != mine.current_workspace {
+        let stored = merged.workspaces.entry(theirs.current_workspace.clone());
+        match stored {
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().tabs.extend(theirs.open_tabs.iter().cloned());
+            }
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry
+                    .insert(crate::workspaces::Workspace { tabs: theirs.open_tabs.clone(), active: theirs.active_tab });
+            }
+        }
+    }
+    merged.workspaces.remove(&mine.current_workspace);
+}
+
+/// Retire les chemins en double (même chemin écrit autrement, voir [`path_key`]) ; le premier est gardé.
+fn dedup_paths(paths: &mut Vec<PathBuf>) {
+    let mut seen = std::collections::HashSet::new();
+    paths.retain(|p| seen.insert(path_key(p)));
+}
+
+/// Retire les comptes en double (même connexion, voir `Account::same_login`) ; le premier est gardé (celui de la
+/// session, en tête après la fusion) et les dépôts associés à un compte retiré passent à celui qui est gardé. Le jeton
+/// du compte retiré reste dans le Gestionnaire d'identifiants.
+fn dedup_accounts(merged: &mut Settings) {
+    let mut kept: Vec<Account> = Vec::new();
+    let mut replaced = BTreeMap::new();
+    for account in std::mem::take(&mut merged.accounts) {
+        match kept.iter().find(|k| k.same_login(&account)) {
+            Some(k) => {
+                replaced.insert(account.id, k.id.clone());
+            }
+            None => kept.push(account),
+        }
+    }
+    merged.accounts = kept;
+    for id in merged.repo_accounts.values_mut() {
+        if let Some(new) = replaced.get(id) {
+            *id = new.clone();
+        }
+    }
 }
 
 /// Fusion à trois d'une valeur JSON (voir [`merge_session`]) ; `None` : entrée absente du résultat.
@@ -515,12 +628,12 @@ impl Settings {
         std::fs::rename(&tmp, path)
     }
 
-    /// Mémorise un dépôt ouvert récemment (20 au plus, le plus récent en tête).
+    /// Mémorise un dépôt ouvert récemment ([`RECENT_REPOS_MAX`] au plus, le plus récent en tête).
     pub fn push_recent(&mut self, path: &Path) {
         let key = path_key(path);
         self.recent_repos.retain(|p| path_key(p) != key);
         self.recent_repos.insert(0, path.to_path_buf());
-        self.recent_repos.truncate(20);
+        self.recent_repos.truncate(RECENT_REPOS_MAX);
     }
 
     pub fn is_favorite(&self, path: &Path) -> bool {
@@ -702,7 +815,7 @@ mod tests {
         let (mut store, mut settings, error) = SettingsFile::load(&file);
         assert_eq!(settings, Settings::default());
         assert!(error.is_some(), "l'erreur de lecture est signalée");
-        assert!(store.read_error().is_some());
+        assert!(matches!(store.pending(), Some(Pending::Unreadable(_))));
         assert!(!store.unsaved(&settings), "rien de modifié pour l'instant");
 
         // Modifications de la session, fichier toujours verrouillé : rien n'est écrit.
@@ -722,7 +835,7 @@ mod tests {
         assert!(!merged.show_remote_branches, "réglage changé pendant la session : celui de la session");
         assert_eq!(merged.favorites, [PathBuf::from(r"C:\DEV\Contoso"), PathBuf::from(r"C:\DEV\Fabrikam")]);
         assert_eq!(Settings::load_from(&file), *merged, "fusion écrite");
-        assert!(store.read_error().is_none() && !store.unsaved(&merged));
+        assert!(store.pending().is_none() && !store.unsaved(&merged));
         assert_eq!(store.save(&merged).unwrap(), Saved::Written, "ensuite, enregistrements habituels");
     }
 
@@ -760,7 +873,8 @@ mod tests {
     fn the_merge_keeps_the_file_values_the_session_did_not_change() {
         use crate::external_tools::ToolPreset;
         let base = Settings::default();
-        let account = |id: &str| Account { id: id.into(), ..account("x") };
+        // Deux connexions différentes (identifiants distincts) : voir le test des doublons pour la même.
+        let account = |id: &str| Account { id: id.into(), username: id.into(), ..account("x") };
         let repo_a = Path::new(r"C:\DEV\Fabrikam");
         let repo_b = Path::new(r"C:\DEV\Contoso");
         let mut theirs = Settings {
@@ -810,9 +924,118 @@ mod tests {
         for i in 0..20 {
             many.push_recent(&PathBuf::from(format!(r"C:\DEV\r{i}")));
         }
-        assert_eq!(merge_session(&base, &many, &theirs).recent_repos.len(), 20);
+        assert_eq!(merge_session(&base, &many, &theirs).recent_repos.len(), RECENT_REPOS_MAX);
     }
 
+    /// Onglets ouverts, onglet actif et espace actif sont ceux de la fenêtre ; les onglets ouverts du fichier dans un
+    /// autre espace y sont rangés, rien du fichier n'est perdu.
+    #[test]
+    fn the_merge_keeps_the_window_tabs_and_stores_the_file_tabs_in_their_workspace() {
+        use crate::workspaces::{DEFAULT_WORKSPACE, Workspace};
+        let tabs = |names: &[&str]| names.iter().map(|n| PathBuf::from(format!(r"C:\DEV\{n}"))).collect::<Vec<_>>();
+        let base = Settings::default();
+        // Fichier : espace « Travail » actif, deux onglets ; « Par défaut » rangé.
+        let theirs = Settings {
+            current_workspace: "Travail".into(),
+            open_tabs: tabs(&["Fabrikam", "Contoso"]),
+            active_tab: 1,
+            workspaces: BTreeMap::from([(DEFAULT_WORKSPACE.into(), Workspace { tabs: tabs(&["Ancien"]), active: 0 })]),
+            ..Settings::default()
+        };
+        // Fenêtre : espace « Par défaut », un onglet.
+        let mine = Settings { open_tabs: tabs(&["Northwind"]), ..base.clone() };
+        let merged = merge_session(&base, &mine, &theirs);
+        assert_eq!(merged.open_tabs, tabs(&["Northwind"]), "onglets de la fenêtre");
+        assert_eq!((merged.active_tab, merged.current_workspace.as_str()), (0, DEFAULT_WORKSPACE));
+        let stored = Workspace { tabs: tabs(&["Fabrikam", "Contoso"]), active: 1 };
+        assert_eq!(merged.workspaces.get("Travail"), Some(&stored), "onglets du fichier rangés dans leur espace");
+        assert!(!merged.workspaces.contains_key(DEFAULT_WORKSPACE), "l'espace affiché a les onglets de la fenêtre");
+        // Les onglets de la fenêtre restent rangés sous son espace quand on en change.
+        let mut switched = merged.clone();
+        assert!(switched.switch_workspace("Travail"));
+        assert_eq!((switched.open_tabs, switched.active_tab), (tabs(&["Fabrikam", "Contoso"]), 1));
+        assert_eq!(switched.workspaces[DEFAULT_WORKSPACE].tabs, tabs(&["Northwind"]));
+
+        // La session avait aussi rangé des onglets dans « Travail » : les siens d'abord, puis ceux du fichier, sans
+        // doublon (même dépôt écrit autrement).
+        let mut mine = mine.clone();
+        let session_stored = vec![PathBuf::from(r"c:\dev\contoso\"), PathBuf::from(r"C:\DEV\Tailspin")];
+        mine.workspaces.insert("Travail".into(), Workspace { tabs: session_stored, active: 1 });
+        let merged = merge_session(&base, &mine, &theirs);
+        let travail = &merged.workspaces["Travail"];
+        assert_eq!(
+            travail.tabs,
+            [PathBuf::from(r"c:\dev\contoso\"), tabs(&["Tailspin"])[0].clone(), tabs(&["Fabrikam"])[0].clone()]
+        );
+        assert_eq!(travail.active, 1, "onglet actif rangé par la session");
+    }
+
+    /// Un chemin écrit autrement ou un compte ajouté des deux côtés ne compte qu'une fois, celui de la session gardé.
+    #[test]
+    fn the_merge_has_no_duplicate_path_or_account() {
+        let base = Settings::default();
+        let login = |id: &str, host: &str, username: &str| Account {
+            id: id.into(),
+            host: host.into(),
+            username: username.into(),
+            ..account("x")
+        };
+        let repo = Path::new(r"C:\DEV\Fabrikam");
+        let mut theirs = Settings {
+            accounts: vec![login("compte-fichier", "github.com", "ada"), login("autre", "github.com", "grace")],
+            scan_roots: vec![PathBuf::from(r"C:\DEV")],
+            recent_repos: vec![PathBuf::from("c:/dev/fabrikam/"), PathBuf::from(r"C:\DEV\Contoso")],
+            ..Settings::default()
+        };
+        theirs.set_account_for_repo(repo, Some("compte-fichier"));
+        let mut mine = base.clone();
+        mine.accounts.push(login("compte-session", "https://GitHub.com/", "Ada"));
+        mine.scan_roots.push(PathBuf::from(r"c:\dev\"));
+        mine.push_recent(repo);
+
+        let merged = merge_session(&base, &mine, &theirs);
+        let ids: Vec<_> = merged.accounts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["compte-session", "autre"], "même connexion : le compte de la session");
+        assert_eq!(merged.account_for_repo(repo).map(|a| a.id.as_str()), Some("compte-session"), "association reprise");
+        assert_eq!(merged.scan_roots, [PathBuf::from(r"c:\dev\")]);
+        assert_eq!(merged.recent_repos, [repo, Path::new(r"C:\DEV\Contoso")]);
+    }
+
+    /// Relu mais impossible à écrire : rien n'est écrit, la session reprend la fusion, l'erreur d'écriture est retenue ;
+    /// l'essai suivant fusionne avec le fichier tel qu'il est alors.
+    #[cfg(windows)]
+    #[test]
+    fn a_settings_file_read_again_but_not_writable_is_retried_with_the_session_on_its_values() {
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        let original = r#"{"theme":"Dark","show_tags":false}"#;
+        std::fs::write(&file, original).unwrap();
+        let lock = hold_open(&file, 0);
+        let (mut store, mut settings, _) = SettingsFile::load(&file);
+        drop(lock);
+        settings.show_remote_branches = false;
+
+        // Lisible, mais un autre programme le tient ouvert sans le laisser remplacer.
+        let held = hold_open(&file, FILE_SHARE_READ);
+        let saved = store.save(&settings).unwrap();
+        let Saved::ReadNotWritten(merged) = saved else { panic!("relu sans écriture attendu : {saved:?}") };
+        drop(held);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original, "rien n'est écrit");
+        assert_eq!((merged.theme, merged.show_tags, merged.show_remote_branches), (ThemeChoice::Dark, false, false));
+        assert!(matches!(store.pending(), Some(Pending::WriteFailed(_))), "{:?}", store.pending());
+        assert!(store.unsaved(&merged), "la modification de la session attend toujours");
+        let only_the_file = Settings { show_remote_branches: true, ..(*merged).clone() };
+        assert!(!store.unsaved(&only_the_file), "les valeurs du fichier ne sont pas des modifications de la session");
+
+        // Le fichier change entre-temps (thème clair) : l'essai suivant le relit et garde la modification de la session.
+        std::fs::write(&file, r#"{"theme":"Light","show_tags":false}"#).unwrap();
+        let saved = store.save(&merged).unwrap();
+        let Saved::Recovered(again) = saved else { panic!("fichier écrit attendu : {saved:?}") };
+        assert_eq!((again.theme, again.show_tags, again.show_remote_branches), (ThemeChoice::Light, false, false));
+        assert_eq!(Settings::load_from(&file), *again);
+        assert!(store.pending().is_none());
+    }
     #[test]
     fn settings_tolerate_unknown_and_missing_fields() {
         let dir = tempfile::tempdir().unwrap();

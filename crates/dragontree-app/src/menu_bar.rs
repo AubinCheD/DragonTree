@@ -10,6 +10,7 @@ use egui::{Align, Align2, Atom, Atoms, Button, FontId, Layout, Response, RichTex
 
 use crate::commands::{self, Command, CommandContext, MENUS, MenuItem, submenu_disabled_hint};
 use crate::icons;
+use crate::settings::Pending;
 use crate::theme::Palette;
 
 /// Affiche la barre ; renvoie la commande choisie.
@@ -23,16 +24,16 @@ pub fn show(ui: &mut Ui, cx: &CommandContext) -> Option<Command> {
     chosen
 }
 
-/// Indicateur « Réglages non enregistrés » (L3), à droite de la barre : le fichier de réglages `path`, illisible au
-/// démarrage, n'a pas encore pu être relu (`error`), et des réglages ont été modifiés. Infobulle : le détail ; renvoie
-/// vrai au clic (nouvel essai demandé).
-pub fn unsaved_settings(ui: &mut Ui, path: &Path, error: &str, p: &Palette) -> bool {
+/// Indicateur « Réglages non enregistrés » (L3), à droite de la barre : des réglages ont été modifiés, mais le fichier
+/// de réglages `path`, illisible au démarrage, n'a pas encore pu les recevoir (`pending`). Infobulle : le détail ;
+/// renvoie vrai au clic (nouvel essai demandé).
+pub fn unsaved_settings(ui: &mut Ui, path: &Path, pending: &Pending, p: &Palette) -> bool {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         let text = format!("{} {}", icons::WARNING, tr!("Réglages non enregistrés"));
-        let detail = tr!(
-            "{path} n'a pas pu être lu ({error}) : vos modifications des réglages ne sont pas enregistrées, pour ne pas l'écraser. DragonTree le relit à chaque enregistrement et y ajoute alors vos modifications. Cliquez pour réessayer maintenant.",
-            path = path.display(),
-            error
+        let detail = format!(
+            "{} {}",
+            pending.describe(path),
+            tr!("DragonTree réessaie à chaque enregistrement. Cliquez pour réessayer maintenant.")
         );
         ui.add(Button::new(RichText::new(text).color(p.removed_fg)).frame(false)).on_hover_text(detail).clicked()
     })

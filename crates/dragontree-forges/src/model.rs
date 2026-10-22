@@ -71,6 +71,14 @@ impl Account {
     pub fn lacks_azure_orgs(&self) -> bool {
         self.kind == ForgeKind::AzureDevOps && crate::azure::clean_orgs(&self.orgs).is_empty()
     }
+
+    /// Même connexion que `other` (même forge, même hôte, même identifiant, sans tenir compte de la casse), quels que
+    /// soient l'identifiant interne (`id`, tiré au hasard à l'ajout) et les informations lues ensuite.
+    pub fn same_login(&self, other: &Account) -> bool {
+        self.kind == other.kind
+            && normalize_host(&self.host, self.kind) == normalize_host(&other.host, other.kind)
+            && self.username.trim().eq_ignore_ascii_case(other.username.trim())
+    }
 }
 
 /// Identité renvoyée par la vérification d'un jeton.
@@ -393,6 +401,16 @@ mod tests {
         }
         let unique: HashSet<&String> = ids.iter().collect();
         assert_eq!(unique.len(), ids.len());
+    }
+
+    #[test]
+    fn the_same_login_ignores_the_id_the_case_and_the_default_host_spelling() {
+        let ada = account(ForgeKind::GitHub, "", "ada", "Ada");
+        let again = Account { id: "autre".into(), ..account(ForgeKind::GitHub, "https://GitHub.com/", " Ada ", "") };
+        assert!(ada.same_login(&again));
+        assert!(!ada.same_login(&account(ForgeKind::GitHub, "", "grace", "")), "autre identifiant");
+        assert!(!ada.same_login(&account(ForgeKind::GitLab, "", "ada", "")), "autre forge");
+        assert!(!ada.same_login(&account(ForgeKind::GitHub, "github.contoso.test", "ada", "")), "autre hôte");
     }
 
     #[test]

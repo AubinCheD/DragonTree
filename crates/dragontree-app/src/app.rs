@@ -18,7 +18,7 @@ use crate::jobs::Jobs;
 use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsWindow};
 use crate::repo::{RepoEvent, RepoTab};
 use crate::repo_list::{RepoListState, ScanEvent};
-use crate::settings::{Saved, Settings, SettingsFile, ThemeChoice, path_key};
+use crate::settings::{Pending, Saved, Settings, SettingsFile, ThemeChoice, path_key};
 use crate::settings_ui::{SettingsTab, SettingsWindow};
 use crate::ssh_keys::{SshEvent, SshKeysWindow};
 use crate::tabbar::{self, TabBarAction, TabInfo};
@@ -212,19 +212,20 @@ impl Shared {
         }
     }
 
-    /// Réglages non enregistrés (L3) : erreur de lecture du fichier quand la session a modifié des réglages que le
-    /// fichier, illisible au démarrage et pas encore relu, n'a pas reçus (voir `SettingsFile`). Jamais en capture
-    /// d'écran, où rien n'est enregistré.
-    pub fn unsaved_settings(&self) -> Option<&str> {
+    /// Réglages non enregistrés (L3) : pourquoi, quand la session a modifié des réglages que le fichier, illisible au
+    /// démarrage et pas encore écrit, n'a pas reçus (voir `SettingsFile`). Jamais en capture d'écran, où rien n'est
+    /// enregistré.
+    pub fn unsaved_settings(&self) -> Option<&Pending> {
         if self.settings_read_only || !self.settings_store.unsaved(&self.settings) {
             return None;
         }
-        self.settings_store.read_error()
+        self.settings_store.pending()
     }
 
     /// Enregistre les réglages. Si le fichier n'a pas pu être lu au démarrage, il est relu d'abord (L3) : toujours
-    /// illisible, rien n'est écrit, une notification le dit à la première modification en attente et l'indicateur de
-    /// la barre de menus reste affiché ; relu, la session reprend la fusion de ses réglages et de ceux du fichier.
+    /// illisible (ou relu sans pouvoir être écrit), rien n'est écrit, une notification le dit à la première modification
+    /// en attente de la série et l'indicateur de la barre de menus reste affiché ; relu, la session reprend la fusion de
+    /// ses réglages et de ceux du fichier.
     pub fn save_settings(&mut self) {
         self.settings_dirty = false;
         if self.settings_read_only {
@@ -232,21 +233,10 @@ impl Shared {
         }
         match self.settings_store.save(&self.settings) {
             Ok(Saved::Written) => self.settings_unsaved_warned = false,
-            Ok(Saved::NotWritten) => {
-                if !self.settings_unsaved_warned
-                    && let Some(error) = self.unsaved_settings().map(str::to_string)
-                {
-                    self.settings_unsaved_warned = true;
-                    let path = self.settings_file();
-                    self.toasts.push(Toast::error(
-                        tr!("Modifications des réglages non enregistrées"),
-                        tr!(
-                            "{path} n'a pas pu être lu ({error}) : vos modifications des réglages ne sont pas enregistrées, pour ne pas l'écraser. Elles le seront dès qu'il pourra être relu (« Réglages non enregistrés », en haut à droite).",
-                            path = path.display(),
-                            error
-                        ),
-                    ));
-                }
+            Ok(Saved::NotWritten) => self.warn_unsaved_settings(),
+            Ok(Saved::ReadNotWritten(merged)) => {
+                self.adopt_settings(*merged);
+                self.warn_unsaved_settings();
             }
             Ok(Saved::Recovered(merged)) => {
                 self.settings_unsaved_warned = false;
@@ -261,6 +251,22 @@ impl Shared {
             }
             Err(e) => self.toasts.push(Toast::error(tr!("Impossible d'enregistrer les réglages"), e.to_string())),
         }
+    }
+
+    /// Modifications des réglages pas enregistrées : notifié une fois par série (jusqu'au prochain enregistrement
+    /// réussi) ; ensuite, seul l'indicateur de la barre de menus le montre.
+    fn warn_unsaved_settings(&mut self) {
+        if self.settings_unsaved_warned {
+            return;
+        }
+        let Some(pending) = self.unsaved_settings() else { return };
+        let detail = format!(
+            "{} {}",
+            pending.describe(&self.settings_file()),
+            tr!("Elles le seront dès que possible (« Réglages non enregistrés », en haut à droite).")
+        );
+        self.settings_unsaved_warned = true;
+        self.toasts.push(Toast::error(tr!("Modifications des réglages non enregistrées"), detail));
     }
 
     pub fn toast(&mut self, t: Toast) {
@@ -1267,7 +1273,7 @@ impl eframe::App for DragonTreeApp {
             self.window_title = title;
         }
 
-        let unsaved = self.shared.unsaved_settings().map(|error| (self.shared.settings_file(), error.to_string()));
+        let unsaved = self.shared.unsaved_settings().map(|pending| (self.shared.settings_file(), pending.clone()));
         let (chosen, retry) = egui::Panel::top("menu-bar")
             .frame(Frame::new().fill(p.sidebar).inner_margin(egui::Margin { left: 6, right: 6, top: 2, bottom: 0 }))
             .show(ui, |ui| {
@@ -1275,7 +1281,7 @@ impl eframe::App for DragonTreeApp {
                     let chosen = crate::menu_bar::show(ui, &self.command_context());
                     let retry = unsaved
                         .as_ref()
-                        .is_some_and(|(path, error)| crate::menu_bar::unsaved_settings(ui, path, error, &p));
+                        .is_some_and(|(path, pending)| crate::menu_bar::unsaved_settings(ui, path, pending, &p));
                     (chosen, retry)
                 })
                 .inner
