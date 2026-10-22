@@ -223,7 +223,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 |---|---|---|---|
 | P1 | Publication open source : licence, vérification du nom, README (fait ; EUIPO et INPI à vérifier à la main) | objectif annoncé par l'utilisateur | moyenne |
 | P2 | Cases du plan jamais cochées (fait : plans signalés comme historiques) | état du plan | basse |
-| P3 | Stabilité de `ui_network` vérifiée sur 3 passages seulement | correction des tests instables | basse |
+| P3 | Stabilité de `ui_network` vérifiée sur 3 passages seulement (fait : 20 passages sur 20) | correction des tests instables | basse |
 | P4 | `--help` en build release depuis une console Windows (à vérifier) | relevé en vérifiant le code | basse |
 | L1 | Dépôts SHA-256 non pris en charge | limite connue (README) | basse |
 | L2 | Éditeur de conflits limité aux fichiers UTF-8 | limite constatée dans le code | moyenne |
@@ -673,11 +673,15 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** chaque plan terminé dit en tête qu'il est historique et renvoie à la feuille de route.
 - **Priorité :** basse.
 
-#### P3 — Stabilité de `ui_network`
+#### P3 — Stabilité de `ui_network` (fait)
 
-- **Contexte :** le 2026-10-17, des tests d'interface échouaient de temps en temps (attentes qui paniquaient sur une erreur passagère de git, clic sur un bouton encore désactivé). Ils ont été corrigés : `ui_flows` passe 20 fois de suite, mais `ui_network` n'a été relancé que 3 fois.
-- **À faire :** lancer `ui_network` en boucle (20 passages).
-- **Critère de fin :** 20 passages sur 20.
+- **Contexte :** le 2026-10-17, des tests d'interface échouaient de temps en temps (attentes qui paniquaient sur une erreur passagère de git, clic sur un bouton encore désactivé). Ils ont été corrigés : `ui_flows` passe 20 fois de suite, mais `ui_network` n'avait été relancé que 3 fois.
+- **État :** vérifié le 2026-10-22, aucune correction nécessaire.
+  - `cargo test -p dragontree-app --test ui_network` (deux tests : `push_fetch_pull_from_toolbar`, `amend_with_push_after_never_force_pushes`), compilé une fois puis lancé 20 fois de suite : **20 passages sur 20**, de 2,2 à 2,6 s chacun (git 2.38.1, toolchain GNU).
+  - Sous charge, en plus du critère : l'exécutable de test lancé 4 fois en parallèle, 10 fois de suite (40 sur 40, 3,9 s au plus), puis 8 fois en parallèle, 5 fois de suite (40 sur 40, 6,2 s au plus).
+  - Les attentes du fichier relisent l'état à chaque image : une commande git qui échoue un instant (`try_git`) ne fait pas paniquer l'attente.
+- **À faire :** lancer `ui_network` en boucle (20 passages) (fait).
+- **Critère de fin (atteint) :** 20 passages sur 20.
 - **Priorité :** basse.
 
 #### P4 — `--help` en build release depuis une console Windows (à vérifier)
