@@ -13,7 +13,11 @@ use crate::model::{Account, ForgeKind, normalize_host};
 /// `GIT_CONFIG_COUNT`, puis `GIT_CONFIG_KEY_<i>` = `http.<origine>.extraHeader` et
 /// `GIT_CONFIG_VALUE_<i>` = `Authorization: Basic <base64(utilisateur:jeton)>`.
 /// Jeton vide → aucune variable.
-pub fn git_auth_env(account: &Account, token: &str) -> Vec<(String, String)> {
+///
+/// `remote_urls` : URL des remotes du dépôt (ou du clone). git compare le chemin des URL en respectant la casse : pour
+/// Azure DevOps, dont l'organisation (ou la collection) est dans le chemin, l'origine est aussi tirée de chaque remote
+/// HTTPS du compte, écrite comme lui (`https://dev.azure.com/Contoso/` pour un compte qui connaît `contoso`).
+pub fn git_auth_env(account: &Account, token: &str, remote_urls: &[&str]) -> Vec<(String, String)> {
     let token = token.trim();
     if token.is_empty() {
         return Vec::new();
@@ -24,7 +28,14 @@ pub fn git_auth_env(account: &Account, token: &str) -> Vec<(String, String)> {
         ForgeKind::AzureDevOps => "",
     };
     let header = format!("Authorization: {}", basic_auth_value(user, token));
-    let origins = auth_origins(account);
+    let mut origins = auth_origins(account);
+    for url in remote_urls {
+        if let Some(origin) = remote_origin(account, url)
+            && !origins.contains(&origin)
+        {
+            origins.push(origin);
+        }
+    }
     let mut env = Vec::with_capacity(1 + 2 * origins.len());
     env.push(("GIT_CONFIG_COUNT".to_string(), origins.len().to_string()));
     for (i, origin) in origins.iter().enumerate() {
@@ -60,6 +71,24 @@ fn auth_origins(account: &Account) -> Vec<String> {
             orgs.iter().map(|org| format!("https://{host}/{org}/")).collect()
         }
     }
+}
+
+/// Origine d'authentification tirée d'un remote HTTPS du compte Azure DevOps dont le chemin commence par une de ses
+/// organisations (collections), casse ignorée : hôte et organisation tels que le remote les écrit. `None` pour les
+/// autres forges (l'origine n'a pas de chemin, et git ignore la casse de l'hôte), un remote SSH ou d'un autre compte.
+fn remote_origin(account: &Account, url: &str) -> Option<String> {
+    if account.kind != ForgeKind::AzureDevOps || !account_matches_url(account, url) {
+        return None;
+    }
+    let rest = url.trim();
+    let rest = rest.get(..8).filter(|s| s.eq_ignore_ascii_case("https://")).map(|_| &rest[8..])?;
+    let (authority, path) = rest.split_once('/')?;
+    let authority = authority.rsplit('@').next()?;
+    clean_orgs(&account.orgs).into_iter().find_map(|org| {
+        let prefix = path.get(..org.len())?;
+        let boundary = path.len() == org.len() || path[org.len()..].starts_with('/');
+        (boundary && prefix.eq_ignore_ascii_case(org)).then(|| format!("https://{authority}/{prefix}/"))
+    })
 }
 
 /// Indique si l'URL d'un remote (HTTPS, SSH ou forme scp `git@hôte:chemin`) relève du compte.
@@ -216,7 +245,7 @@ mod tests {
     fn auth_env_github() {
         let acc = account(ForgeKind::GitHub, "github.com", "octocat", &[]);
         assert_eq!(
-            git_auth_env(&acc, "ghp_tok"),
+            git_auth_env(&acc, "ghp_tok", &[]),
             env(&[
                 ("GIT_CONFIG_COUNT", "1"),
                 ("GIT_CONFIG_KEY_0", "http.https://github.com/.extraHeader"),
@@ -230,7 +259,7 @@ mod tests {
     fn auth_env_gitlab_self_hosted() {
         let acc = account(ForgeKind::GitLab, "https://GitLab.Example.com:8443/", "jsmith", &[]);
         assert_eq!(
-            git_auth_env(&acc, " glpat-tok\n"),
+            git_auth_env(&acc, " glpat-tok\n", &[]),
             env(&[
                 ("GIT_CONFIG_COUNT", "1"),
                 ("GIT_CONFIG_KEY_0", "http.https://gitlab.example.com:8443/.extraHeader"),
@@ -246,7 +275,7 @@ mod tests {
         // Utilisateur vide : base64(":azpat").
         let value = "Authorization: Basic OmF6cGF0";
         assert_eq!(
-            git_auth_env(&acc, "azpat"),
+            git_auth_env(&acc, "azpat", &[]),
             env(&[
                 ("GIT_CONFIG_COUNT", "4"),
                 ("GIT_CONFIG_KEY_0", "http.https://dev.azure.com/fabrikam/.extraHeader"),
@@ -264,7 +293,7 @@ mod tests {
     #[test]
     fn auth_env_azure_without_orgs_covers_dev_azure_com() {
         let acc = account(ForgeKind::AzureDevOps, "dev.azure.com", "c@example.com", &[]);
-        let vars = git_auth_env(&acc, "azpat");
+        let vars = git_auth_env(&acc, "azpat", &[]);
         assert_eq!(vars[0], ("GIT_CONFIG_COUNT".into(), "1".into()));
         assert_eq!(vars[1], ("GIT_CONFIG_KEY_0".into(), "http.https://dev.azure.com/.extraHeader".into()));
     }
@@ -272,7 +301,7 @@ mod tests {
     #[test]
     fn auth_env_azure_server_uses_collection_origins() {
         let acc = account(ForgeKind::AzureDevOps, "tfs.example.com", "DOMAINE\\camille", &["DefaultCollection"]);
-        let vars = git_auth_env(&acc, "azpat");
+        let vars = git_auth_env(&acc, "azpat", &[]);
         assert_eq!(
             vars,
             env(&[
@@ -283,10 +312,53 @@ mod tests {
         );
     }
 
+    /// RV4d : git compare le chemin en respectant la casse ; l'origine est aussi prise telle que le remote l'écrit.
+    #[test]
+    fn auth_env_azure_follows_the_case_of_the_organisation_in_the_remotes() {
+        let acc = account(ForgeKind::AzureDevOps, "dev.azure.com", "c@example.com", &["contoso"]);
+        let remotes = [
+            "https://Contoso@dev.azure.com/Contoso/Site%20web/_git/Site",
+            // Même casse que le compte, SSH, autre organisation, hôte en visualstudio.com : rien de plus.
+            "https://dev.azure.com/contoso/Site/_git/Autre",
+            "git@ssh.dev.azure.com:v3/CONTOSO/Site/Site",
+            "https://dev.azure.com/northwind/X/_git/Y",
+            "https://Contoso.visualstudio.com/DefaultCollection/Site/_git/Site",
+            // Préfixe seulement : pas la même organisation.
+            "https://dev.azure.com/Contoso-Labs/X/_git/Y",
+        ];
+        let keys: Vec<String> = git_auth_env(&acc, "azpat", &remotes)
+            .into_iter()
+            .filter(|(k, _)| k.starts_with("GIT_CONFIG_KEY_"))
+            .map(|(_, v)| v)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "http.https://dev.azure.com/contoso/.extraHeader",
+                "http.https://contoso.visualstudio.com/.extraHeader",
+                "http.https://dev.azure.com/Contoso/.extraHeader",
+            ]
+        );
+
+        // Azure DevOps Server : collection sous un dossier virtuel, port de l'URL du remote.
+        let acc =
+            account(ForgeKind::AzureDevOps, "tfs.example.com:8443", "DOMAINE\\camille", &["tfs/DefaultCollection"]);
+        let vars = git_auth_env(&acc, "azpat", &["https://tfs.example.com:8443/TFS/DefaultCollection/Site/_git/Site"]);
+        assert!(vars.contains(&(
+            "GIT_CONFIG_KEY_1".into(),
+            "http.https://tfs.example.com:8443/TFS/DefaultCollection/.extraHeader".into()
+        )));
+
+        // GitHub et GitLab : l'origine n'a pas de chemin, rien à ajouter.
+        let acc = account(ForgeKind::GitHub, "github.com", "octocat", &[]);
+        let vars = git_auth_env(&acc, "tok", &["https://GitHub.com/Octocat/Hello.git"]);
+        assert_eq!(vars[0], ("GIT_CONFIG_COUNT".into(), "1".into()));
+    }
+
     #[test]
     fn auth_env_empty_token_injects_nothing() {
         let acc = account(ForgeKind::GitHub, "github.com", "octocat", &[]);
-        assert!(git_auth_env(&acc, "  ").is_empty());
+        assert!(git_auth_env(&acc, "  ", &[]).is_empty());
     }
 
     #[test]

@@ -25,13 +25,15 @@ pub struct OpOptions {
     pub remote_refs: bool,
 }
 
-/// Variables d'environnement qui authentifient git avec le jeton du compte (vide sans compte ni jeton). Lit le
-/// gestionnaire d'identifiants : à appeler depuis une tâche de fond.
-pub(crate) fn auth_env(account: Option<&dragontree_forges::Account>) -> Vec<(String, String)> {
+/// Variables d'environnement qui authentifient git avec le jeton du compte (vide sans compte ni jeton) pour les URL
+/// du compte et celles des remotes `remote_urls` (voir `dragontree_forges::git_auth_env`). Lit le gestionnaire
+/// d'identifiants : à appeler depuis une tâche de fond.
+pub(crate) fn auth_env(account: Option<&dragontree_forges::Account>, remote_urls: &[String]) -> Vec<(String, String)> {
     if let Some(acc) = account
         && let Ok(Some(token)) = dragontree_forges::secrets::load_token(&acc.id)
     {
-        return dragontree_forges::git_auth_env(acc, &token);
+        let urls: Vec<&str> = remote_urls.iter().map(String::as_str).collect();
+        return dragontree_forges::git_auth_env(acc, &token, &urls);
     }
     Vec::new()
 }
@@ -40,6 +42,11 @@ impl RepoTab {
     /// Compte associé au dépôt (voir `RepoTab::account`), dont le jeton authentifie les opérations réseau.
     pub(crate) fn net_account(&self, shared: &Shared) -> Option<dragontree_forges::Account> {
         self.account(&shared.settings).cloned()
+    }
+
+    /// URL des remotes du dépôt (lecture et push), pour l'authentification (voir `auth_env`).
+    pub(crate) fn remote_urls(&self) -> Vec<String> {
+        self.remotes.iter().flat_map(|r| [r.fetch_url.clone(), r.push_url.clone()]).collect()
     }
 
     /// Lance `f` sur une file du dépôt, partagée avec ses autres onglets (voir `op_queue`) : celle du réseau
@@ -62,6 +69,7 @@ impl RepoTab {
             waiting: false,
         });
         let account = if opts.network { self.net_account(shared) } else { None };
+        let urls = if account.is_some() { self.remote_urls() } else { Vec::new() };
         let (sender, tab, title) = (shared.jobs.sender(), self.id, title.to_string());
         let pending = PendingOp {
             tab,
@@ -87,7 +95,7 @@ impl RepoTab {
                     sender.send(AppEvent::Repo(tab, RepoEvent::OpWaiting(id, false)));
                 }
             }
-            let net = NetOptions { env: auth_env(account.as_ref()), cancel, non_interactive: opts.silent };
+            let net = NetOptions { env: auth_env(account.as_ref(), &urls), cancel, non_interactive: opts.silent };
             let progress_sender = sender.clone();
             let mut last = Instant::now() - Duration::from_secs(1);
             let mut on_progress = |p: Progress| {

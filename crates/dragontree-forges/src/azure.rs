@@ -503,4 +503,26 @@ mod tests {
         assert_eq!(docs.default_branch, None, "dépôt vide : pas de branche par défaut");
         assert!(!docs.private, "projet public");
     }
+
+    /// RV4d : Azure DevOps n'a pas de visibilité par dépôt, celle du projet vaut pour tous ses dépôts. Seul un projet
+    /// public rend ses dépôts publics ; « organization » (anciennes versions), une visibilité absente (Azure DevOps
+    /// Server, sans projets publics) ou inconnue laissent le cadenas.
+    #[test]
+    fn a_repository_is_public_only_in_a_public_project() {
+        let repo = |visibility: Option<&str>| {
+            let project = match visibility {
+                Some(v) => format!(r#"{{"name": "Site", "visibility": "{v}"}}"#),
+                None => r#"{"name": "Site"}"#.to_string(),
+            };
+            let body = format!(
+                r#"{{"value": [{{"name": "Depot", "project": {project}, "remoteUrl": "https://dev.azure.com/contoso/Site/_git/Depot"}}]}}"#
+            );
+            parse_repositories(&body, "contoso", "acc").unwrap().remove(0)
+        };
+        assert!(!repo(Some("public")).private);
+        assert!(!repo(Some("Public")).private, "casse ignorée");
+        assert!(repo(Some("private")).private);
+        assert!(repo(Some("organization")).private, "visible de l'organisation seulement");
+        assert!(repo(None).private, "Azure DevOps Server : pas de visibilité, projets privés");
+    }
 }

@@ -214,7 +214,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | RV1 | Fluidité de l'interface sur un gros dépôt : filtre, copies par image, coloration synchrone (corrigé) | revue finale, mineur n°6 | moyenne |
 | RV2 | Gros diffs lus entièrement en mémoire avant la limite de 8 Mio (corrigé) | revue finale, mineur n°7 | moyenne |
 | RV3 | Fetch automatique dans la file des écritures ; deux files pour un même dépôt (corrigé) | revue finale, mineur n°16 | basse |
-| RV4 | Points non jugés : processus git à la fermeture (corrigé), instances multiples (corrigé), proxy (corrigé), cas des forges (à vérifier) | revue finale et rapport du crate forges | basse |
+| RV4 | Points non jugés : processus git à la fermeture, instances multiples, proxy, cas des forges (corrigé ; HTTP simple documenté comme limite) | revue finale et rapport du crate forges | basse |
 | RV5 | Résidus de la relecture de la traduction : `--lang` enregistré, bouton Push occupé, textes figés | relecture de la traduction | basse |
 
 ### Pistes
@@ -544,10 +544,10 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
   - suivi de revue (le fetch automatique en cours n'est plus arrêté) : `a_visible_network_operation_cancels_the_waiting_automatic_fetch_and_waits_for_the_running_one` (fetch en cours jamais annulé, pull parti après sa fin, attente affichée ; fetch en attente annulé sans lancer git ; vu rouge : le fetch en cours était annulé), `removing_a_remote_waits_for_the_running_automatic_fetch` (vu rouge sans l'option `remote_refs`) et `a_cancelled_automatic_fetch_shows_no_notification` (`actions.rs`) ; `making_way_cancels_what_has_not_started_and_waits_for_what_runs` et `making_way_stops_waiting_when_the_waiting_operation_is_cancelled` (`op_queue.rs`) ; test d'interface `a_visible_fetch_waits_for_the_running_automatic_fetch_and_says_so` (`ui_op_queues.rs` : la connexion du fetch automatique reste ouverte, le texte d'attente est affiché, le fetch visible part à sa fin ; vu rouge).
 - **Priorité :** basse.
 
-#### RV4 — Points non jugés par la revue et cas des forges
+#### RV4 — Points non jugés par la revue et cas des forges (corrigé)
 
 - **Contexte :** la revue finale a laissé ces points sans jugement. Le rapport du crate des forges a signalé les autres.
-- **Points (tous à vérifier) :**
+- **Points (tous traités) :**
   - **a. Processus git à la fermeture de l'application (corrigé).**
     - Avant : aucun arrêt n'était prévu. Le job Windows était créé sans `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, donc un push ou un fetch en cours continuait après la fermeture.
     - Décision (plan) : demander confirmation (« Attendre / Quitter quand même ») ; en quittant, annuler les opérations, et aucun processus git ne survit ; les opérations silencieuses (fetch automatique) sont arrêtées sans demander.
@@ -578,13 +578,20 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
       - un agent ureq par proxy, gardé pour les requêtes suivantes ; l'accès à Windows passe par le trait `ProxySource`, remplacé dans les tests.
     - Limites (README) : proxy SOCKS non pris en charge (connexion directe) ; proxy qui demande une authentification (NTLM, Kerberos) non pris en charge ; un proxy défini seulement dans la configuration de git (`http.proxy`) n'est pas lu.
     - Critère : atteint. Tests unitaires (`proxy.rs`) : formats `hôte:port`, `http=…;https=…` (séparateurs, casse, SOCKS, IPv6), exclusions (`<local>`, `*`, protocole, port, casse) et bouclage, configuration automatique puis repli sur les réglages manuels, absence de réglages ; `winhttp_runs_a_proxy_auto_config_script` : un script PAC servi par un serveur local est exécuté par WinHTTP (`PROXY` et `DIRECT` selon l'hôte), sans lire la configuration de la machine ; `http.rs` : `the_agent_takes_the_windows_proxy_of_the_url_unless_it_is_bypassed` et `a_request_goes_through_the_windows_proxy` (un serveur local qui joue le proxy reçoit la requête), vus rouges sans le proxy de Windows.
-  - **d. Forges.**
-    - GitLab : la liste `simple=true` peut omettre la visibilité ; le dépôt s'affiche alors comme privé (`crates/dragontree-forges/src/gitlab.rs:42`, `:98`).
-    - GitLab : les instances en HTTP simple ne sont pas prises en charge (`crates/dragontree-forges/src/gitlab.rs:10`).
-    - Azure DevOps : « privé » est déduit de la visibilité du projet (`crates/dragontree-forges/src/azure.rs:250`).
-    - Azure DevOps : l'en-tête d'authentification vise `https://dev.azure.com/<org>/` (`crates/dragontree-forges/src/auth.rs:45-50`) et git compare ce chemin en respectant la casse, alors que l'association d'un compte à une URL l'ignore. Un remote écrit avec une autre casse d'organisation ne recevrait pas l'en-tête.
-    - Pour trancher : test réel avec un remote dont la casse diffère.
-- **Critère de fin :** chaque point est soit corrigé et testé, soit documenté comme limite dans le README.
+  - **d. Forges (corrigé ; HTTP simple documenté comme limite).**
+    - GitLab, visibilité avec `simple=true` (corrigé) :
+      - avant : certaines versions de GitLab omettent la visibilité dans la liste « simple » des projets ; le dépôt s'affichait alors comme privé ;
+      - désormais (`gitlab::list_repos_with`, `crates/dragontree-forges/src/gitlab.rs`) : si un projet n'a pas de visibilité, la liste des seuls projets publics du compte (`visibility=public`, toujours « simple ») la complète ; les autres restent privés (privés ou internes : cadenas dans les deux cas), comme si cette seconde liste échoue. Aucune requête de plus quand toutes les visibilités sont données ;
+      - tests : `a_missing_visibility_is_completed_by_the_list_of_public_projects` (vu rouge sans le complément), `no_public_list_is_requested_when_every_visibility_is_known`, `a_failed_public_list_keeps_the_unknown_projects_private`.
+    - Instances en HTTP simple (limite documentée) :
+      - les forges ne sont jointes qu'en HTTPS : l'adresse de l'API, celles des pages web (pull requests, création d'un jeton) et l'origine de l'en-tête d'authentification de git sont construites en HTTPS, et le jeton ne doit jamais circuler en clair. Le prendre en charge demanderait de porter le schéma dans tous ces endroits (et dans `RepoLocation`) pour un cas rare et peu sûr ;
+      - avant, une adresse `http://…` saisie à l'ajout d'un compte était appelée en HTTPS, avec une erreur TLS obscure ; elle est désormais refusée avec une explication (`reject_plain_http`, `crates/dragontree-forges/src/lib.rs`), pour toutes les forges : test `a_plain_http_server_is_rejected_without_network`. Un dépôt dont le remote est en `http://` garde les identifiants habituels de git (l'en-tête du compte ne vise que HTTPS) ; README, « Limites connues ».
+    - Azure DevOps, « privé » déduit de la visibilité du projet (juste, vérifié) : Azure DevOps n'a pas de visibilité par dépôt, celle du projet vaut pour tous ses dépôts (projets publics ou privés). Seul un projet `public` rend ses dépôts publics ; `organization` (anciennes versions de l'API), une visibilité absente (Azure DevOps Server, qui n'a pas de projets publics) ou inconnue gardent le cadenas : test `a_repository_is_public_only_in_a_public_project` (`azure.rs`).
+    - Azure DevOps, casse de l'organisation dans l'en-tête d'authentification (corrigé) :
+      - avant : l'en-tête visait `https://dev.azure.com/<org>/` avec la casse de l'organisation du compte ; git compare le chemin des URL en respectant la casse, alors que l'association d'un compte à un remote l'ignore : un remote `https://dev.azure.com/Contoso/…` d'un compte qui connaît `contoso` ne recevait pas l'en-tête ;
+      - vérifié avec git lui-même, sans réseau : test d'intégration `the_azure_header_reaches_a_remote_whose_organisation_is_written_with_another_case` (`crates/dragontree-forges/tests/git_auth.rs`, `git config --get-urlmatch http.extraheader <url>` avec les variables d'environnement de DragonTree et la configuration de la machine écartée) : avec l'origine du compte seule, git ne donne pas l'en-tête pour ce remote (vu rouge) ;
+      - désormais, `git_auth_env` reçoit les URL des remotes du dépôt (celle du clone pour un clonage) : pour chaque remote HTTPS du compte Azure DevOps dont le chemin commence par une de ses organisations ou collections (casse ignorée), l'origine est ajoutée telle que le remote l'écrit (`https://dev.azure.com/Contoso/`, `https://tfs.contoso.com:8443/TFS/DefaultCollection/`) ; GitHub et GitLab n'en ont pas besoin (origine sans chemin, hôte comparé sans casse). Test unitaire `auth_env_azure_follows_the_case_of_the_organisation_in_the_remotes` (`auth.rs`).
+- **Critère de fin (atteint) :** chaque point est soit corrigé et testé, soit documenté comme limite dans le README (instances en HTTP simple).
 - **Priorité :** basse.
 
 #### RV5 — Résidus de la relecture de la traduction

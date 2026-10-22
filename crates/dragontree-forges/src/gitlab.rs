@@ -18,10 +18,33 @@ pub(crate) fn verify(host: &str, token: &str) -> Result<VerifiedUser, ForgeError
 
 /// `GET /projects?membership=true…`, toutes les pages.
 pub(crate) fn list_repos(host: &str, token: &str, account_id: &str) -> Result<Vec<RemoteRepo>, ForgeError> {
-    let base = api_base(host);
-    let raw = http::paginate(PAGE_SIZE, MAX_PAGES, |page| {
-        parse_project_page(&http::check_status(get(&projects_page_url(&base, page), token)?)?.body)
-    })?;
+    list_repos_with(&api_base(host), account_id, |url| Ok(http::check_status(get(url, token)?)?.body))
+}
+
+/// `list_repos` avec la lecture d'une URL donnée (`fetch` : corps de la réponse). La liste « simple » omet la
+/// visibilité sur certaines versions de GitLab : si un projet n'en a pas, la liste des seuls projets publics
+/// (`visibility=public`) la complète ; les autres restent privés (privés ou internes, cadenas dans les deux cas). Si
+/// cette seconde liste échoue, ils restent privés par prudence.
+fn list_repos_with(
+    base: &str,
+    account_id: &str,
+    mut fetch: impl FnMut(&str) -> Result<String, ForgeError>,
+) -> Result<Vec<RemoteRepo>, ForgeError> {
+    let mut raw =
+        http::paginate(PAGE_SIZE, MAX_PAGES, |page| parse_project_page(&fetch(&projects_page_url(base, page, None))?))?;
+    if raw.iter().any(|p| p.visibility.is_none()) {
+        let public = http::paginate(PAGE_SIZE, MAX_PAGES, |page| {
+            parse_project_page(&fetch(&projects_page_url(base, page, Some("public")))?)
+        });
+        if let Ok(public) = public {
+            let ids: std::collections::HashSet<u64> = public.into_iter().filter_map(|p| p.id).collect();
+            for project in raw.iter_mut().filter(|p| p.visibility.is_none()) {
+                if project.id.is_some_and(|id| ids.contains(&id)) {
+                    project.visibility = Some("public".into());
+                }
+            }
+        }
+    }
     Ok(into_remotes(raw, account_id))
 }
 
@@ -37,10 +60,12 @@ fn get(url: &str, token: &str) -> Result<http::Response, ForgeError> {
     http::get(url, &refs)
 }
 
-fn projects_page_url(api_base: &str, page: usize) -> String {
+/// Page `page` des projets du compte ; `visibility` : seulement ceux de cette visibilité.
+fn projects_page_url(api_base: &str, page: usize, visibility: Option<&str>) -> String {
+    let filter = visibility.map(|v| format!("&visibility={v}")).unwrap_or_default();
     format!(
         "{api_base}/projects?membership=true&simple=true&per_page={PAGE_SIZE}&page={page}\
-         &order_by=last_activity_at"
+         &order_by=last_activity_at{filter}"
     )
 }
 
@@ -58,6 +83,7 @@ struct GlNamespace {
 
 #[derive(Deserialize)]
 struct GlProject {
+    id: Option<u64>,
     name: Option<String>,
     path: Option<String>,
     path_with_namespace: Option<String>,
@@ -137,10 +163,11 @@ mod tests {
     fn gitlab_projects_url_requests_full_pages() {
         assert_eq!(api_base("gitlab.example.com"), "https://gitlab.example.com/api/v4");
         assert_eq!(
-            projects_page_url("https://gitlab.com/api/v4", 2),
+            projects_page_url("https://gitlab.com/api/v4", 2, None),
             "https://gitlab.com/api/v4/projects?membership=true&simple=true&per_page=100&page=2\
              &order_by=last_activity_at"
         );
+        assert!(projects_page_url("https://gitlab.com/api/v4", 1, Some("public")).ends_with("&visibility=public"));
     }
 
     #[test]
@@ -180,5 +207,53 @@ mod tests {
         assert!(billing.private);
 
         assert!(!repos[2].private, "projet public");
+    }
+
+    /// RV4d : la liste « simple » sans visibilité est complétée par la liste des projets publics.
+    #[test]
+    fn a_missing_visibility_is_completed_by_the_list_of_public_projects() {
+        let mut requested = Vec::new();
+        let repos = list_repos_with("https://gitlab.example.com/api/v4", "acc-2", |url| {
+            requested.push(url.to_string());
+            if url.contains("visibility=public") {
+                // billing-api (sans visibilité dans la liste) est public ; gitlab-runner l'était déjà.
+                Ok(r#"[{"id": 128, "path": "billing-api"}, {"id": 250833, "path": "gitlab-runner"}]"#.into())
+            } else {
+                Ok(PROJECTS.into())
+            }
+        })
+        .unwrap();
+        let private: Vec<(&str, bool)> = repos.iter().map(|r| (r.name.as_str(), r.private)).collect();
+        assert_eq!(private, [("diaspora-client", true), ("billing-api", false), ("gitlab-runner", false)]);
+        assert_eq!(requested.len(), 2, "{requested:?}");
+        assert!(requested[1].ends_with("&visibility=public"), "{requested:?}");
+    }
+
+    #[test]
+    fn no_public_list_is_requested_when_every_visibility_is_known() {
+        let complete =
+            PROJECTS.replace(r#""path": "billing-api","#, r#""path": "billing-api", "visibility": "internal","#);
+        let mut requests = 0;
+        let repos = list_repos_with("https://gitlab.example.com/api/v4", "acc-2", |_| {
+            requests += 1;
+            Ok(complete.clone())
+        })
+        .unwrap();
+        assert_eq!(requests, 1);
+        assert!(repos[1].private, "interne : cadenas");
+    }
+
+    #[test]
+    fn a_failed_public_list_keeps_the_unknown_projects_private() {
+        let repos = list_repos_with("https://gitlab.example.com/api/v4", "acc-2", |url| {
+            if url.contains("visibility=public") {
+                Err(ForgeError::Http { status: 500, body: String::new() })
+            } else {
+                Ok(PROJECTS.into())
+            }
+        })
+        .unwrap();
+        assert!(repos[1].private, "visibilité inconnue : privé par prudence");
+        assert!(!repos[2].private);
     }
 }

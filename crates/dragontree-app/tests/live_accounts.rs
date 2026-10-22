@@ -29,7 +29,7 @@ fn azure_clone_with_injected_auth_only() {
     println!("{} dépôts visibles ; clonage de {}", repos.len(), repo.full_name());
 
     // En-tête du compte uniquement : aucun gestionnaire d'identifiants en secours.
-    let mut env = dragontree_forges::git_auth_env(&account, &pat);
+    let mut env = dragontree_forges::git_auth_env(&account, &pat, &[repo.clone_url.as_str()]);
     let n: usize = env.iter().find(|(k, _)| k == "GIT_CONFIG_COUNT").map(|(_, v)| v.parse().unwrap()).unwrap();
     env.retain(|(k, _)| k != "GIT_CONFIG_COUNT");
     env.push((format!("GIT_CONFIG_KEY_{n}"), "credential.helper".into()));

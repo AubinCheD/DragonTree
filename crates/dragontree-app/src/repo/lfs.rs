@@ -149,9 +149,9 @@ impl RepoTab {
         window.loading = true;
         window.error = None;
         let (g, id) = (window.generation, self.id);
-        let account = self.net_account(shared);
+        let (account, urls) = (self.net_account(shared), self.remote_urls());
         shared.jobs.spawn("lfs-locks", move || {
-            let env = super::actions::auth_env(account.as_ref());
+            let env = super::actions::auth_env(account.as_ref(), &urls);
             let net = NetOptions { env, cancel: CancelToken::new(), non_interactive: false };
             Some(AppEvent::Repo(id, RepoEvent::LfsLocks(g, repo.lfs_locks(&net))))
         });

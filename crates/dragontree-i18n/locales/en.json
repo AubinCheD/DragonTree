@@ -1091,6 +1091,7 @@
   "Sélectionnez un commit pour voir ses modifications": "Select a commit to see its changes",
   "Sélectionnez un fichier": "Select a file",
   "Serveur": "Server",
+  "serveur en HTTP simple : DragonTree ne joint les forges qu'en HTTPS, pour que le jeton ne circule jamais en clair. Indiquez l'adresse HTTPS du serveur.": "plain HTTP server: DragonTree only reaches forges over HTTPS, so that the token never travels in clear text. Enter the HTTPS address of the server.",
   "serveur introuvable (DNS)": "server not found (DNS)",
   "seules les adresses http, https et mailto sont ouvertes : {url}": "only http, https and mailto addresses are opened: {url}",
   "Snapshot : garder les modifications en place": "Snapshot: keep the changes in place",

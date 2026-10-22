@@ -29,6 +29,7 @@ pub use pullrequest::{CreatedPullRequest, PullRequestDraft, create_pull_request,
 /// pour Azure DevOps Server), ajoutées aux organisations découvertes, sans doublon.
 pub fn verify(kind: ForgeKind, host: &str, token: &str, orgs_hint: &[String]) -> Result<VerifiedUser, ForgeError> {
     let token = clean_token(token)?;
+    reject_plain_http(host)?;
     let host = model::normalize_host(host, kind);
     let mut user = match kind {
         ForgeKind::GitHub => github::verify(&host, token)?,
@@ -49,6 +50,22 @@ pub fn list_repos(account: &Account, token: &str) -> Result<Vec<RemoteRepo>, For
         ForgeKind::AzureDevOps => azure::list_repos(&host, &account.orgs, token, &account.id)?,
     };
     Ok(model::finalize_repos(repos))
+}
+
+/// Adresse de serveur saisie en `http://` : refusée avec une explication, plutôt qu'appelée en HTTPS (le schéma est
+/// retiré par `normalize_host`) avec une erreur TLS obscure. Les forges ne sont appelées qu'en HTTPS : le jeton ne
+/// circule jamais en clair, et les adresses de l'API, des pages web et de l'en-tête d'authentification de git sont
+/// toutes construites en HTTPS (limite documentée dans le README).
+fn reject_plain_http(host: &str) -> Result<(), ForgeError> {
+    if host.trim().get(..7).is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://")) {
+        return Err(ForgeError::InvalidInput(
+            tr!(
+                "serveur en HTTP simple : DragonTree ne joint les forges qu'en HTTPS, pour que le jeton ne circule jamais en clair. Indiquez l'adresse HTTPS du serveur."
+            )
+            .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Jeton sans espaces ni retour à la ligne (copier-coller), jamais vide.
@@ -94,5 +111,16 @@ mod tests {
             avatar_url: None,
         };
         assert!(matches!(list_repos(&account, ""), Err(ForgeError::InvalidInput(_))));
+    }
+
+    /// RV4d : une instance en HTTP simple est refusée avec une explication, sans requête (HTTPS seulement).
+    #[test]
+    fn a_plain_http_server_is_rejected_without_network() {
+        for kind in [ForgeKind::GitLab, ForgeKind::GitHub, ForgeKind::AzureDevOps] {
+            match verify(kind, " HTTP://gitlab.contoso.test:8080/ ", "jeton", &["DefaultCollection".into()]) {
+                Err(ForgeError::InvalidInput(msg)) => assert!(msg.contains("HTTPS"), "{msg}"),
+                other => panic!("{kind:?} : {other:?}"),
+            }
+        }
     }
 }

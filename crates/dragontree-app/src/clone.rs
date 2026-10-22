@@ -229,7 +229,7 @@ impl CloneWindow {
             if let Some(acc) = &acc
                 && let Ok(Some(token)) = secrets::load_token(&acc.id)
             {
-                env = dragontree_forges::git_auth_env(acc, &token);
+                env = dragontree_forges::git_auth_env(acc, &token, &[url.as_str()]);
             }
             let net = NetOptions { env, cancel, non_interactive: false };
             let mut last = std::time::Instant::now();
