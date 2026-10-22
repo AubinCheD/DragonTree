@@ -473,3 +473,51 @@ fn closing_the_clone_window_cleans_up_the_cancelled_clone() {
     h.get_by_label("Close window").click();
     wait_git(&mut h, "clone annulé nettoyé", || !dest.exists());
 }
+
+/// Dépôt SHA-256 avec un commit, ou `None` (message) si le git installé ne sait pas en créer (git 2.29 et suivants).
+fn sha256_repo(base: &Path) -> Option<PathBuf> {
+    let version = test_git().version().unwrap();
+    let mut numbers = version.trim_start_matches("git version ").split('.').map(|n| n.parse::<u32>().unwrap_or(0));
+    if (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0)) < (2, 29) {
+        eprintln!("{version} ne sait pas créer de dépôt SHA-256 (git 2.29 et suivants) : test ignoré");
+        return None;
+    }
+    let dir = base.join("sha256");
+    std::fs::create_dir_all(&dir).unwrap();
+    git(&dir, &["init", "-q", "-b", "main", "--object-format=sha256"]);
+    for (k, v) in [("user.name", "Testeur"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")] {
+        git(&dir, &["config", k, v]);
+    }
+    commit_file(&dir, "a.txt", "a\n", "Premier");
+    Some(dir)
+}
+
+/// L1 : un dépôt SHA-256 s'ouvre sur une erreur explicite, et son clonage échoue avec la même erreur (le dossier créé
+/// par le clonage est supprimé, comme après un clonage échoué).
+#[test]
+fn a_sha256_repository_is_refused_with_an_explicit_error_at_open_and_clone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let Some(repo) = sha256_repo(tmp.path()) else { return };
+    let clones = tmp.path().join("clones");
+    let profile = tmp.path().join("profil");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(profile.join("settings.json"), serde_json::json!({ "default_clone_dir": clones }).to_string())
+        .unwrap();
+    let explicit = "utilise des identifiants SHA-256 : DragonTree ne prend en charge que les dépôts SHA-1";
+
+    let mut h = harness(StartOptions { open: vec![repo.clone()], ..start(tmp.path()) });
+    wait_until(&mut h, "erreur d'ouverture explicite", |h| h.query_by_label_contains(explicit).is_some());
+    drop(h);
+
+    let mut h = harness(StartOptions { window: Some("clone".into()), ..start(tmp.path()) });
+    let hint = "https://github.com/organisation/depot.git";
+    wait_until(&mut h, "fenêtre de clonage", |h| h.query_by(|n| n.placeholder() == Some(hint)).is_some());
+    let url = h.get_by(|n| n.placeholder() == Some(hint));
+    url.focus();
+    url.type_text(&format!("file:///{}", repo.display().to_string().replace('\\', "/")));
+    h.run_steps(3);
+    h.get_by_label(&format!("{} Cloner", dragontree_app::icons::DOWNLOAD_SIMPLE)).click();
+    wait_until(&mut h, "erreur de clonage explicite", |h| h.query_by_label_contains(explicit).is_some());
+    let dest = clones.join("sha256");
+    wait_git(&mut h, "dossier du clone supprimé", || !dest.exists());
+}

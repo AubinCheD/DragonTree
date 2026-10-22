@@ -107,9 +107,11 @@ pub fn read_head(git_dir: &Path) -> Result<HeadState, GitError> {
         let name = target.strip_prefix("refs/heads/").unwrap_or(target);
         return Ok(HeadState::Branch(name.to_string()));
     }
-    Oid::from_hex(raw)
-        .map(HeadState::Detached)
-        .ok_or_else(|| GitError::Parse(tr!("HEAD illisible : {raw}", raw = format!("{raw:?}"))))
+    Oid::parse(raw).map(HeadState::Detached).map_err(|e| match e {
+        // HEAD détachée sur un identifiant SHA-256 : erreur explicite (L1).
+        GitError::UnsupportedObjectFormat { .. } => e,
+        _ => GitError::Parse(tr!("HEAD illisible : {raw}", raw = format!("{raw:?}"))),
+    })
 }
 
 /// Parse la sortie de `git for-each-ref --format=FOR_EACH_REF_FORMAT`.

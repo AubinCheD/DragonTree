@@ -281,7 +281,9 @@ des fichiers `tests/live*.rs`.
   car DragonTree ne joint les forges qu'en HTTPS (le jeton ne circule jamais en clair) ; un compte déjà enregistré
   ainsi reste appelé en HTTPS. Un dépôt dont le remote est en `http://` garde les identifiants habituels de git :
   l'en-tête du compte ne vise que HTTPS.
-- Dépôts SHA-256 non pris en charge.
+- Dépôts SHA-256 (`git init --object-format=sha256`) non pris en charge : leur ouverture, et leur clonage (le dossier
+  cloné est alors supprimé), s'arrêtent sur un message qui le dit. DragonTree ne gère que des identifiants SHA-1 de
+  20 octets ; pour un tel dépôt, utilisez git en ligne de commande.
 
 ## Licence
 

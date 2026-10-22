@@ -225,7 +225,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | P2 | Cases du plan jamais cochées (fait : plans signalés comme historiques) | état du plan | basse |
 | P3 | Stabilité de `ui_network` vérifiée sur 3 passages seulement (fait : 20 passages sur 20) | correction des tests instables | basse |
 | P4 | `--help` en build release depuis une console Windows (corrigé ; l'invite revient avant le texte, limite documentée) | relevé en vérifiant le code | basse |
-| L1 | Dépôts SHA-256 non pris en charge | limite connue (README) | basse |
+| L1 | Dépôts SHA-256 non pris en charge (limite documentée : erreur explicite à l'ouverture et au clonage) | limite connue (README) | basse |
 | L2 | Éditeur de conflits limité aux fichiers UTF-8 | limite constatée dans le code | moyenne |
 | L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session | arbitrage de la revue (M9) | basse |
 | L4 | Échec d'authentification du fetch automatique signalé une seule fois | arbitrage de la revue (M2) | basse |
@@ -718,13 +718,28 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** l'aide s'affiche depuis cmd et PowerShell avec l'exécutable release ; tube de Git Bash inchangé.
 - **Priorité :** basse.
 
-#### L1 — Dépôts SHA-256 non pris en charge
+#### L1 — Dépôts SHA-256 non pris en charge (limite documentée : erreur explicite)
 
-- **État :** l'identifiant de commit fait 20 octets (`crates/dragontree-git/src/oid.rs:6`), et rien ne détecte `extensions.objectFormat`. Le comportement sur un dépôt SHA-256 n'a pas été testé (à vérifier).
+- **État :** limite documentée (README, « Limites connues ») ; ouverture et clonage refusés avec un message explicite.
+  - Avant (vérifié le 2026-10-22 avec git 2.38.1, par les tests ci-dessous lancés sans la correction) : rien ne détectait `extensions.objectFormat`. Un dépôt SHA-256 s'ouvrait sans erreur et son clonage réussissait ; ses branches disparaissaient (lignes de `for-each-ref` ignorées) et le journal échouait sur « commit illisible dans le log » (une HEAD détachée aurait donné « HEAD illisible », d'après le code). Aucune panique : `Oid::from_hex` refusait déjà les identifiants de 64 caractères, sans les tronquer.
+  - Réalisé (`crates/dragontree-git`) :
+    - erreur `GitError::UnsupportedObjectFormat { format, path }`, traduite : « Le dépôt {path} utilise des identifiants SHA-256 : DragonTree ne prend en charge que les dépôts SHA-1 » (« Identifiant SHA-256 : … » sans dépôt) ;
+    - `Repo::open` lit le format avec le même `git rev-parse` (`--show-object-format`, présent dans git 2.31, le minimum pris en charge) et refuse tout format autre que `sha1`, aussi depuis un sous-dossier ;
+    - `clone_repo` vérifie le format du clone terminé (`check_object_format`) et renvoie la même erreur ; l'interface supprime alors le dossier qu'elle avait créé, comme après un clonage échoué, et affiche le message dans la fenêtre de clonage ;
+    - `Oid::parse` : identifiant SHA-1 ou erreur explicite (SHA-256 : `UnsupportedObjectFormat` ; autre : `Parse`). Il sert aux lectures qui renvoient une erreur : journal (`LogParser`), détail d'un commit (`commit_info`), HEAD détachée (`read_head`). Les lectures qui ignorent les lignes illisibles (refs, état, stashs, worktrees, bisect, blame) gardent `Oid::from_hex`, qui refuse les 64 caractères sans les tronquer ;
+    - page d'erreur de l'onglet (`crates/dragontree-app/src/repo/mod.rs`) : en plus du message, « Utilisez git en ligne de commande pour ce dépôt : les identifiants SHA-256 sont une limite connue de DragonTree. »
+  - Identifiants de 32 octets : non gérés, limite documentée. `Oid` est un `[u8; 20]` copiable utilisé partout (graphe, tables de hachage, caches de l'historique mesurés en RV1), et le code suppose aussi 40 caractères ailleurs : arbre vide SHA-1 (`EMPTY_TREE`), en-tête `From <sha>` des patchs mbox (`apply.rs`), SHA courts des dialogues, recherche par SHA. Le format reste expérimental dans git (pas d'échange avec un dépôt SHA-1) et rare chez les forges ; le coût (type à taille variable ou à 32 octets, mémoire du graphe, tous les analyseurs) n'est pas raisonnable pour ce point de priorité basse.
+- **Tests :**
+  - `crates/dragontree-git/tests/object_format.rs` (dépôt créé par `git init --object-format=sha256` avec un commit ; test ignoré avec un message si git a moins de 2.29) :
+    - `opening_a_sha256_repository_gives_a_clear_error` : `Repo::open` à la racine et depuis un sous-dossier, erreur `UnsupportedObjectFormat` (`sha256`, chemin du dépôt), message avec « SHA-256 » et « SHA-1 » ; vu rouge avant : dépôt ouvert ;
+    - `cloning_a_sha256_repository_gives_the_same_clear_error` : `clone_repo` en `file://` ; vu rouge avant : clonage réussi ;
+    - `sha256_ids_are_refused_by_every_parser_without_panicking` : `Oid::from_hex` et `Oid::parse` sur un identifiant de 64 caractères ; sur le dépôt ouvert sans `Repo::open`, journal et HEAD détachée en erreur explicite, refs et état sans identifiant tronqué, stashs et worktrees sans panique.
+  - `oid_refuses_sha256_ids_with_an_explicit_error` (`oid.rs`).
+  - Interface : `a_sha256_repository_is_refused_with_an_explicit_error_at_open_and_clone` (`crates/dragontree-app/tests/ui_flows.rs`) : onglet ouvert sur le message, clonage par la fenêtre arrêté sur le même message, dossier du clone supprimé.
 - **À faire :**
-  1. Afficher au moins une erreur explicite à l'ouverture.
-  2. Plus tard, gérer des identifiants de 32 octets.
-- **Critère de fin :** test d'intégration avec `git init --object-format=sha256` : message clair, sans panique.
+  1. Afficher au moins une erreur explicite à l'ouverture (fait, et au clonage).
+  2. Plus tard, gérer des identifiants de 32 octets (non retenu : limite documentée ci-dessus).
+- **Critère de fin (atteint) :** test d'intégration avec `git init --object-format=sha256` : message clair, sans panique.
 - **Priorité :** basse.
 
 #### L2 — Éditeur de conflits limité aux fichiers UTF-8

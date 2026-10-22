@@ -30,6 +30,9 @@ pub enum GitError {
     /// Le commit a échoué et ni le nom ni l'e-mail de l'auteur ne sont configurés (reconnu d'après la configuration,
     /// pas d'après le message de git, qui dépend de sa langue) ; contient le message de git.
     IdentityMissing(String),
+    /// Dépôt (`path`) ou identifiant dont le format d'objets (`format`, par exemple `sha256`) n'est pas SHA-1 :
+    /// DragonTree ne gère que des identifiants de 20 octets (L1).
+    UnsupportedObjectFormat { format: String, path: Option<String> },
     /// Erreur interne de DragonTree (tâche interrompue par une panique).
     Internal(String),
 }
@@ -104,6 +107,25 @@ impl fmt::Display for GitError {
                 tr!("La branche « {branch} » est déjà sortie dans le worktree {path}", branch, path = path.display())
             ),
             GitError::IdentityMissing(detail) => write!(f, "{detail}"),
+            GitError::UnsupportedObjectFormat { format, path } => {
+                let format = if format == "sha256" { "SHA-256".to_string() } else { format.to_uppercase() };
+                match path {
+                    Some(path) => write!(
+                        f,
+                        "{}",
+                        tr!(
+                            "Le dépôt {path} utilise des identifiants {format} : DragonTree ne prend en charge que les dépôts SHA-1",
+                            path,
+                            format
+                        )
+                    ),
+                    None => write!(
+                        f,
+                        "{}",
+                        tr!("Identifiant {format} : DragonTree ne prend en charge que les dépôts SHA-1", format)
+                    ),
+                }
+            }
             GitError::Internal(e) => write!(f, "{}", tr!("erreur interne de DragonTree : {e}", e)),
         }
     }

@@ -37,6 +37,21 @@ fn without_head(opts: &LogOptions) -> Option<LogOptions> {
 /// Arbre vide de git (SHA-1), utilisé comme parent d'un commit racine.
 pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
+/// Seul format d'objets pris en charge : identifiants SHA-1 de 20 octets (`Oid`). Un dépôt SHA-256 est refusé à
+/// l'ouverture et au clonage (L1).
+const SUPPORTED_OBJECT_FORMAT: &str = "sha1";
+
+/// Erreur explicite si le dépôt de `dir` n'utilise pas des identifiants SHA-1 (`git rev-parse --show-object-format`).
+pub(crate) fn check_object_format(git: &Git, dir: &Path) -> Result<(), GitError> {
+    let out = git.cmd(dir).read_only().args(["rev-parse", "--show-object-format"]).run()?;
+    match out.stdout_str().trim() {
+        SUPPORTED_OBJECT_FORMAT => Ok(()),
+        format => {
+            Err(GitError::UnsupportedObjectFormat { format: format.to_string(), path: Some(dir.display().to_string()) })
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Repo {
     pub git: Git,
@@ -93,7 +108,8 @@ pub(crate) fn native_path(p: &str) -> PathBuf {
 }
 
 impl Repo {
-    /// Ouvre le dépôt contenant `path` (qui peut être un sous-dossier).
+    /// Ouvre le dépôt contenant `path` (qui peut être un sous-dossier). Un dépôt dont les identifiants ne sont pas
+    /// SHA-1 (`extensions.objectFormat=sha256`) est refusé : `GitError::UnsupportedObjectFormat` (L1).
     pub fn open(git: &Git, path: &Path) -> Result<Repo, GitError> {
         let not_repo = || GitError::NotARepository { path: path.display().to_string() };
         if !path.is_dir() {
@@ -102,7 +118,14 @@ impl Repo {
         let out = git
             .cmd(path)
             .read_only()
-            .args(["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"])
+            .args([
+                "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-dir",
+                "--git-common-dir",
+                "--show-object-format",
+            ])
             .run()
             .map_err(|e| match e {
                 GitError::Failed { ref stderr, .. } if stderr.contains("not a git repository") => not_repo(),
@@ -110,8 +133,14 @@ impl Repo {
             })?;
         let text = out.stdout_str();
         let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
-        match (lines.next(), lines.next(), lines.next()) {
-            (Some(top), Some(git_dir), Some(common)) => Ok(Repo {
+        match (lines.next(), lines.next(), lines.next(), lines.next()) {
+            (Some(top), Some(_), Some(_), Some(format)) if format != SUPPORTED_OBJECT_FORMAT => {
+                Err(GitError::UnsupportedObjectFormat {
+                    format: format.to_string(),
+                    path: Some(native_path(top).display().to_string()),
+                })
+            }
+            (Some(top), Some(git_dir), Some(common), Some(_)) => Ok(Repo {
                 git: git.clone(),
                 workdir: native_path(top),
                 git_dir: native_path(git_dir),
@@ -291,7 +320,7 @@ impl Repo {
             return Err(GitError::Parse(tr!("commit {id} illisible", id)));
         }
         Ok(CommitInfo {
-            id: Oid::from_hex(f[0].trim()).ok_or_else(|| GitError::Parse(f[0].to_string()))?,
+            id: Oid::parse(f[0].trim())?,
             parents: f[1].split_whitespace().filter_map(Oid::from_hex).collect(),
             author: f[2].to_string(),
             author_email: f[3].to_string(),

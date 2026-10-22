@@ -191,7 +191,9 @@ impl Repo {
     }
 }
 
-/// Clone `url` dans `dest` (dont le dossier parent est créé si besoin).
+/// Clone `url` dans `dest` (dont le dossier parent est créé si besoin). Le clone d'un dépôt SHA-256 se termine, puis
+/// est signalé par `GitError::UnsupportedObjectFormat` (L1) : `dest` reste sur le disque, à l'appelant de le garder
+/// ou non (l'interface supprime le dossier qu'elle a créé, comme après un clonage échoué).
 pub fn clone_repo(
     git: &Git,
     url: &str,
@@ -211,7 +213,8 @@ pub fn clone_repo(
     if recurse {
         cmd = cmd.arg("--recurse-submodules");
     }
-    run_with_progress(cmd.arg("--").arg(url).arg(dest), on)
+    run_with_progress(cmd.arg("--").arg(url).arg(dest), on)?;
+    crate::repo::check_object_format(git, dest)
 }
 
 /// Crée un dépôt vide dans `path` (créé si besoin).

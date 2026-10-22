@@ -1,14 +1,38 @@
 use std::fmt;
 
+use dragontree_i18n::tr;
+
+use crate::GitError;
+
 /// Identifiant d'objet git (SHA-1, 20 octets). Copiable et compact : 20 octets au lieu
 /// d'une chaîne hexadécimale de 40 caractères allouée sur le tas.
+///
+/// Les dépôts SHA-256 (identifiants de 32 octets, 64 caractères) ne sont pas pris en charge (L1) : `Repo::open` et
+/// `clone_repo` les refusent avec `GitError::UnsupportedObjectFormat`, et un identifiant de 64 caractères n'est
+/// jamais lu, ni tronqué, comme un identifiant SHA-1.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct Oid(pub [u8; 20]);
+
+/// Longueur hexadécimale d'un identifiant SHA-256.
+const SHA256_HEX_LEN: usize = 64;
 
 impl Oid {
     pub const ZERO: Oid = Oid([0; 20]);
 
-    /// Parse exactement 40 caractères hexadécimaux (casse indifférente).
+    /// Comme `from_hex`, avec une erreur explicite : un identifiant SHA-256 (64 caractères hexadécimaux) donne
+    /// `GitError::UnsupportedObjectFormat`, toute autre chaîne qui n'est pas un identifiant SHA-1, `GitError::Parse`.
+    pub fn parse(s: &str) -> Result<Oid, GitError> {
+        Oid::from_hex(s).ok_or_else(|| {
+            if s.len() == SHA256_HEX_LEN && s.bytes().all(|b| b.is_ascii_hexdigit()) {
+                GitError::UnsupportedObjectFormat { format: "sha256".into(), path: None }
+            } else {
+                GitError::Parse(tr!("identifiant d'objet invalide : {id}", id = format!("{s:?}")))
+            }
+        })
+    }
+
+    /// Parse exactement 40 caractères hexadécimaux (casse indifférente) ; `None` pour toute autre chaîne, un
+    /// identifiant SHA-256 de 64 caractères compris.
     pub fn from_hex(s: &str) -> Option<Oid> {
         let bytes = s.as_bytes();
         if bytes.len() != 40 {
@@ -90,6 +114,21 @@ mod tests {
         assert!(Oid::from_hex(&HEX[..39]).is_none());
         assert!(Oid::from_hex(&format!("{HEX}0")).is_none());
         assert!(Oid::from_hex("g123456789abcdef0123456789abcdef01234567").is_none());
+    }
+
+    /// L1 : un identifiant SHA-256 (64 caractères) n'est jamais lu ni tronqué comme un identifiant SHA-1 ; `parse` le
+    /// dit explicitement.
+    #[test]
+    fn oid_refuses_sha256_ids_with_an_explicit_error() {
+        let sha256 = format!("{HEX}{}", &HEX[..24]);
+        assert_eq!(sha256.len(), 64);
+        assert_eq!(Oid::from_hex(&sha256), None);
+        let err = Oid::parse(&sha256).unwrap_err();
+        assert_eq!(err, GitError::UnsupportedObjectFormat { format: "sha256".into(), path: None });
+        assert!(err.to_string().contains("SHA-256"), "{err}");
+        assert_eq!(Oid::parse(HEX).unwrap().to_hex(), HEX);
+        assert!(matches!(Oid::parse(&HEX[..39]), Err(GitError::Parse(_))));
+        assert!(matches!(Oid::parse(&format!("{}g", &sha256[..63])), Err(GitError::Parse(_))));
     }
 
     #[test]

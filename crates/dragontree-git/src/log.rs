@@ -278,12 +278,12 @@ impl LogParser {
         if f.len() != 8 {
             return Err(bad());
         }
-        let id = Oid::from_hex(f[0]).ok_or_else(bad)?;
-        let parents = f[1]
-            .split_whitespace()
-            .map(|p| Oid::from_hex(p).ok_or_else(bad))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_boxed_slice();
+        // Un identifiant SHA-256 donne son erreur explicite (L1), tout autre identifiant illisible celle du commit.
+        let oid = |s: &str| {
+            Oid::parse(s).map_err(|e| if matches!(e, GitError::UnsupportedObjectFormat { .. }) { e } else { bad() })
+        };
+        let id = oid(f[0])?;
+        let parents = f[1].split_whitespace().map(oid).collect::<Result<Vec<_>, _>>()?.into_boxed_slice();
         Ok(Commit {
             id,
             parents,

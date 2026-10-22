@@ -1381,6 +1381,14 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                 GitError::NotARepository { .. } => {
                     ui.label(RichText::new(tr!("Ce dossier n'est pas (ou plus) un dépôt git.")).color(p.weak));
                 }
+                GitError::UnsupportedObjectFormat { .. } => {
+                    ui.label(
+                        RichText::new(tr!(
+                            "Utilisez git en ligne de commande pour ce dépôt : les identifiants SHA-256 sont une limite connue de DragonTree."
+                        ))
+                        .color(p.weak),
+                    );
+                }
                 GitError::NotFound
                     if ui.button(format!("{} {}", icons::GEAR_SIX, tr!("Réglages"))).clicked() => {
                         shared.actions.push(AppAction::ShowSettings);
