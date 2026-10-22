@@ -14,8 +14,31 @@ use crate::toasts::{Toast, ToastKind};
 
 type OpFn = dyn FnOnce(&Repo, &NetOptions, &mut dyn FnMut(Progress)) -> Result<Option<String>, GitError> + Send;
 
+/// Type d'une opération : l'état « occupé » des boutons (barre d'outils, commit) se lit sur lui (`RepoTab::op_running`),
+/// jamais sur le titre, qui est traduit (RV5b). Un bouton est occupé pendant sa propre opération, d'où qu'elle soit
+/// lancée (bouton, menu, raccourci, palette, push après un commit).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum OpKind {
+    /// Toute autre opération : push d'un tag ou de plusieurs branches, fetch et pull LFS, renommage d'un stash…
+    #[default]
+    Other,
+    /// Fetch des remotes (bouton Fetch ; le fetch automatique, silencieux, n'occupe pas le bouton).
+    Fetch,
+    /// Pull de la branche suivie ou choisie.
+    Pull,
+    /// Push d'une branche : dialogue Push, push rapide, push après un commit.
+    Push,
+    Commit,
+    /// Mise de côté par le dialogue Stash (stash ou snapshot) ou des fichiers choisis.
+    Stash,
+    /// Pop d'un stash.
+    StashPop,
+}
+
 #[derive(Default, Clone, Copy)]
 pub struct OpOptions {
+    /// Type de l'opération (état « occupé » des boutons).
+    pub kind: OpKind,
     /// Opération réseau : injecte l'authentification du compte associé au dépôt.
     pub network: bool,
     /// Pas de notification de succès, pas de fenêtre d'authentification (auto-fetch).
@@ -63,6 +86,7 @@ impl RepoTab {
         self.running.push(RunningOp {
             id,
             title: title.to_string(),
+            kind: opts.kind,
             progress: None,
             cancel: cancel.clone(),
             silent: opts.silent,
@@ -129,7 +153,19 @@ impl RepoTab {
         refresh: Refresh,
         f: impl FnOnce(&Repo) -> Result<Option<String>, GitError> + Send + 'static,
     ) {
-        self.run_op(shared, title, refresh, OpOptions::default(), Box::new(move |r, _, _| f(r)));
+        self.run_simple_as(shared, OpKind::Other, title, refresh, f);
+    }
+
+    /// Opération locale sans progression, d'un type donné (état « occupé » des boutons).
+    fn run_simple_as(
+        &mut self,
+        shared: &Shared,
+        kind: OpKind,
+        title: &str,
+        refresh: Refresh,
+        f: impl FnOnce(&Repo) -> Result<Option<String>, GitError> + Send + 'static,
+    ) {
+        self.run_op(shared, title, refresh, OpOptions { kind, ..OpOptions::default() }, Box::new(move |r, _, _| f(r)));
     }
 
     /// Opération réseau avec progression et authentification.
@@ -141,13 +177,27 @@ impl RepoTab {
         silent: bool,
         f: impl FnOnce(&Repo, &NetOptions, &mut dyn FnMut(Progress)) -> Result<Option<String>, GitError> + Send + 'static,
     ) {
-        self.run_op(shared, title, refresh, OpOptions { network: true, silent, remote_refs: false }, Box::new(f));
+        self.run_net_as(shared, OpKind::Other, title, refresh, silent, f);
+    }
+
+    /// Opération réseau d'un type donné (état « occupé » des boutons).
+    fn run_net_as(
+        &mut self,
+        shared: &Shared,
+        kind: OpKind,
+        title: &str,
+        refresh: Refresh,
+        silent: bool,
+        f: impl FnOnce(&Repo, &NetOptions, &mut dyn FnMut(Progress)) -> Result<Option<String>, GitError> + Send + 'static,
+    ) {
+        let opts = OpOptions { kind, network: true, silent, ..OpOptions::default() };
+        self.run_op(shared, title, refresh, opts, Box::new(f));
     }
 
     // --- Réseau -------------------------------------------------------------------------
 
     pub(crate) fn op_fetch(&mut self, shared: &Shared, remote: Option<String>, prune: bool, silent: bool) {
-        self.run_net(shared, "Fetch", Refresh::REFS.with_extras(), silent, move |r, n, on| {
+        self.run_net_as(shared, OpKind::Fetch, "Fetch", Refresh::REFS.with_extras(), silent, move |r, n, on| {
             r.fetch(remote.as_deref(), prune, n, on)?;
             Ok(Some(tr!("Fetch terminé").into()))
         });
@@ -168,7 +218,7 @@ impl RepoTab {
     }
 
     pub(crate) fn op_pull(&mut self, shared: &Shared, remote: String, branch: String, rebase: bool) {
-        self.run_net(shared, "Pull", Refresh::ALL, false, move |r, n, on| {
+        self.run_net_as(shared, OpKind::Pull, "Pull", Refresh::ALL, false, move |r, n, on| {
             r.pull(&remote, &branch, rebase, n, on)?;
             Ok(Some(tr!("Pull de {remote}/{branch} terminé", remote, branch)))
         });
@@ -185,7 +235,7 @@ impl RepoTab {
         force: bool,
         tags: bool,
     ) {
-        self.run_net(shared, "Push", Refresh::REFS, false, move |r, n, on| {
+        self.run_net_as(shared, OpKind::Push, "Push", Refresh::REFS, false, move |r, n, on| {
             r.push(&remote, &local, &remote_branch, set_upstream, force, n, on)?;
             if tags {
                 r.push_all_tags(&remote, n, on)?;
@@ -301,7 +351,7 @@ impl RepoTab {
     pub(crate) fn op_commit(&mut self, shared: &Shared, message: String, amend: bool, push_after: bool) {
         let after = if push_after { self.push_after_commit(amend) } else { AfterCommit::Nothing };
         let before = self.next_op_id;
-        self.run_simple(shared, "Commit", Refresh::ALL, move |r| {
+        self.run_simple_as(shared, OpKind::Commit, "Commit", Refresh::ALL, move |r| {
             r.commit(&message, amend)?;
             Ok(Some(if amend { tr!("Commit modifié") } else { tr!("Commit créé") }.into()))
         });
@@ -363,6 +413,14 @@ impl RepoTab {
 
     // --- Branches, tags, historique -----------------------------------------------------
 
+    /// Push d'un tag vers un remote (menu d'un tag) : il n'occupe pas le bouton Push (`OpKind::Other`).
+    pub(crate) fn op_push_tag(&mut self, shared: &Shared, remote: String, tag: String) {
+        self.run_net(shared, tr!("Push du tag"), Refresh::REFS, false, move |r, n, on| {
+            r.push_tag(&remote, &tag, n, on)?;
+            Ok(Some(tr!("Tag {tag} poussé", tag)))
+        });
+    }
+
     pub(crate) fn op_checkout(&mut self, shared: &Shared, target: String) {
         self.run_simple(shared, "Checkout", Refresh::ALL, move |r| {
             r.checkout(&target)?;
@@ -422,7 +480,7 @@ impl RepoTab {
 
 impl RepoTab {
     pub(crate) fn op_stash_save(&mut self, shared: &Shared, message: String, untracked: bool, keep_index: bool) {
-        self.run_simple(shared, "Stash", Refresh::STATUS.with_extras(), move |r| {
+        self.run_simple_as(shared, OpKind::Stash, "Stash", Refresh::STATUS.with_extras(), move |r| {
             r.stash_save(Some(&message), untracked, keep_index)?;
             Ok(Some(tr!("Modifications mises de côté (stash)").into()))
         });
@@ -430,7 +488,7 @@ impl RepoTab {
 
     /// Stash des seuls fichiers choisis.
     pub(crate) fn op_stash_files(&mut self, shared: &Shared, message: String, paths: Vec<String>) {
-        self.run_simple(shared, "Stash", Refresh::STATUS.with_extras(), move |r| {
+        self.run_simple_as(shared, OpKind::Stash, "Stash", Refresh::STATUS.with_extras(), move |r| {
             r.stash_push_paths(Some(&message), &paths)?;
             Ok(Some(tr!("Fichiers mis de côté (stash)").into()))
         });
@@ -438,7 +496,7 @@ impl RepoTab {
 
     /// Snapshot : un stash qui laisse les modifications en place.
     pub(crate) fn op_stash_snapshot(&mut self, shared: &Shared, message: String) {
-        self.run_simple(shared, "Snapshot", Refresh::STATUS.with_extras(), move |r| {
+        self.run_simple_as(shared, OpKind::Stash, "Snapshot", Refresh::STATUS.with_extras(), move |r| {
             r.stash_snapshot(Some(&message))?;
             Ok(Some(tr!("Snapshot enregistré (stash)").into()))
         });
@@ -453,7 +511,8 @@ impl RepoTab {
 
     /// Agit sur le stash `oid` (pas sur un index : la liste a pu changer depuis l'affichage).
     pub(crate) fn op_stash(&mut self, shared: &Shared, oid: Oid, label: String, kind: StashOp) {
-        self.run_simple(shared, kind.title(), Refresh::STATUS.with_extras(), move |r| {
+        let op_kind = if matches!(kind, StashOp::Pop) { OpKind::StashPop } else { OpKind::Other };
+        self.run_simple_as(shared, op_kind, kind.title(), Refresh::STATUS.with_extras(), move |r| {
             match kind {
                 StashOp::Apply => r.stash_apply_oid(oid)?,
                 StashOp::Pop => r.stash_pop_oid(oid)?,
@@ -770,5 +829,67 @@ mod tests {
             fetch && commit
         });
         assert_eq!(shared.toasts.titles(), ["Commit : annulé"], "seule l'opération visible le signale");
+    }
+
+    /// L'état « occupé » des boutons vient du type de l'opération, jamais de son titre traduit (RV5b) : une opération
+    /// dont le titre commence comme celui d'un bouton dans une langue (« Push du tag », « Fetch LFS », « Pull LFS » en
+    /// français, « Stash rename » en anglais) ne l'occupe pas ; celle du bouton, si. Les titres sont d'abord en
+    /// français (langue des tests unitaires : elle est globale au processus), puis remplacés par leur traduction
+    /// anglaise : même résultat.
+    #[test]
+    fn the_busy_buttons_follow_the_kind_of_operation_in_every_language() {
+        use dragontree_i18n::{Lang, translate};
+
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, _events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let tab = &mut tabs[0];
+        // File des écritures occupée : les opérations y restent en attente ; annulées à la fin, elles ne lancent pas
+        // git.
+        let queues = tab.queues(&shared).unwrap();
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        queues.writes.then(move || {
+            let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+        });
+        let kinds = [OpKind::Fetch, OpKind::Pull, OpKind::Push, OpKind::Commit, OpKind::Stash, OpKind::StashPop];
+        let busy = |tab: &RepoTab| kinds.into_iter().filter(|k| tab.op_running(*k)).collect::<Vec<_>>();
+        // Titres anglais des opérations lancées (« Fetch », « Push », « Commit »… ne sont pas traduits).
+        let in_english = |tab: &mut RepoTab| {
+            let french = ["Push du tag", "Fetch LFS", "Pull LFS", "Renommage du stash", "Pop du stash"];
+            for op in &mut tab.running {
+                if let Some(fr) = french.iter().find(|fr| **fr == op.title) {
+                    op.title = translate(Lang::En, fr).to_string();
+                }
+            }
+            tab.running.iter().map(|op| op.title.clone()).collect::<Vec<_>>()
+        };
+        let stash = Oid::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap();
+
+        // Opérations d'autres types (et le fetch automatique, silencieux) : aucun bouton occupé.
+        tab.op_push_tag(&shared, "origin".into(), "v1.0".into());
+        tab.op_lfs_fetch(&shared);
+        tab.op_lfs_pull(&shared);
+        tab.op_stash_rename(&shared, stash, "stash@{0}".into(), "Nouveau nom".into());
+        tab.op_fetch(&shared, None, true, true);
+        assert_eq!(busy(tab), [], "titres en français");
+        assert_eq!(in_english(tab), ["Tag push", "LFS fetch", "LFS pull", "Stash rename", "Fetch"]);
+        assert_eq!(busy(tab), [], "titres en anglais");
+
+        // Les opérations des boutons les occupent, dans les deux langues.
+        tab.op_fetch(&shared, None, true, false);
+        tab.op_pull(&shared, "origin".into(), "main".into(), false);
+        tab.op_push(&shared, "origin".into(), "main".into(), "main".into(), false, false, false);
+        tab.op_commit(&shared, "Message".into(), false, false);
+        tab.op_stash_save(&shared, "Travail en cours".into(), false, false);
+        tab.op_stash(&shared, stash, "stash@{0}".into(), StashOp::Pop);
+        assert_eq!(busy(tab), kinds, "titres en français");
+        in_english(tab);
+        assert_eq!(busy(tab), kinds, "titres en anglais");
+
+        for op in &tab.running {
+            op.cancel.cancel();
+        }
+        gate_tx.send(()).unwrap();
+        assert!(queues.writes.cancel_and_wait(Duration::from_secs(10)));
+        assert!(queues.background.cancel_and_wait(Duration::from_secs(10)));
     }
 }

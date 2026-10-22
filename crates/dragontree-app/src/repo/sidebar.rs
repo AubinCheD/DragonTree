@@ -895,11 +895,7 @@ impl RepoTab {
         if let Some(remote) = self.default_remote()
             && ui.button(format!("{} {}", icons::ARROW_LINE_UP, tr!("Pousser vers {remote}", remote))).clicked()
         {
-            let tag = name.clone();
-            self.run_net(shared, tr!("Push du tag"), super::Refresh::REFS, false, move |r, n, on| {
-                r.push_tag(&remote, &tag, n, on)?;
-                Ok(Some(tr!("Tag {tag} poussé", tag)))
-            });
+            self.op_push_tag(shared, remote, name.clone());
             ui.close();
         }
         self.filter_menu_entry(ui, shared, &format!("refs/tags/{name}"));

@@ -189,6 +189,9 @@ n'est pas une opération du dépôt) est fermé avec DragonTree, sans question.
 
 Réglages › Apparence › Langue : **Système** (langue d'affichage de Windows si elle est gérée, anglais sinon),
 **Français** ou **English**. Les messages de git lui-même restent dans la langue de git.
+Limite : un changement de langue vaut pour les textes affichés ensuite ; ceux qui l'étaient déjà ne sont pas retraduits
+(titre d'une opération en cours, notifications affichées, titre et texte d'un dialogue ouvert, certains messages
+d'erreur internes, qui peuvent alors mêler les deux langues).
 
 Le texte français écrit dans le code sert de clé : `tr!("Fermer l'onglet")`, `tr!("Supprimer « {name} » ?", name)`,
 `trn!(n, "{n} fichier", "{n} fichiers")`. Chaque autre langue a un catalogue

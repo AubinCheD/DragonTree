@@ -6,6 +6,7 @@ use dragontree_git::{ConflictKind, FileState, OpState, PatchMode, StatusEntry, S
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, Key, RichText, Sense, Ui};
 
+use super::actions::OpKind;
 use super::commit_message::{self, LengthLevel};
 use super::details::{file_row, file_row_sense};
 use super::diff_view::{self, DiffMode};
@@ -794,7 +795,7 @@ impl RepoTab {
         let staged = status.staged().len();
         let conflicts = status.conflicted().len();
         let merging = self.op_state == OpState::Merge;
-        let committing = self.running.iter().any(|o| o.title.starts_with("Commit"));
+        let committing = self.op_running(OpKind::Commit);
 
         let subject = ui.add(
             egui::TextEdit::singleline(&mut self.changes.subject)

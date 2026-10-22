@@ -4,7 +4,7 @@ use dragontree_git::HeadState;
 use dragontree_i18n::tr;
 use egui::{RichText, Ui};
 
-use super::actions::StashOp;
+use super::actions::{OpKind, StashOp};
 use super::{Dialog, RepoTab};
 use crate::app::{AppAction, Shared};
 use crate::commands::Command;
@@ -14,7 +14,8 @@ use crate::widgets::toolbar_button;
 
 impl RepoTab {
     pub(super) fn toolbar_ui(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
-        let busy = |tab: &RepoTab, name: &str| tab.running.iter().any(|o| !o.silent && o.title.starts_with(name));
+        // Bouton « occupé » pendant sa propre opération, reconnue par son type (jamais par son titre, traduit).
+        let busy = |tab: &RepoTab, kind| tab.op_running(kind);
         let head = self.refs.as_ref().map(|r| r.head.clone());
         // Les boutons tirés du registre de commandes ont le même état grisé et la même action que les menus.
         let can = |cmd| self.can_run(cmd);
@@ -48,7 +49,7 @@ impl RepoTab {
             });
             ui.separator();
 
-            if toolbar_button(ui, icons::CLOUD_ARROW_DOWN, "Fetch", fetch, busy(self, "Fetch"))
+            if toolbar_button(ui, icons::CLOUD_ARROW_DOWN, "Fetch", fetch, busy(self, OpKind::Fetch))
                 .on_hover_text(with_shortcut(
                     tr!("Récupérer les nouveautés de tous les remotes (fetch --all --prune)"),
                     Command::Fetch,
@@ -59,7 +60,7 @@ impl RepoTab {
             }
             // Ctrl+clic sur Pull ou Push : l'opération rapide, sans dialogue (Fetch n'en a pas).
             let ctrl = |ui: &Ui| ui.input(|i| i.modifiers.command);
-            if toolbar_button(ui, icons::ARROW_LINE_DOWN, "Pull", pull, busy(self, "Pull"))
+            if toolbar_button(ui, icons::ARROW_LINE_DOWN, "Pull", pull, busy(self, OpKind::Pull))
                 .on_hover_text(format!(
                     "{}\n{}",
                     with_shortcut(tr!("Récupérer et intégrer la branche suivie"), Command::Pull),
@@ -69,7 +70,7 @@ impl RepoTab {
             {
                 self.run_command(if ctrl(ui) { Command::QuickPull } else { Command::Pull }, shared);
             }
-            if toolbar_button(ui, icons::ARROW_LINE_UP, "Push", push, busy(self, "Push"))
+            if toolbar_button(ui, icons::ARROW_LINE_UP, "Push", push, busy(self, OpKind::Push))
                 .on_hover_text(format!(
                     "{}\n{}",
                     with_shortcut(tr!("Envoyer la branche courante"), Command::Push),
@@ -80,14 +81,14 @@ impl RepoTab {
                 self.run_command(if ctrl(ui) { Command::QuickPush } else { Command::Push }, shared);
             }
             ui.separator();
-            if toolbar_button(ui, icons::TRAY_ARROW_DOWN, "Stash", stash, busy(self, "Stash"))
+            if toolbar_button(ui, icons::TRAY_ARROW_DOWN, "Stash", stash, busy(self, OpKind::Stash))
                 .on_hover_text(with_shortcut(tr!("Mettre de côté les modifications en cours"), Command::Stash))
                 .clicked()
             {
                 self.run_command(Command::Stash, shared);
             }
             let has_stash = !self.stashes.is_empty();
-            if toolbar_button(ui, icons::TRAY_ARROW_UP, "Pop", has_stash, busy(self, StashOp::Pop.title()))
+            if toolbar_button(ui, icons::TRAY_ARROW_UP, "Pop", has_stash, busy(self, OpKind::StashPop))
                 .on_hover_text(tr!("Réappliquer le dernier stash et le supprimer"))
                 .clicked()
                 && let Some(top) = self.stashes.first()

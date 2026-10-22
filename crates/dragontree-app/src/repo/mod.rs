@@ -117,7 +117,11 @@ pub enum Side {
 
 pub struct RunningOp {
     pub id: u64,
+    /// Titre affiché (barre de progression, notifications), traduit au lancement : après un changement de langue, il
+    /// reste dans l'ancienne (RV5c, README « Langue »). La logique ne le lit jamais : voir `kind`.
     pub title: String,
+    /// Type de l'opération, dont dépend l'état « occupé » des boutons (`RepoTab::op_running`).
+    pub kind: actions::OpKind,
     pub progress: Option<Progress>,
     pub cancel: CancelToken,
     pub silent: bool,
@@ -592,6 +596,11 @@ impl RepoTab {
     pub(crate) fn queues(&mut self, shared: &Shared) -> Option<crate::op_queue::RepoQueues> {
         let repo = self.repo.as_ref()?;
         Some(self.queues.get_or_insert_with(|| shared.queues.for_repo(repo)).clone())
+    }
+
+    /// Une opération visible de ce type attend ou tourne : son bouton est « occupé » (barre d'outils, commit).
+    pub(crate) fn op_running(&self, kind: actions::OpKind) -> bool {
+        kind != actions::OpKind::Other && self.running.iter().any(|o| !o.silent && o.kind == kind)
     }
 
     pub fn is_busy(&self) -> bool {

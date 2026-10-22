@@ -57,7 +57,7 @@ Les références `crates/…:ligne` renvoient au code du 2026-10-19.
   - `--help` ignorait `--lang` ;
   - un format de date traduit invalide pouvait faire planter l'application ;
   - « Journal git » était traduit par « Git log » ; il est maintenant traduit par « Git command log ».
-- Les autres points de la relecture restent à traiter : voir RV5.
+- Les autres points de la relecture sont traités dans RV5 (corrigé) : `--lang` et `--theme` sont temporaires, l'état « occupé » des boutons ne dépend plus de la langue, et les textes déjà affichés lors d'un changement de langue restent dans l'ancienne (limite, README).
 
 ### Worktrees — fait (R3)
 
@@ -215,7 +215,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | RV2 | Gros diffs lus entièrement en mémoire avant la limite de 8 Mio (corrigé) | revue finale, mineur n°7 | moyenne |
 | RV3 | Fetch automatique dans la file des écritures ; deux files pour un même dépôt (corrigé) | revue finale, mineur n°16 | basse |
 | RV4 | Points non jugés : processus git à la fermeture, instances multiples, proxy, cas des forges (corrigé ; HTTP simple documenté comme limite) | revue finale et rapport du crate forges | basse |
-| RV5 | Résidus de la relecture de la traduction : `--lang` enregistré, bouton Push occupé, textes figés | relecture de la traduction | basse |
+| RV5 | Résidus de la relecture de la traduction : `--lang` enregistré, bouton Push occupé, textes figés (corrigé ; textes figés documentés comme limite) | relecture de la traduction | basse |
 
 ### Pistes
 
@@ -595,10 +595,10 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** chaque point est soit corrigé et testé, soit documenté comme limite dans le README (instances en HTTP simple).
 - **Priorité :** basse.
 
-#### RV5 — Résidus de la relecture de la traduction
+#### RV5 — Résidus de la relecture de la traduction (corrigé)
 
-- **Contexte :** relecture de la traduction du 2026-10-17. Trois points ont été corrigés (voir Langue) ; restent ceux-ci.
-- **État et travail restant :**
+- **Contexte :** relecture de la traduction du 2026-10-17. Trois points ont été corrigés (voir Langue) ; restaient ceux-ci.
+- **État :** corrigé (deux points corrigés, le troisième documenté comme limite).
   - **`--lang` et `--theme` temporaires (corrigé).**
     - Avant : l'option était écrite dans les réglages, toujours sauvegardés. Une seule exécution de `dragontree --lang en` changeait donc la langue pour de bon, alors que l'aide disait « force la langue ». `--theme` faisait de même.
     - Décision (plan) : les deux options deviennent temporaires (non enregistrées) ; l'aide le dit.
@@ -607,11 +607,16 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
       - les menus Affichage › Thème et Configuration › Langue cochent le choix en vigueur, et la fenêtre Réglages le montre (`SettingsWindow::new`) ; un choix explicite y est enregistré et met fin au remplacement du champ concerné : entrée d'un menu (même celle déjà cochée), thème ou langue changés dans la fenêtre puis « Enregistrer ». « Enregistrer » sans y toucher les laisse temporaires. Cas limite : pour enregistrer dans la fenêtre la valeur même de `--theme` (déjà sélectionnée), passer par le menu ;
       - l'aide (`crates/dragontree-app/src/main.rs`) : « thème pour cette exécution seulement (non enregistré) », « langue de l'interface pour cette exécution seulement (non enregistrée) » ; README, « Utilisation ».
     - Tests d'interface (`crates/dragontree-app/tests/ui_start_options.rs`) : `the_command_line_theme_and_language_are_in_effect_but_never_saved` (thème clair enregistré, `--theme dark --lang fr` : la fenêtre montre « Sombre » et « Français », le menu coche « Sombre » ; un réglage changé dans la fenêtre, puis un autre par un menu, sont enregistrés sans le thème ni la langue de la ligne de commande ; lancement suivant sans `--theme` : « Clair » coché ; vu rouge : `(Dark, Some(Fr))` enregistrés), `a_theme_chosen_in_the_menu_is_saved_even_if_it_is_the_command_line_one`, `a_theme_chosen_in_the_settings_window_replaces_the_command_line_one`.
-  - **Bouton Push affiché occupé pendant le push d'un tag, en français seulement.**
-    - État : l'état occupé se teste sur le début du titre de l'opération (`crates/dragontree-app/src/repo/toolbar.rs:16`) ; « Push du tag » commence par « Push », pas « Tag push » (`crates/dragontree-app/src/repo/sidebar.rs:587`). Le même procédé sert pour « Commit » (`crates/dragontree-app/src/repo/changes.rs:553`).
-    - À faire : identifier les opérations par un type plutôt que par leur titre.
-  - **Textes figés dans l'ancienne langue après un changement de langue :** titres d'opérations en cours, notifications déjà affichées, titres de dialogues ouverts, messages d'erreur internes (qui peuvent alors mêler les deux langues). Le message d'erreur des réglages est construit avant l'application de la langue choisie (`crates/dragontree-app/src/app.rs:166` puis `:174`). Acceptable ; à documenter.
-- **Critère de fin :** décision prise sur `--lang` et aide alignée ; test unitaire de l'état occupé indépendant de la langue.
+  - **Bouton Push affiché occupé pendant le push d'un tag, en français seulement (corrigé).**
+    - Avant : l'état occupé des boutons de la barre d'outils se testait sur le début du titre de l'opération, qui est traduit : « Push du tag » commence par « Push », pas « Tag push ». De même en français « Fetch LFS » et « Pull LFS » occupaient Fetch et Pull, en anglais « Stash rename » (renommage d'un stash) occupait Stash, et une commande personnalisée nommée « Commit… » ou « Push… » occupait le bouton, dans les deux langues. La zone de commit testait de même « Commit ».
+    - Réalisé : chaque opération porte un type, `OpKind` (`crates/dragontree-app/src/repo/actions.rs`), dans ses options (`OpOptions::kind`) puis dans `RunningOp::kind` (`crates/dragontree-app/src/repo/mod.rs`) ; `RepoTab::op_running(kind)` (opération visible de ce type) donne l'état occupé des boutons Fetch, Pull, Push, Stash et Pop (`toolbar.rs`) et l'état « commit en cours » de la zone de commit (`changes.rs`). Plus aucune logique ne lit un titre d'opération (titres seulement affichés : barre de progression, notifications, dialogue de fermeture).
+    - Règle : un bouton est occupé pendant sa propre opération, d'où qu'elle soit lancée. `Fetch` : fetch des remotes (le fetch automatique, silencieux, ne l'occupe pas, comme avant) ; `Pull` ; `Push` : dialogue Push, push rapide, push après un commit ; `Commit` ; `Stash` : dialogue Stash (stash ou snapshot) et stash des fichiers choisis ; `StashPop` : pop d'un stash. Les autres (`Other`) n'occupent aucun bouton : push d'un tag (`op_push_tag`, sorti du menu du tag), push de plusieurs branches, fetch, pull et prune LFS, renommage, application et suppression d'un stash, commandes personnalisées. Changements de comportement assumés, identiques dans les deux langues : le push de plusieurs branches n'occupe plus Push (il l'occupait, « Push de plusieurs branches » / « Pushing several branches ») ; un snapshot occupe désormais Stash.
+    - Test unitaire `the_busy_buttons_follow_the_kind_of_operation_in_every_language` (`actions.rs`) : file des écritures bloquée, opérations lancées par le code réel ; push d'un tag, fetch et pull LFS, renommage d'un stash et fetch automatique n'occupent aucun bouton, fetch, pull, push, commit, stash et pop occupent le leur ; mêmes résultats avec les titres remplacés par leur traduction anglaise (« Tag push », « LFS fetch », « LFS pull », « Stash rename », « Pop stash » : la langue de l'interface est globale au processus, les tests unitaires restent en français). Vu rouge avec l'ancienne règle (début du titre) : `[Fetch, Pull, Push]` occupés par les titres français.
+  - **Textes figés dans l'ancienne langue après un changement de langue (documenté).**
+    - Titres des opérations en cours, notifications déjà affichées, titres et textes des dialogues ouverts, messages d'erreur internes (qui peuvent alors mêler les deux langues) restent dans la langue du moment où ils ont été construits.
+    - Décision (plan) : documenter la limite ; pas de retraduction des notifications déjà affichées. Documentée dans le README (« Langue ») et en commentaire là où la langue change (`App::process_actions`, `crates/dragontree-app/src/app.rs`) et sur `RunningOp::title`.
+    - Message d'erreur des réglages illisibles, construit avant l'application de la langue choisie (vérifié) : il n'en résulte aucun mélange. Il n'existe que si les réglages n'ont pas pu être lus ; ce sont alors les réglages par défaut (langue du système), et le message est construit dans la langue du système ou dans celle de `--lang`, déjà appliquée par `main` : la même que la langue en vigueur ensuite.
+- **Critère de fin (atteint) :** décision prise sur `--lang` (temporaire) et aide alignée ; test unitaire de l'état occupé indépendant de la langue.
 - **Priorité :** basse.
 
 ### Pistes et limites connues

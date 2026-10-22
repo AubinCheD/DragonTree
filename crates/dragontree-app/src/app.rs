@@ -729,6 +729,9 @@ impl DragonTreeApp {
                 ctx.request_repaint();
             });
         }
+        // Nouvelle langue : les textes déjà construits ne sont pas retraduits (RV5c, limite décrite dans le README,
+        // « Langue ») : titres des opérations en cours, notifications affichées, titres et textes des dialogues
+        // ouverts, messages d'erreur internes, qui peuvent alors mêler les deux langues.
         let lang = self.shared.language().unwrap_or(self.system_lang);
         if lang != dragontree_i18n::lang() {
             dragontree_i18n::set_lang(lang);
