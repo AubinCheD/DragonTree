@@ -140,6 +140,12 @@ dragontree.exe [DÉPÔT…] [--open <dossier>] [--add-root <dossier>] [--theme l
                [--view history|changes] [--profile <dossier>] [--screenshot <png> --after-ms <n>]
 ```
 
+`--help` affiche l'aide sur la sortie d'erreur (code de sortie 2), aussi dans une console cmd ou PowerShell :
+l'exécutable release est une application graphique, qui se rattache alors à la console pour écrire l'aide ou une
+erreur d'option. Limite : tapé directement, cmd et PowerShell n'attendent pas la fin d'une application graphique ;
+leur invite revient avant le texte (Entrée en redonne une). `start /wait dragontree --help` (cmd), un script `.cmd`
+ou `Start-Process -NoNewWindow -Wait` (PowerShell) attendent. Dans un tube (Git Bash), rien ne change.
+
 `--profile` isole réglages, cache et état de fenêtre (pratique pour tester sans toucher à votre profil).
 Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALAPPDATA%\DragonTree\`.
 `--theme` et `--lang` valent pour ce lancement seulement et ne sont pas enregistrés ; un thème ou une langue choisis

@@ -83,6 +83,7 @@ fn claim_instance(start: &StartOptions) -> Option<PrimaryInstance> {
         Startup::Primary(instance) => Some(instance),
         Startup::Forwarded => std::process::exit(0),
         Startup::Alone(e) => {
+            // Pas de rattachement à la console ici (`console`) : l'application continue, elle en recevrait les Ctrl+C.
             eprintln!("DragonTree : instance unique impossible ({e}), démarrage sans");
             None
         }
@@ -95,6 +96,9 @@ fn main() -> eframe::Result {
     let start = match parse_args() {
         Ok(o) => o,
         Err(msg) => {
+            // Exécutable release (application graphique) lancé depuis cmd ou PowerShell : sans cela, l'aide et les
+            // erreurs n'iraient nulle part (P4, voir `console`).
+            dragontree_app::console::attach_parent_console();
             eprintln!("{msg}");
             std::process::exit(2);
         }

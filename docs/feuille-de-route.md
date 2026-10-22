@@ -224,7 +224,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | P1 | Publication open source : licence, vérification du nom, README (fait ; EUIPO et INPI à vérifier à la main) | objectif annoncé par l'utilisateur | moyenne |
 | P2 | Cases du plan jamais cochées (fait : plans signalés comme historiques) | état du plan | basse |
 | P3 | Stabilité de `ui_network` vérifiée sur 3 passages seulement (fait : 20 passages sur 20) | correction des tests instables | basse |
-| P4 | `--help` en build release depuis une console Windows (à vérifier) | relevé en vérifiant le code | basse |
+| P4 | `--help` en build release depuis une console Windows (corrigé ; l'invite revient avant le texte, limite documentée) | relevé en vérifiant le code | basse |
 | L1 | Dépôts SHA-256 non pris en charge | limite connue (README) | basse |
 | L2 | Éditeur de conflits limité aux fichiers UTF-8 | limite constatée dans le code | moyenne |
 | L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session | arbitrage de la revue (M9) | basse |
@@ -684,12 +684,38 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** 20 passages sur 20.
 - **Priorité :** basse.
 
-#### P4 — `--help` en build release depuis une console Windows (à vérifier)
+#### P4 — `--help` en build release depuis une console Windows (fait)
 
 - **Contexte :** relevé en vérifiant le code, ce point n'a pas été discuté.
   - L'exécutable release utilise le sous-système Windows (`crates/dragontree-app/src/main.rs:1`), et l'aide est écrite sur la sortie d'erreur (`:110`).
   - L'aide a été vérifiée à travers un tube, depuis Git Bash. Dans une console cmd ou PowerShell interactive, elle risque de ne pas s'afficher.
-- **À faire :** lancer `dragontree.exe --help` dans cmd et dans PowerShell. Si rien ne s'affiche, s'attacher à la console parente (`AttachConsole`) avant d'écrire.
+- **État :** corrigé.
+  - Avant (vérifié le 2026-10-22 avec l'exécutable release) : `dragontree.exe --help` tapé dans cmd ou dans PowerShell, `cmd /c`, `Start-Process -NoNewWindow -Wait` : rien ne s'affichait. Une application graphique n'a ni console ni flux standard (handles nuls).
+  - Réalisé (`crates/dragontree-app/src/console.rs`) : avant d'écrire l'aide ou une erreur d'argument, `main` appelle `console::attach_parent_console`.
+    - Il ne fait rien si la sortie d'erreur est déjà utilisable : console, tube (Git Bash dans mintty), fichier, `NUL`.
+    - Sinon il se rattache à la console du parent (`AttachConsole(ATTACH_PARENT_PROCESS)`), puis remet les flux qui étaient redirigés : constaté, depuis cmd, `--help > aide.txt` voyait sa sortie standard remplacée par la console, car cmd transmet les flux sans `STARTF_USESTDHANDLES` et `AttachConsole` les remplace alors tous.
+    - Un flux de sortie encore inutilisable après l'attache est ouvert sur `CONOUT$` : c'est le cas de Git Bash lancé dans une console, qui transmet un handle de sortie d'erreur invalide chez l'application graphique, et `AttachConsole` ne le remplace pas.
+    - La bibliothèque standard relit `GetStdHandle` à chaque écriture et écrit dans une console en UTF-16 : `eprintln!` suffit ensuite, accents compris.
+    - Sans console à rejoindre (lancement depuis l'Explorateur), le message est perdu comme avant ; le code de sortie (2) ne change pas.
+    - Le message « instance unique impossible », écrit au démarrage d'une application qui continue, ne se rattache pas : une application rattachée à une console en reçoit les Ctrl+C.
+  - Vérifié à la main le 2026-10-22, exécutable release (texte lu dans la console) :
+    - tapé dans cmd et dans PowerShell (interactifs) : aide affichée, accents compris ;
+    - `cmd /c`, `start /wait`, script `.cmd`, `Start-Process -NoNewWindow -Wait`, Git Bash dans une console : aide affichée avant l'invite ou la commande suivante ; code de sortie 2 (`start /wait`, script, Git Bash) ;
+    - option inconnue : message puis aide ;
+    - `--help > aide.txt` dans cmd : aide dans la console, fichier vide (l'aide va sur la sortie d'erreur) ;
+    - `--help 2> erreurs.txt` : aide dans le fichier, rien dans la console ;
+    - Git Bash (tube) : inchangé, aide dans le tube, code 2.
+  - Limite (documentée dans le README et le module) : tapé directement dans cmd ou PowerShell, le shell n'attend pas la fin d'une application graphique. L'invite revient aussitôt et le texte s'affiche après elle ; Entrée redonne une invite propre. `start /wait` (cmd), un script `.cmd` ou `Start-Process -NoNewWindow -Wait` (PowerShell) attendent la fin.
+- **Tests** (`crates/dragontree-app/src/console.rs`) :
+  - `only_a_missing_error_output_attaches_and_redirections_are_kept` : décision selon l'état des flux.
+  - `handles_are_classified_by_what_windows_knows_of_them` : handles nul, invalide, inconnu, fichier, tube.
+  - `without_a_console_the_call_does_not_panic_and_keeps_the_redirected_output` : le test se relance en processus sans console, sortie standard dans un tube, sans sortie d'erreur.
+    - Lancé comme cmd lance un programme, avec une console parente : `Attached`, et la sortie standard garde son tube.
+    - Sans console parente : `NoConsole`, sans panique.
+    - Vu rouge sans la remise des flux : sortie standard remplacée par la console, compte rendu de l'enfant perdu.
+  - L'exécutable release n'est pas construit par la suite de tests (vérification manuelle ci-dessus).
+- **À faire :** lancer `dragontree.exe --help` dans cmd et dans PowerShell. Si rien ne s'affiche, s'attacher à la console parente (`AttachConsole`) avant d'écrire (fait).
+- **Critère de fin (atteint) :** l'aide s'affiche depuis cmd et PowerShell avec l'exécutable release ; tube de Git Bash inchangé.
 - **Priorité :** basse.
 
 #### L1 — Dépôts SHA-256 non pris en charge

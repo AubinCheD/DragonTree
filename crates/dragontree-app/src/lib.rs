@@ -11,6 +11,7 @@ pub mod clone;
 pub mod closed_tabs;
 pub mod closing;
 pub mod commands;
+pub mod console;
 pub mod custom_commands;
 pub mod diff_style;
 pub mod editors;
