@@ -65,7 +65,8 @@ pub fn abort_label(state: OpState) -> &'static str {
 /// des modifications locales ; `PullRequest` : formulaire de création d'une pull request, qui reste ouvert pendant le push
 /// et l'appel à la forge (voir `pull_request`) ; `OpenSolution` : solution à ouvrir dans `editor` (Visual Studio) quand le
 /// dépôt en contient plusieurs, `chosen` est sa position dans `solutions` ; `UseAccount` : comptes proposés pour le
-/// dépôt (voir `repo_account`), `chosen` est l'identifiant du compte coché.
+/// dépôt (voir `repo_account`), `chosen` est l'identifiant du compte coché ; `DiscardLines::whitespace` : un hunk entier
+/// choisi emporte aussi des changements d'espaces masqués par « Espaces » (L6), que le dialogue signale.
 #[derive(Debug, Clone)]
 pub enum Dialog {
     CreateBranch { start: String, start_label: String, name: String, checkout: bool },
@@ -88,7 +89,7 @@ pub enum Dialog {
     Push { remote: String, local: String, remote_branch: String, set_upstream: bool, force: bool, tags: bool },
     Pull { remote: String, branch: String, rebase: bool },
     Discard { tracked: Vec<String>, untracked: Vec<String> },
-    DiscardLines { selection: Vec<HunkSelection> },
+    DiscardLines { selection: Vec<HunkSelection>, whitespace: bool },
     AddRemote { name: String, url: String },
     EditRemoteUrl { name: String, url: String, push_url: Option<String> },
     RemoveRemote { name: String },
@@ -546,7 +547,7 @@ impl RepoTab {
                 });
                 true
             }
-            Dialog::DiscardLines { selection } => {
+            Dialog::DiscardLines { selection, whitespace } => {
                 let lines: usize = selection.iter().map(|s| s.lines.as_ref().map_or(0, Vec::len)).sum();
                 let text = if lines == 0 {
                     tr!("Le hunk sera annulé dans la copie de travail.").to_string()
@@ -558,8 +559,9 @@ impl RepoTab {
                     )
                 };
                 warn(ui, &text);
-                // Diff sans les espaces (L6) : un hunk entier emporte aussi les changements d'espaces de ses lignes.
-                if self.changes.diff_full.is_some() && selection.iter().any(|s| s.lines.is_none()) {
+                // Diff sans les espaces (L6) : un hunk entier emporte aussi les changements d'espaces de ses lignes, dit
+                // seulement s'il en a (revue finale).
+                if *whitespace {
                     ui.label(
                         RichText::new(tr!("Ses changements d'espaces, masqués par « Espaces », seront aussi annulés."))
                             .color(p.weak),
@@ -729,7 +731,7 @@ impl RepoTab {
                 self.op_pull(shared, remote, branch.trim().to_string(), rebase)
             }
             Dialog::Discard { tracked, untracked } => self.op_discard(shared, tracked, untracked),
-            Dialog::DiscardLines { selection } => {
+            Dialog::DiscardLines { selection, .. } => {
                 self.op_patch(shared, PatchMode::Discard, selection);
                 self.changes.diff_state.selected.clear();
             }

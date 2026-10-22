@@ -84,7 +84,9 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   coloration est mise en cache et s'arrête au-delà de 20 000 lignes) ; un diff de plus de 8 Mio est tronqué et git est
   arrêté à cette limite, sans que la mémoire monte avec la taille du fichier.
 - **Affichage du diff** : police, taille, largeur de tabulation, espaces visibles ou ignorés (espaces ignorés :
-  l'indexation par hunk ou par ligne reste possible ; un hunk entier emporte les changements d'espaces de ses lignes).
+  l'indexation par hunk ou par ligne reste possible ; un hunk entier emporte les changements d'espaces de ses lignes,
+  pas un changement de mode, signalé ; diff en lecture seule si le diff complet du fichier ne peut pas être lu en
+  entier).
 - **IA Claude Code** (facultatif, désactivée par défaut) : message de commit et revue de la branche courante.
   DragonTree lance la CLI `claude` en mode non interactif, sans aucun outil (`--tools ""`) : la consigne passe par stdin
   et la réponse revient sur stdout ; l'IA n'exécute ni ne modifie rien.

@@ -78,6 +78,12 @@ impl FileDiff {
     pub fn removed_count(&self) -> usize {
         self.hunks.iter().flat_map(|h| &h.lines).filter(|l| l.kind == LineKind::Removed).count()
     }
+
+    /// Changement de mode du fichier (`old mode` et `new mode` de l'en-tête) : ancien et nouveau mode.
+    pub fn mode_change(&self) -> Option<(&str, &str)> {
+        let mode = |prefix: &str| self.header_lines.iter().find_map(|l| l.strip_prefix(prefix)).map(str::trim);
+        Some((mode("old mode ")?, mode("new mode ")?))
+    }
 }
 
 /// Taille maximale d'un diff affiché ; au-delà `truncated` est vrai et les hunks sont vides.
@@ -587,5 +593,26 @@ index 3b18e51..0000000\n\
         assert_eq!(v[2].kind, ChangeKind::Added);
         assert_eq!(v[3].kind, ChangeKind::Deleted);
         assert_eq!(v[4].kind, ChangeKind::TypeChanged);
+    }
+
+    /// Revue finale (C4) : changement de mode lu dans l'en-tête, pour le signaler quand l'option « Espaces » ne
+    /// l'indexe pas avec les hunks.
+    #[test]
+    fn mode_change_is_read_from_the_header() {
+        let d = one(&lines(&[
+            "diff --git a/run.sh b/run.sh",
+            "old mode 100644",
+            "new mode 100755",
+            "index 1111111..2222222",
+            "--- a/run.sh",
+            "+++ b/run.sh",
+            "@@ -1 +1 @@",
+            "-a",
+            "+b",
+        ]));
+        assert_eq!(d.mode_change(), Some(("100644", "100755")));
+        let d =
+            one(&lines(&["diff --git a/x b/x", "index 1..2 100644", "--- a/x", "+++ b/x", "@@ -1 +1 @@", "-a", "+b"]));
+        assert_eq!(d.mode_change(), None);
     }
 }

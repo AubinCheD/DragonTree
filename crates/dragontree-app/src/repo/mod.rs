@@ -242,6 +242,30 @@ impl Default for HistoryState {
     }
 }
 
+/// Diff complet (sans `-w`) d'un fichier des changements affiché sans les espaces (option « Espaces », L6), lu avec lui :
+/// les patchs des hunks et des lignes choisis y sont construits (voir `build_patch_ignoring_whitespace`).
+#[derive(Debug, Clone, Default)]
+pub enum FullDiff {
+    /// Pas besoin : diff affiché avec les espaces, sans hunk, ou d'un fichier non suivi (toutes ses lignes sont
+    /// ajoutées ; `op_patch` le relit sans `-w`). Les patchs se construisent sur le diff affiché.
+    #[default]
+    NotNeeded,
+    Read(Arc<FileDiff>),
+    /// Illisible (erreur de git) ou incomplet (tronqué à la limite de lecture, binaire) : le diff affiché reste, en
+    /// lecture seule pour l'indexation, avec l'explication, comme avant L6 (revue finale).
+    Unavailable,
+}
+
+impl FullDiff {
+    /// Le diff complet lu, s'il l'a été.
+    pub fn read(&self) -> Option<&Arc<FileDiff>> {
+        match self {
+            FullDiff::Read(full) => Some(full),
+            FullDiff::NotNeeded | FullDiff::Unavailable => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ChangesState {
     pub selected: Option<(Side, String)>,
@@ -249,9 +273,8 @@ pub struct ChangesState {
     /// Point de départ d'une sélection Maj+clic (fichier, pas position : la liste change).
     pub anchor: Option<(Side, String)>,
     pub diff: Option<LoadedDiff>,
-    /// Diff complet (sans `-w`) du fichier affiché, lu avec lui quand il ignore les espaces (option « Espaces ») : les
-    /// patchs des hunks et des lignes choisis y sont construits (L6, voir `build_patch_ignoring_whitespace`).
-    pub diff_full: Option<Arc<FileDiff>>,
+    /// Diff complet du fichier affiché quand il ignore les espaces (voir `FullDiff`).
+    pub diff_full: FullDiff,
     pub diff_key: Option<(Side, String)>,
     pub diff_loading: bool,
     pub diff_state: DiffViewState,
@@ -376,7 +399,7 @@ pub enum RepoEvent {
     Details(u64, Oid, Result<DetailsData, GitError>),
     CommitDiff(u64, Result<LoadedDiff, GitError>),
     /// Diff d'un fichier des changements, et son diff complet quand il ignore les espaces (voir `ChangesState::diff_full`).
-    WorkDiff(u64, (Side, String), Result<(LoadedDiff, Option<Arc<FileDiff>>), GitError>),
+    WorkDiff(u64, (Side, String), Result<(LoadedDiff, FullDiff), GitError>),
     /// Patch lu et vérifié, prêt pour le dialogue d'application.
     PatchPreview(u64, Result<Box<patches::PatchPreview>, GitError>),
     /// Texte d'un patch lu pour le presse-papiers.
@@ -867,16 +890,20 @@ impl RepoTab {
         let (g, id, o) = (self.gens.work_diff, self.id, Self::diff_options(shared));
         shared.jobs.spawn("work-diff", move || {
             let staged = side == Side::Staged;
-            let res = repo.diff_worktree_file(&path, staged, untracked, &o).and_then(|shown| {
+            let res = repo.diff_worktree_file(&path, staged, untracked, &o).map(|shown| {
                 // Diff sans les espaces (L6) : le diff complet du même fichier, lu dans la foulée, sert aux patchs. Un
                 // fichier non suivi n'en a pas besoin (toutes ses lignes sont ajoutées ; `op_patch` le relit sans `-w`).
+                // Illisible ou incomplet, il ne fait pas échouer l'affichage (voir `FullDiff::Unavailable`).
                 let full = if o.ignore_whitespace && !untracked && !shown.hunks.is_empty() {
                     let full_options = DiffOptions { ignore_whitespace: false, ..o };
-                    Some(Arc::new(repo.diff_worktree_file(&path, staged, false, &full_options)?))
+                    match repo.diff_worktree_file(&path, staged, false, &full_options) {
+                        Ok(full) if !full.truncated && !full.is_binary => FullDiff::Read(Arc::new(full)),
+                        _ => FullDiff::Unavailable,
+                    }
                 } else {
-                    None
+                    FullDiff::NotNeeded
                 };
-                Ok((LoadedDiff::new(shown), full))
+                (LoadedDiff::new(shown), full)
             });
             Some(AppEvent::Repo(id, RepoEvent::WorkDiff(g, (side, path), res)))
         });
@@ -1050,7 +1077,7 @@ impl RepoTab {
                     }
                     Err(e) => {
                         self.changes.diff = None;
-                        self.changes.diff_full = None;
+                        self.changes.diff_full = FullDiff::NotNeeded;
                         shared.toast(Toast::error(tr!("Diff impossible"), e.to_string()));
                     }
                 }
@@ -1240,7 +1267,7 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                 } else {
                     self.changes.selected = None;
                     self.changes.diff = None;
-                    self.changes.diff_full = None;
+                    self.changes.diff_full = FullDiff::NotNeeded;
                     self.changes.diff_key = None;
                 }
             }

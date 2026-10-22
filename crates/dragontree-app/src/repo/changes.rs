@@ -12,7 +12,7 @@ use super::details::{file_row, file_row_sense};
 use super::diff_view::{self, DiffMode};
 use super::file_drag::{FileDrag, file_drag_ghost};
 use super::patches::PatchSource;
-use super::{ChangesState, Dialog, RepoTab, Side};
+use super::{ChangesState, Dialog, FullDiff, RepoTab, Side};
 use crate::app::{AppAction, Shared};
 use crate::commands::Command;
 use crate::external_tools::ExternalDiff;
@@ -140,7 +140,7 @@ impl RepoTab {
         self.changes.multi = [(side, path.clone())].into();
         if side == Side::Conflict {
             self.changes.diff = None;
-            self.changes.diff_full = None;
+            self.changes.diff_full = FullDiff::NotNeeded;
             self.changes.diff_key = None;
         } else {
             self.load_work_diff(shared, side, path, false);
@@ -686,22 +686,42 @@ impl RepoTab {
         }
         let mode = if side == Side::Staged { DiffMode::Staged } else { DiffMode::Unstaged };
         let renamed_staged = side == Side::Staged && diff.old_path.is_some() && diff.old_path != diff.new_path;
+        let note = |ui: &mut Ui, text: &str| {
+            ui.label(RichText::new(format!("{} {text}", icons::INFO)).color(p.weak).size(12.0));
+        };
         // Diff sans les espaces (-w) : les patchs sont construits sur le diff complet lu avec lui (L6, voir
-        // `build_patch_ignoring_whitespace`) ; la règle de correspondance est rappelée au-dessus du diff.
-        if self.changes.diff_full.is_some() && !renamed_staged {
-            ui.label(
-                RichText::new(format!(
-                    "{} {}",
-                    icons::INFO,
-                    tr!(
-                        "Espaces ignorés à l'affichage : un hunk indexé, désindexé ou annulé emporte aussi ses changements d'espaces ; une sélection de lignes, non."
-                    )
-                ))
-                .color(p.weak)
-                .size(12.0),
+        // `build_patch_ignoring_whitespace`) ; la règle de correspondance est rappelée au-dessus du diff, et un
+        // changement de mode, que les hunks n'emportent pas, signalé. Diff complet illisible ou incomplet : lecture
+        // seule pour l'indexation, comme avant L6 (revue finale).
+        let unavailable = matches!(self.changes.diff_full, FullDiff::Unavailable);
+        if renamed_staged {
+            // Lecture seule de toute façon (renommage indexé).
+        } else if unavailable {
+            note(
+                ui,
+                tr!(
+                    "Lecture seule : le diff complet du fichier, qui sert à indexer ou annuler des hunks et des lignes quand « Espaces » est actif, n'a pas pu être lu en entier (fichier trop gros ?). Désactivez « Espaces » pour indexer ou annuler des lignes."
+                ),
             );
+        } else if self.changes.diff_full.read().is_some() {
+            note(
+                ui,
+                tr!(
+                    "Espaces ignorés à l'affichage : un hunk indexé, désindexé ou annulé emporte aussi ses changements d'espaces ; une sélection de lignes, non."
+                ),
+            );
+            if let Some((old, new)) = diff.mode_change() {
+                note(
+                    ui,
+                    &tr!(
+                        "Changement de mode ({old} → {new}) : avec « Espaces », il ne suit ni les hunks ni les lignes, seulement le fichier entier.",
+                        old,
+                        new
+                    ),
+                );
+            }
         }
-        let mode = if renamed_staged { DiffMode::ReadOnly } else { mode };
+        let mode = if renamed_staged || unavailable { DiffMode::ReadOnly } else { mode };
         if self.changes.highlighter.is_dark() != p.dark {
             self.changes.highlighter = crate::highlight::Highlighter::new(p.dark);
         }
@@ -719,7 +739,14 @@ impl RepoTab {
         );
         if let Some(a) = action {
             if a.mode == PatchMode::Discard {
-                self.dialog = Some(Dialog::DiscardLines { selection: a.selection });
+                // Diff sans les espaces : le dialogue dit si un hunk entier choisi emporte aussi des changements
+                // d'espaces (revue finale).
+                let whitespace = self.changes.diff_full.read().is_some_and(|full| {
+                    a.selection.iter().any(|s| {
+                        s.lines.is_none() && dragontree_git::whole_hunk_changes_whitespace(&diff, full, s.hunk)
+                    })
+                });
+                self.dialog = Some(Dialog::DiscardLines { selection: a.selection, whitespace });
             } else {
                 self.op_patch(shared, a.mode, a.selection);
                 self.changes.diff_state.selected.clear();

@@ -175,6 +175,85 @@ fn a_hunk_is_staged_with_whitespace_ignored() {
     assert_eq!(std::fs::read(repo.join("form.cs")).unwrap(), worktree, "copie de travail intacte");
 }
 
+/// Dépôt `depot` dont le fichier `name` passe de `old` (commité) à `new` (copie de travail), interface lancée sur la
+/// vue des changements avec l'option « Espaces », une fois `prepare` passé sur le dépôt (le premier fichier est choisi).
+fn whitespace_ignored(
+    base: &Path,
+    name: &str,
+    old: &[u8],
+    new: &[u8],
+    prepare: impl FnOnce(&Path),
+) -> Harness<'static, DragonTreeApp> {
+    let repo = base.join("depot");
+    init_repo(&repo);
+    std::fs::write(repo.join(name), old).unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "init"]);
+    std::fs::write(repo.join(name), new).unwrap();
+    prepare(&repo);
+    let profile = base.join("profil");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(profile.join("settings.json"), r#"{"ignore_whitespace": true}"#).unwrap();
+    harness(StartOptions { open: vec![repo], view: Some("changes".into()), ..start(base) })
+}
+
+/// Revue finale (C1) : avec « Espaces », un diff complet illisible ou incomplet (ici au-delà de la limite de lecture
+/// de 8 Mio) ne fait plus échouer l'affichage et ne sert pas aux patchs : le diff sans les espaces reste affiché, en
+/// lecture seule pour l'indexation, avec l'explication.
+#[test]
+fn a_full_diff_that_cannot_be_read_whole_leaves_the_whitespace_diff_read_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Changement visible en tête ; espaces ajoutés à 100 longues lignes : le diff complet dépasse 8 Mio, pas le diff
+    // affiché.
+    let long = "a".repeat(50_000);
+    let text = |first: &str, tail: &str| -> Vec<u8> {
+        let mut s = format!("{first}\n");
+        for i in 0..9 {
+            s.push_str(&format!("ligne {i}\n"));
+        }
+        for _ in 0..100 {
+            s.push_str(&format!("{long}{tail}\n"));
+        }
+        s.into_bytes()
+    };
+    let mut h = whitespace_ignored(tmp.path(), "gros.txt", &text("x = 1", ""), &text("x = 2", " "), |_| {});
+
+    wait_until(&mut h, "diff en lecture seule expliqué", |h| h.query_by_label_contains("Lecture seule").is_some());
+    assert!(h.query_by_label_contains("Indexer le hunk").is_none(), "pas d'indexation sur un diff incomplet");
+    assert_eq!(h.query_all_by_label_contains("Diff impossible").count(), 0);
+}
+
+/// Revue finale (C3) : la note du dialogue « Annuler des lignes » sur les changements d'espaces d'un hunk entier n'est
+/// affichée que si le hunk en contient.
+#[test]
+fn the_discard_note_on_whitespace_shows_only_for_a_hunk_that_has_whitespace_changes() {
+    for (new, expected) in [("a\r\nB\r\nc\r\n", false), ("a\nB\r\nc\r\n", true)] {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut h = whitespace_ignored(tmp.path(), "f.txt", b"a\r\nb\r\nc\r\n", new.as_bytes(), |_| {});
+        click_label_containing(&mut h, "Annuler le hunk");
+        wait_until(&mut h, "dialogue d'annulation", |h| {
+            h.query_by_label_contains("Le hunk sera annulé dans la copie de travail").is_some()
+        });
+        let note = h.query_by_label_contains("Ses changements d'espaces").is_some();
+        assert_eq!(note, expected, "note pour {new:?}");
+    }
+}
+
+/// Revue finale (C4) : avec « Espaces », un changement de mode ne suit pas les hunks ni les lignes : le diff le dit.
+#[test]
+fn a_mode_change_is_pointed_out_when_whitespace_is_ignored() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Contenu et mode indexés (le mode passe par l'index : `core.fileMode` est faux sous Windows) ; le fichier indexé,
+    // seul modifié, est choisi.
+    let mut h = whitespace_ignored(tmp.path(), "run.sh", b"a\nb\n", b"a\nB\n", |repo| {
+        git(repo, &["add", "run.sh"]);
+        git(repo, &["update-index", "--chmod=+x", "run.sh"]);
+    });
+    wait_until(&mut h, "changement de mode signalé", |h| {
+        h.query_by_label_contains("Changement de mode (100644 → 100755)").is_some()
+    });
+}
+
 #[test]
 fn enter_does_not_confirm_a_destructive_dialog() {
     let tmp = tempfile::tempdir().unwrap();

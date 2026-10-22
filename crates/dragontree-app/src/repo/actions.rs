@@ -10,7 +10,7 @@ use dragontree_git::{
 use dragontree_i18n::{tr, trn};
 
 use super::dialogs::{ConfirmAction, Dialog};
-use super::{AfterCommit, PendingCommit, Refresh, RepoEvent, RepoTab, RunningOp, Side};
+use super::{AfterCommit, FullDiff, PendingCommit, Refresh, RepoEvent, RepoTab, RunningOp, Side};
 use crate::app::{AppEvent, Shared};
 use crate::op_queue::PendingOp;
 use crate::toasts::{Toast, ToastKind};
@@ -363,7 +363,13 @@ impl RepoTab {
     pub(crate) fn op_patch(&mut self, shared: &Shared, mode: PatchMode, sel: Vec<HunkSelection>) {
         let Some(diff) = self.changes.diff.clone() else { return };
         let Some((side, path)) = self.changes.diff_key.clone() else { return };
-        let full = self.changes.diff_full.clone();
+        let full = match &self.changes.diff_full {
+            FullDiff::Read(full) => Some(Arc::clone(full)),
+            FullDiff::NotNeeded => None,
+            // Diff complet illisible : diff en lecture seule pour l'indexation, rien n'est construit sur le diff
+            // affiché, faux sans les espaces (revue finale).
+            FullDiff::Unavailable => return,
+        };
         let untracked = diff.is_new
             && side == Side::Unstaged
             && self

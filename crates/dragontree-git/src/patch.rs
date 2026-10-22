@@ -187,6 +187,19 @@ pub fn build_patch_ignoring_whitespace(
     Ok(build_patch(&exact, &exact_sel, reverse))
 }
 
+/// Le hunk entier `hunk` du diff affiché sans les espaces (`shown`) emporte aussi des changements d'espaces : l'une de
+/// ses lignes de contexte a deux versions qui diffèrent dans le diff complet `full` (voir
+/// [`build_patch_ignoring_whitespace`]). Faux pour un hunk absent ou qui ne se reporte pas sur le diff complet (son
+/// patch serait refusé).
+pub fn whole_hunk_changes_whitespace(shown: &FileDiff, full: &FileDiff, hunk: usize) -> bool {
+    let Some(h) = shown.hunks.get(hunk) else { return false };
+    if full.truncated || full.is_binary {
+        return false;
+    }
+    // Une ligne de contexte dont les versions diffèrent devient deux lignes du hunk exact.
+    exact_hunk(h, &FullLines::new(full)).is_ok_and(|(exact, _)| exact.lines.len() > h.lines.len())
+}
+
 /// En-tête du diff exact : celui du diff complet pour une création ou une suppression de fichier (un seul hunk, le
 /// même avec ou sans `-w`), sinon une simple modification, comme une sélection partielle (`build_patch`) : les hunks
 /// exacts ne couvrent pas forcément tout le diff complet (changements d'espaces hors des hunks affichés), et un
@@ -290,9 +303,10 @@ fn with_kind(line: &DiffLine, kind: LineKind, old_no: Option<u32>, new_no: Optio
     DiffLine { kind, old_no, new_no, ..line.clone() }
 }
 
-/// Égalité de `git diff -w` : les blancs (espace, tabulation, `\r`, saut de page…) ne comptent pas.
+/// Égalité de `git diff -w` : les blancs ne comptent pas, ceux de `isspace` de git (`sane_ctype`) : espace,
+/// tabulation, `\n` et `\r` ; pas la tabulation verticale ni le saut de page, contrairement à la bibliothèque C.
 fn equal_ignoring_whitespace(a: &[u8], b: &[u8]) -> bool {
-    let blank = |c: &&u8| matches!(**c, b' ' | b'\t' | b'\n' | b'\x0B' | b'\x0C' | b'\r');
+    let blank = |c: &&u8| matches!(**c, b' ' | b'\t' | b'\n' | b'\r');
     a.iter().filter(|c| !blank(c)).eq(b.iter().filter(|c| !blank(c)))
 }
 
@@ -589,5 +603,14 @@ mod tests {
         // Diff complet tronqué : rien à quoi se fier.
         let truncated = FileDiff { truncated: true, hunks: Vec::new(), ..full_ws() };
         refused(build_patch_ignoring_whitespace(&shown_ws(), &truncated, &whole, false));
+    }
+
+    /// Revue finale (C2) : les blancs de `git diff -w` sont ceux de `isspace` de git (espace, tabulation, saut de
+    /// ligne, retour chariot), pas la tabulation verticale ni le saut de page (vérifié avec git).
+    #[test]
+    fn whitespace_equality_is_the_one_of_git() {
+        assert!(equal_ignoring_whitespace(b"  a\tb \r", b"ab"));
+        assert!(!equal_ignoring_whitespace(b"a\x0bb", b"ab"), "tabulation verticale : pas un blanc pour git");
+        assert!(!equal_ignoring_whitespace(b"a\x0cb", b"ab"), "saut de page : pas un blanc pour git");
     }
 }

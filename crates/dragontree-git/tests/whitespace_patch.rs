@@ -7,6 +7,7 @@ mod common;
 use common::TestRepo;
 use dragontree_git::{
     DiffOptions, FileDiff, HunkSelection, LineKind, PatchMode, Repo, build_patch_ignoring_whitespace,
+    whole_hunk_changes_whitespace,
 };
 
 const SHOWN: DiffOptions = DiffOptions { context: 3, ignore_whitespace: true };
@@ -186,4 +187,24 @@ fn unstaging_and_discarding_a_whole_hunk_follow_the_same_rule() {
     apply(&repo, "form.cs", false, PatchMode::Discard, &[HunkSelection { hunk: 0, lines: None }]);
     assert_eq!(std::fs::read(t.file("form.cs")).unwrap(), form(&OUTSIDE), "hors du hunk : rien d'annulé");
     assert_eq!(index_bytes(&t, "form.cs"), form(&[]));
+}
+
+/// Revue finale (C3) : un hunk entier n'emporte des changements d'espaces que si l'une de ses lignes de contexte en a ;
+/// le dialogue « Annuler des lignes » ne le dit que dans ce cas.
+#[test]
+fn a_whole_hunk_changes_whitespace_only_when_one_of_its_context_lines_does() {
+    let (t, _) = form_repo();
+    let repo = open(&t);
+    let (shown, full) = diffs(&repo, "form.cs", false);
+    assert!(whole_hunk_changes_whitespace(&shown, &full, 0), "lignes 4 et 6 dans le hunk");
+
+    // Seule la ligne 5 change, puis s'y ajoutent des changements d'espaces hors du hunk.
+    for outside in [&[][..], &OUTSIDE[..]] {
+        let changes: Vec<(usize, &str)> = [(5, "        x = 10;")].iter().chain(outside).copied().collect();
+        std::fs::write(t.file("form.cs"), form(&changes)).unwrap();
+        let (shown, full) = diffs(&repo, "form.cs", false);
+        assert_eq!(shown.hunks.len(), 1);
+        assert!(!whole_hunk_changes_whitespace(&shown, &full, 0), "aucun changement d'espaces dans le hunk");
+        assert!(!whole_hunk_changes_whitespace(&shown, &full, 1), "hunk absent");
+    }
 }

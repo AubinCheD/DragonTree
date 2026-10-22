@@ -55,7 +55,9 @@ pub use log::{Commit, CommitSearch, LogOptions, LogOrder, LogParser, LogScope, L
 pub use net::{NetOptions, clone_repo, init_repo, trust_directory};
 pub use oid::Oid;
 pub use ops::{MergeMode, ResetMode};
-pub use patch::{HunkSelection, PatchMode, build_patch, build_patch_ignoring_whitespace};
+pub use patch::{
+    HunkSelection, PatchMode, build_patch, build_patch_ignoring_whitespace, whole_hunk_changes_whitespace,
+};
 pub use progress::{Progress, parse_progress};
 pub use refs::{HeadState, LocalBranch, RefKind, RefLabel, RefsSnapshot, RemoteBranch, TagRef};
 pub use repo::{CommitInfo, OpState, Remote, Repo, Submodule};
