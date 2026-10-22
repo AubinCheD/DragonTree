@@ -167,6 +167,25 @@ fn amending_a_pushed_commit_offers_a_force_push_that_replaces_it() {
     wait_until(&mut h, "notification du push forcé", |h| h.query_all_by_label_contains("(push forcé)").count() > 0);
 }
 
+/// Revue finale (B1) : le push forcé confirmé pousse le commit modifié que le dialogue nomme, même si la branche
+/// locale a bougé pendant que le dialogue était ouvert (ici un commit de plus, fait en ligne de commande) ; le commit
+/// suivant reste local.
+#[test]
+fn the_force_push_pushes_the_amended_commit_even_if_the_branch_moved_meanwhile() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut h, p) = amend_the_pushed_commit(tmp.path());
+    let amended = git(&p.work, &["rev-parse", "HEAD"]).trim().to_string();
+    assert!(h.query_by_label_contains(&format!("commit modifié ({})", &amended[..7])).is_some(), "commit nommé");
+
+    std::fs::write(p.work.join("c.txt"), "c\n").unwrap();
+    git(&p.work, &["add", "c.txt"]);
+    git(&p.work, &["commit", "-q", "-m", "après l'amend"]);
+    click_label(&mut h, "Pousser en forçant");
+    wait_until(&mut h, "notification du push forcé", |h| h.query_all_by_label_contains("(push forcé)").count() > 0);
+    assert_eq!(git(&p.bare, &["rev-parse", "main"]).trim(), amended, "le commit modifié, pas la branche qui a bougé");
+    assert_ne!(git(&p.work, &["rev-parse", "HEAD"]).trim(), amended, "le commit suivant reste local");
+}
+
 #[test]
 fn cancelling_the_force_push_keeps_the_amended_commit_local() {
     let tmp = tempfile::tempdir().unwrap();
@@ -201,7 +220,7 @@ fn the_force_push_is_refused_when_someone_pushed_meanwhile() {
 
 /// Branche en retard sur le remote (le commit d'un collègue est arrivé par un fetch) : le commit modifié n'était pas le
 /// sommet de la branche distante ; un push forcé écraserait le commit du collègue. Il n'est pas proposé, la
-/// notification dit que rien n'est poussé.
+/// notification dit que rien n'est poussé et conseille d'intégrer d'abord les commits distants (revue finale, B3).
 #[test]
 fn no_force_push_is_offered_when_the_branch_is_behind_its_remote() {
     let tmp = tempfile::tempdir().unwrap();
@@ -213,6 +232,8 @@ fn no_force_push_is_offered_when_the_branch_is_behind_its_remote() {
     wait_until(&mut h, "notification : commit non poussé", |h| {
         h.query_all_by_label_contains("pas été poussé").count() > 0
     });
+    assert!(h.query_all_by_label_contains("Pull avec rebase").count() > 0, "intégrer d'abord les commits distants");
+    assert_eq!(h.query_all_by_label_contains("Push › Forcer").count(), 0, "pas de push forcé conseillé");
     assert!(h.query_by_label("Pousser en forçant").is_none(), "aucun push forcé proposé");
     h.run_steps(10);
     assert_eq!(git(&p.bare, &["rev-parse", "main"]).trim(), theirs, "rien n'est poussé");

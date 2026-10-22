@@ -208,8 +208,30 @@ fn an_amended_pushed_commit_is_replaced_by_a_push_with_a_pinned_lease() {
 
     amend_with(&alice, "b.txt");
     assert_eq!(alice.head_if_pushed().unwrap(), None, "le commit modifié diverge de origin/main");
-    alice.push_with_lease("origin", "main", "main", replaced, &NetOptions::default(), &mut |_| {}).unwrap();
+    let amended = alice.head_commit().unwrap();
+    assert_eq!(amended.to_hex(), rev_of(&remote, &alice.workdir, "HEAD"));
+    alice.push_with_lease("origin", amended, "main", replaced, &NetOptions::default(), &mut |_| {}).unwrap();
     assert_eq!(rev_of(&remote, remote.path(), "main"), rev_of(&remote, &alice.workdir, "HEAD"));
+    assert_eq!(rev_of(&remote, &alice.workdir, "origin/main"), amended.to_hex(), "référence de suivi à jour");
+}
+
+/// Revue finale (B1) : c'est le commit modifié qui est poussé, pas la branche locale, qui a pu bouger depuis l'amend
+/// (ici un commit de plus) : la branche distante reçoit le commit modifié, et le commit suivant reste local.
+#[test]
+fn a_push_with_a_pinned_lease_pushes_the_amended_commit_even_if_the_branch_moved() {
+    let remote = seeded_remote();
+    let work = tempfile::tempdir().unwrap();
+    let alice = clone_into(&remote, work.path(), "alice");
+    let replaced = alice.head_if_pushed().unwrap().unwrap();
+    amend_with(&alice, "b.txt");
+    let amended = alice.head_commit().unwrap();
+    std::fs::write(alice.workdir.join("c.txt"), "c\n").unwrap();
+    alice.stage(&["c.txt".into()]).unwrap();
+    alice.commit("après l'amend", false).unwrap();
+
+    alice.push_with_lease("origin", amended, "main", replaced, &NetOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(rev_of(&remote, remote.path(), "main"), amended.to_hex());
+    assert_ne!(rev_of(&remote, &alice.workdir, "HEAD"), amended.to_hex(), "le commit suivant n'est pas poussé");
 }
 
 /// Le bail porte sur la valeur remplacée, pas sur la référence de suivi : un autre clone a poussé, puis un fetch
@@ -222,6 +244,7 @@ fn a_push_with_a_pinned_lease_is_refused_when_the_remote_moved_even_after_a_fetc
     let bob = clone_into(&remote, work.path(), "bob");
     let replaced = alice.head_if_pushed().unwrap().unwrap();
     amend_with(&alice, "b.txt");
+    let amended = alice.head_commit().unwrap();
 
     std::fs::write(bob.workdir.join("c.txt"), "c\n").unwrap();
     bob.stage(&["c.txt".into()]).unwrap();
@@ -232,7 +255,7 @@ fn a_push_with_a_pinned_lease_is_refused_when_the_remote_moved_even_after_a_fetc
     assert_eq!(rev_of(&remote, &alice.workdir, "origin/main"), bob_head);
 
     let err =
-        alice.push_with_lease("origin", "main", "main", replaced, &NetOptions::default(), &mut |_| {}).unwrap_err();
+        alice.push_with_lease("origin", amended, "main", replaced, &NetOptions::default(), &mut |_| {}).unwrap_err();
     match &err {
         GitError::Failed { stderr, .. } => assert!(stderr.contains("stale info"), "{stderr}"),
         other => panic!("attendu Failed, obtenu {other:?}"),

@@ -293,13 +293,14 @@ enum AfterCommit {
     Push(actions::PushTarget),
     /// Push demandé mais non lancé ; le texte explique pourquoi.
     PushSkipped(String),
-    /// Amend d'un commit déjà poussé (L5) : `replaced` reçoit, du commit lui-même juste avant l'amend, le commit
-    /// remplacé s'il était exactement la branche distante suivie (`Repo::head_if_pushed`). Le push forcé est alors
-    /// proposé dans un dialogue de confirmation ; sinon (HEAD en retard sur le remote…), rien n'est poussé et une
+    /// Amend d'un commit déjà poussé (L5) : `amended` reçoit ce que le commit lui-même a lu (`actions::Amended`) :
+    /// le commit remplacé s'il était exactement la branche distante suivie (`Repo::head_if_pushed`, juste avant
+    /// l'amend) et le commit modifié (HEAD juste après). Le push forcé de ce commit est alors proposé dans un dialogue
+    /// de confirmation ; sinon (branche distante en avance sur le commit remplacé…), rien n'est poussé et une
     /// notification le dit, comme pour `PushSkipped`.
     OfferForcePush {
         target: actions::PushTarget,
-        replaced: Arc<OnceLock<Oid>>,
+        amended: Arc<OnceLock<actions::Amended>>,
     },
 }
 

@@ -25,13 +25,13 @@ pub enum ConfirmAction {
     OpenWorktree(PathBuf),
     /// Lever le verrou LFS d'un fichier même s'il appartient à quelqu'un d'autre (`git lfs unlock --force`).
     LfsForceUnlock(String),
-    /// Pousser en forçant le commit modifié par un amend alors qu'il était déjà poussé (L5), avec un bail fixé à
-    /// `replaced`, le commit remplacé. Annuler (ou fermer) garde le commit en local et le notifie.
+    /// Pousser en forçant `amended`, le commit modifié par un amend alors qu'il était déjà poussé (L5), avec un bail
+    /// fixé à `replaced`, le commit remplacé. Annuler (ou fermer) garde le commit en local et le notifie.
     ForcePushAmended {
         remote: String,
-        local: String,
         remote_branch: String,
         replaced: Oid,
+        amended: Oid,
     },
 }
 
@@ -808,8 +808,8 @@ impl RepoTab {
                 }
                 ConfirmAction::OpenWorktree(path) => shared.actions.push(AppAction::OpenRepo(path)),
                 ConfirmAction::LfsForceUnlock(path) => self.op_lfs_force_unlock(shared, path),
-                ConfirmAction::ForcePushAmended { remote, local, remote_branch, replaced } => {
-                    self.op_force_push_amended(shared, remote, local, remote_branch, replaced)
+                ConfirmAction::ForcePushAmended { remote, remote_branch, replaced, amended } => {
+                    self.op_force_push_amended(shared, remote, remote_branch, replaced, amended)
                 }
             },
         }

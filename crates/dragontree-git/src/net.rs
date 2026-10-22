@@ -130,22 +130,30 @@ impl Repo {
         })
     }
 
-    /// Push forcé de `local` vers `remote_branch`, avec un bail fixé à `expected` (L5, commit modifié par un amend
-    /// alors qu'il était déjà poussé) : `--force-with-lease=refs/heads/<remote_branch>:<expected>`, jamais un
+    /// Identifiant du commit de HEAD (`git rev-parse --verify HEAD`).
+    pub fn head_commit(&self) -> Result<Oid, GitError> {
+        let out = self.read().args(["rev-parse", "--verify", "HEAD"]).run()?;
+        Oid::parse(out.stdout_str().trim())
+    }
+
+    /// Push forcé du commit `commit` vers `remote_branch`, avec un bail fixé à `expected` (L5, commit modifié par un
+    /// amend alors qu'il était déjà poussé) : `--force-with-lease=refs/heads/<remote_branch>:<expected>`, jamais un
     /// `--force` nu. `expected` est la valeur de la branche distante que le commit modifié remplace : si le remote a
     /// bougé depuis (un autre clone a poussé), git refuse le push (« stale info ») et rien n'est écrasé, même après un
-    /// fetch qui aurait avancé la référence de suivi (un bail sans valeur la prendrait pour référence).
+    /// fetch qui aurait avancé la référence de suivi (un bail sans valeur la prendrait pour référence). C'est le commit
+    /// lui-même qui est poussé (`<commit>:refs/heads/<remote_branch>`), pas la branche locale : elle a pu bouger depuis
+    /// (opération en file, commande lancée ailleurs).
     pub fn push_with_lease(
         &self,
         remote: &str,
-        local: &str,
+        commit: Oid,
         remote_branch: &str,
         expected: Oid,
         n: &NetOptions,
         on: &mut dyn FnMut(Progress),
     ) -> Result<(), GitError> {
         let lease = format!("--force-with-lease=refs/heads/{remote_branch}:{}", expected.to_hex());
-        let refspec = format!("refs/heads/{local}:refs/heads/{remote_branch}");
+        let refspec = format!("{}:refs/heads/{remote_branch}", commit.to_hex());
         run_with_progress(
             self.net(n).args(["push".to_string(), "--progress".into(), lease, remote.into(), refspec]),
             on,
