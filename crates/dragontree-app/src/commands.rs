@@ -370,6 +370,10 @@ pub const NOT_IN_MENUS: &[Command] = &[Command::OpenInEditor];
 /// en un seul point, `DragonTreeApp::command_context`, pour la barre de menus, les raccourcis et la palette.
 pub struct CommandContext<'a> {
     pub settings: &'a Settings,
+    /// Thème et langue en vigueur, cochés dans les menus : ceux de `--theme` et `--lang` pendant cette exécution,
+    /// sinon ceux des réglages (`Shared::theme`, `Shared::language`).
+    pub theme: ThemeChoice,
+    pub language: Option<Lang>,
     /// Onglet actif s'il s'agit d'un dépôt ouvert (chargé sans erreur).
     pub repo: Option<&'a RepoTab>,
     /// Au moins un onglet fermé peut être rouvert.
@@ -921,11 +925,11 @@ impl Command {
             Command::ShowStashes => Some(cx.settings.show_stashes),
             Command::ShowIgnoredFiles => Some(cx.settings.show_ignored_files),
             Command::HideUntrackedFiles => Some(cx.settings.hide_untracked_files),
-            Command::Language(lang) => Some(cx.settings.language == lang),
+            Command::Language(lang) => Some(cx.language == lang),
             Command::Workspace(i) => {
                 Some(cx.settings.workspace_names().get(i).is_some_and(|n| n == cx.settings.current_workspace_name()))
             }
-            Command::Theme(choice) => Some(cx.settings.theme == choice),
+            Command::Theme(choice) => Some(cx.theme == choice),
             _ => None,
         }
     }
@@ -1060,6 +1064,8 @@ mod tests {
         let settings = Settings::default();
         let cx = |lfs_available| CommandContext {
             settings: &settings,
+            theme: settings.theme,
+            language: settings.language,
             repo: None,
             can_reopen_tab: false,
             lfs_available,
@@ -1121,6 +1127,8 @@ mod tests {
         // Sans dépôt ouvert, elles sont grisées comme toute commande de dépôt.
         let cx = CommandContext {
             settings: &settings,
+            theme: settings.theme,
+            language: settings.language,
             repo: None,
             can_reopen_tab: false,
             lfs_available: None,

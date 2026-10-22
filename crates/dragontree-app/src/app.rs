@@ -126,6 +126,12 @@ pub struct Shared {
     /// Capture d'écran (`--screenshot`) : les réglages ne sont jamais écrits. Instance à part (voir `single_instance`),
     /// elle lit sans `--profile` le profil d'une instance peut-être ouverte, qui les écrit.
     pub settings_read_only: bool,
+    /// Thème de `--theme` et langue de `--lang` (RV5a) : ils valent pour cette exécution seulement et ne sont jamais
+    /// enregistrés ; `settings` garde les choix enregistrés, et aucune écriture des réglages ne peut donc les y
+    /// mettre. Menus et fenêtre Réglages montrent le choix en vigueur (`theme`, `language`) ; un choix fait dans
+    /// l'application y est enregistré et met fin au remplacement du champ concerné.
+    pub theme_override: Option<ThemeChoice>,
+    pub lang_override: Option<Lang>,
     /// Files d'opérations des dépôts, partagées par leurs onglets (voir `op_queue`).
     pub queues: crate::op_queue::OpQueues,
 }
@@ -159,6 +165,8 @@ impl Shared {
             ai_check: AiCheck::Idle,
             auto_fetch_every: None,
             settings_read_only: false,
+            theme_override: None,
+            lang_override: None,
             queues: Default::default(),
         };
         (shared, rx)
@@ -166,6 +174,17 @@ impl Shared {
 
     pub fn settings_file(&self) -> PathBuf {
         self.settings_store.path().to_path_buf()
+    }
+
+    /// Thème en vigueur : celui de `--theme` pendant cette exécution, sinon celui des réglages.
+    pub fn theme(&self) -> ThemeChoice {
+        self.theme_override.unwrap_or(self.settings.theme)
+    }
+
+    /// Langue choisie en vigueur (`None` : celle de Windows) : celle de `--lang` pendant cette exécution, sinon
+    /// celle des réglages.
+    pub fn language(&self) -> Option<Lang> {
+        self.lang_override.or(self.settings.language)
     }
 
     pub fn save_settings(&mut self) {
@@ -280,32 +299,31 @@ impl DragonTreeApp {
             None => Settings::file(),
         };
         let (settings_store, mut settings, settings_error) = SettingsFile::load(&settings_path);
-        if let Some(t) = start.theme {
-            settings.theme = t;
-        }
-        if let Some(l) = start.lang {
-            settings.language = Some(l);
-        }
+        // `--theme` et `--lang` : pour cette exécution seulement, jamais écrits dans les réglages (voir
+        // `Shared::theme_override`).
+        let theme = start.theme.unwrap_or(settings.theme);
         let system_lang = Lang::system();
-        dragontree_i18n::set_lang(settings.language.unwrap_or(system_lang));
+        dragontree_i18n::set_lang(start.lang.or(settings.language).unwrap_or(system_lang));
         if let Some(root) = &start.add_root
             && !settings.scan_roots.iter().any(|r| path_key(r) == path_key(root))
         {
             settings.scan_roots.push(root.clone());
         }
         theme::install_fonts(&ctx, settings.diff_font);
-        theme::apply(&ctx, settings.theme, settings.ui_scale);
+        theme::apply(&ctx, theme, settings.ui_scale);
 
         let git = match &settings.git_path {
             Some(p) => Some(Git::with_exe(p.clone())).filter(|g| g.version().is_ok()).or_else(|| Git::discover().ok()),
             None => Git::discover().ok(),
         };
         let repo_list = RepoListState::load_cache(start.profile_dir.as_deref());
-        let applied_theme = (settings.theme, settings.ui_scale);
+        let applied_theme = (theme, settings.ui_scale);
         let applied_diff_font = settings.diff_font;
         let (mut shared, rx) = Shared::new(ctx.clone(), settings, settings_store, start.profile_dir.clone(), git);
         shared.auto_fetch_every = start.auto_fetch_every;
         shared.settings_read_only = start.screenshot.is_some();
+        shared.theme_override = start.theme;
+        shared.lang_override = start.lang;
         if let Some(msg) = settings_error {
             shared.toasts.push(Toast::error(tr!("Réglages réinitialisés"), msg));
         }
@@ -392,7 +410,7 @@ impl DragonTreeApp {
         match app.start.window.as_deref() {
             Some("accounts") => app.accounts.open = true,
             Some("ssh") => app.ssh_keys.show(),
-            Some("settings") => app.settings_window = Some(SettingsWindow::new(&app.shared.settings)),
+            Some("settings") => app.settings_window = Some(SettingsWindow::new(&app.shared)),
             Some("clone") => app.clone = Some(CloneWindow::new(&app.shared)),
             Some("pullrequests") => app.pull_requests.show(),
             Some("log") => app.log_open = true,
@@ -692,7 +710,7 @@ impl DragonTreeApp {
         if self.shared.settings_dirty {
             self.shared.save_settings();
         }
-        let wanted = (self.shared.settings.theme, self.shared.settings.ui_scale);
+        let wanted = (self.shared.theme(), self.shared.settings.ui_scale);
         if wanted != self.applied_theme {
             theme::apply(ctx, wanted.0, wanted.1);
             self.applied_theme = wanted;
@@ -711,7 +729,7 @@ impl DragonTreeApp {
                 ctx.request_repaint();
             });
         }
-        let lang = self.shared.settings.language.unwrap_or(self.system_lang);
+        let lang = self.shared.language().unwrap_or(self.system_lang);
         if lang != dragontree_i18n::lang() {
             dragontree_i18n::set_lang(lang);
             ctx.request_repaint();
@@ -748,11 +766,11 @@ impl DragonTreeApp {
             AppAction::ShowGitIdentity => self.git_identity.show(&self.shared),
             AppAction::ShowSettings => {
                 if self.settings_window.is_none() {
-                    self.settings_window = Some(SettingsWindow::new(&self.shared.settings));
+                    self.settings_window = Some(SettingsWindow::new(&self.shared));
                 }
             }
             AppAction::ShowSettingsTab(tab) => {
-                self.settings_window.get_or_insert_with(|| SettingsWindow::new(&self.shared.settings)).show_tab(tab)
+                self.settings_window.get_or_insert_with(|| SettingsWindow::new(&self.shared)).show_tab(tab)
             }
             AppAction::ShowLog => self.log_open = true,
             AppAction::AddScanRoot => {
@@ -804,6 +822,8 @@ impl DragonTreeApp {
         };
         CommandContext {
             settings: &self.shared.settings,
+            theme: self.shared.theme(),
+            language: self.shared.language(),
             repo,
             can_reopen_tab: !self.closed_tabs.is_empty(),
             lfs_available: self.shared.lfs,
@@ -941,12 +961,16 @@ impl DragonTreeApp {
                 self.shared.settings.repo_list_visible = !self.shared.settings.repo_list_visible;
                 self.shared.settings_dirty = true;
             }
+            // Choix explicite, même celui qui est déjà en vigueur : enregistré, il remplace celui de `--lang` ou de
+            // `--theme` (voir `Shared::theme_override`).
             Command::Language(lang) => {
                 self.shared.settings.language = lang;
+                self.shared.lang_override = None;
                 self.shared.settings_dirty = true;
             }
             Command::Theme(choice) => {
                 self.shared.settings.theme = choice;
+                self.shared.theme_override = None;
                 self.shared.settings_dirty = true;
             }
             Command::ZoomIn | Command::ZoomOut | Command::ZoomReset => {

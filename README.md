@@ -142,6 +142,8 @@ dragontree.exe [DÉPÔT…] [--open <dossier>] [--add-root <dossier>] [--theme l
 
 `--profile` isole réglages, cache et état de fenêtre (pratique pour tester sans toucher à votre profil).
 Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALAPPDATA%\DragonTree\`.
+`--theme` et `--lang` valent pour ce lancement seulement et ne sont pas enregistrés ; un thème ou une langue choisis
+ensuite dans les menus ou dans Réglages › Apparence sont enregistrés et les remplacent.
 
 **Instance unique** : une seule fenêtre par profil. Lancer `dragontree.exe C:\dépôt` alors que DragonTree est ouvert
 ouvre le dépôt dans la fenêtre existante, qui passe au premier plan (sans dépôt : elle passe seulement au premier

@@ -18,8 +18,8 @@ Utilisation : dragontree [OPTIONS] [DÉPÔT…]
   --open <dossier>        ouvre un dépôt dans un onglet (répétable, ou dossiers en arguments)
   --profile <dossier>     réglages, cache et état de fenêtre dans ce dossier (tests)
   --add-root <dossier>    ajoute un dossier racine scanné
-  --theme light|dark      force le thème
-  --lang fr|en            force la langue de l'interface
+  --theme light|dark      thème pour cette exécution seulement (non enregistré)
+  --lang fr|en            langue de l'interface pour cette exécution seulement (non enregistrée)
   --view history|changes  vue initiale des dépôts ouverts
   --select <n>            sélectionne le n-ième commit de l'historique
   --window accounts|clone|settings|log|ssh|pullrequests  ouvre une fenêtre au démarrage

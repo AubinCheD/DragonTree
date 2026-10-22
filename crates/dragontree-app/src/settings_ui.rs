@@ -24,7 +24,8 @@ pub enum SettingsTab {
 
 pub struct SettingsWindow {
     tab: SettingsTab,
-    /// Réglages à l'ouverture de la fenêtre : l'enregistrement ne reporte que les champs du brouillon qui en diffèrent.
+    /// Réglages à l'ouverture de la fenêtre, avec le thème et la langue en vigueur : l'enregistrement ne reporte que
+    /// les champs du brouillon qui en diffèrent.
     opened: Settings,
     draft: Settings,
     skip_dirs: String,
@@ -33,7 +34,9 @@ pub struct SettingsWindow {
 }
 
 impl SettingsWindow {
-    pub fn new(settings: &Settings) -> SettingsWindow {
+    pub fn new(shared: &Shared) -> SettingsWindow {
+        // Thème et langue en vigueur, ceux de `--theme` et `--lang` compris (voir `Shared::theme_override`).
+        let settings = &Settings { theme: shared.theme(), language: shared.language(), ..shared.settings.clone() };
         SettingsWindow {
             tab: SettingsTab::General,
             skip_dirs: settings.scan_skip_dirs.join(", "),
@@ -105,6 +108,14 @@ impl SettingsWindow {
             // qu'elle était ouverte (menu Affichage, réglages du dépôt, barre d'onglets, vue diff…) est conservé.
             let mut merged = shared.settings.clone();
             take_edits(&mut merged, &self.opened, &d);
+            // Un thème ou une langue choisis ici sont enregistrés et remplacent ceux de `--theme` ou `--lang` ; sans
+            // y toucher, ceux-ci restent en vigueur et ne sont pas enregistrés (voir `Shared::theme_override`).
+            if d.theme != self.opened.theme {
+                shared.theme_override = None;
+            }
+            if d.language != self.opened.language {
+                shared.lang_override = None;
+            }
             let rescan = merged.scan_roots != shared.settings.scan_roots
                 || merged.scan_max_depth != shared.settings.scan_max_depth
                 || merged.scan_skip_dirs != shared.settings.scan_skip_dirs
