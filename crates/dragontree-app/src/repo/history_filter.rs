@@ -247,16 +247,26 @@ mod tests {
     }
 
     /// Critère de RV1 : une frappe dans le filtre coûte moins de 16 ms au thread de l'interface, sur une liste de
-    /// 100 000 commits (le calcul lui-même part en arrière-plan).
+    /// 100 000 commits (le calcul lui-même part en arrière-plan). Mesure d'horloge : chaque frappe est rejouée 5 fois
+    /// et la plus rapide compte (une machine chargée peut retirer la main au test pendant un quantum de Windows,
+    /// 15,6 ms, sans que la frappe coûte davantage) ; un calcul fait sur place, lui, coûte à chaque fois.
     #[test]
     fn a_keystroke_in_the_filter_costs_less_than_a_frame_on_the_interface_thread() {
         let (mut tab, shared, _events, _dir) = tab_with(100_000);
         let mut worst = Duration::ZERO;
         for typed in ["n", "nu", "num", "nume", "numér", "numéro", "numéro 4", "numéro 42", "numéro 424"] {
             tab.history.filter = typed.into();
-            let start = Instant::now();
-            tab.apply_filter(&shared);
-            worst = worst.max(start.elapsed());
+            let fastest = (0..5)
+                .map(|_| {
+                    // Le même texte n'est pas recalculé : on oublie le précédent pour rejouer la frappe.
+                    tab.history.filter_applied = None;
+                    let start = Instant::now();
+                    tab.apply_filter(&shared);
+                    start.elapsed()
+                })
+                .min()
+                .unwrap();
+            worst = worst.max(fastest);
         }
         assert!(worst < Duration::from_millis(16), "frappe la plus lente : {worst:?}");
     }

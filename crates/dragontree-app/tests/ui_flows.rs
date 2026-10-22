@@ -59,8 +59,8 @@ fn stage_all_then_commit_from_changes_view() {
     let subject = h.get_by(|n| n.placeholder() == Some("Résumé du commit (obligatoire)"));
     subject.focus();
     subject.type_text("Commit depuis l'interface");
-    h.run_steps(3);
-    h.get_by_label_contains("Commit (2 fichiers)").click();
+    wait_until(&mut h, "résumé saisi", |h| has_text_input(h, "Commit depuis l'interface"));
+    click_label_containing(&mut h, "Commit (2 fichiers)");
 
     wait_git(&mut h, "commit créé", || {
         try_git(&repo, &["log", "-1", "--format=%s"]).is_some_and(|s| s.trim() == "Commit depuis l'interface")
@@ -84,8 +84,8 @@ fn failed_commit_keeps_the_message() {
     let subject = h.get_by(|n| n.placeholder() == Some("Résumé du commit (obligatoire)"));
     subject.focus();
     subject.type_text("Message à garder");
-    h.run_steps(3);
-    h.get_by_label_contains("Commit (2 fichiers)").click();
+    wait_until(&mut h, "résumé saisi", |h| has_text_input(h, "Message à garder"));
+    click_label_containing(&mut h, "Commit (2 fichiers)");
 
     wait_until(&mut h, "échec du commit signalé", |h| h.query_by_label_contains("a échoué").is_some());
     assert_eq!(git(&repo, &["rev-list", "--count", "HEAD"]).trim(), "2", "aucun commit créé");
@@ -323,8 +323,8 @@ fn create_branch_from_toolbar_dialog() {
     let name = h.get_by(|n| n.placeholder() == Some("nom-de-la-branche (ex. feature/ma-fonction)"));
     name.focus();
     name.type_text("feature/depuis-ui");
-    h.run_steps(3);
-    h.get_by_label("Créer").click();
+    wait_until(&mut h, "nom saisi", |h| has_text_input(h, "feature/depuis-ui"));
+    click_label(&mut h, "Créer");
     wait_git(&mut h, "branche créée et active", || {
         try_git(&repo, &["rev-parse", "--abbrev-ref", "HEAD"]).is_some_and(|s| s.trim() == "feature/depuis-ui")
     });
@@ -631,9 +631,8 @@ fn closing_the_clone_window_cleans_up_the_cancelled_clone() {
     let url = h.get_by(|n| n.placeholder() == Some(hint));
     url.focus();
     url.type_text(&format!("http://127.0.0.1:{port}/depot.git"));
-    h.run_steps(3);
-    let clone = format!("{} Cloner", dragontree_app::icons::DOWNLOAD_SIMPLE);
-    h.get_by_label(&clone).click();
+    wait_until(&mut h, "dossier déduit de l'URL", |h| has_text_input(h, "depot"));
+    click_label(&mut h, &format!("{} Cloner", dragontree_app::icons::DOWNLOAD_SIMPLE));
     let dest = clones.join("depot");
     wait_git(&mut h, "dossier du clone créé", || dest.exists());
 
@@ -683,8 +682,8 @@ fn a_sha256_repository_is_refused_with_an_explicit_error_at_open_and_clone() {
     let url = h.get_by(|n| n.placeholder() == Some(hint));
     url.focus();
     url.type_text(&format!("file:///{}", repo.display().to_string().replace('\\', "/")));
-    h.run_steps(3);
-    h.get_by_label(&format!("{} Cloner", dragontree_app::icons::DOWNLOAD_SIMPLE)).click();
+    wait_until(&mut h, "dossier déduit de l'URL", |h| has_text_input(h, "sha256"));
+    click_label(&mut h, &format!("{} Cloner", dragontree_app::icons::DOWNLOAD_SIMPLE));
     // Le message nomme le dossier du clone : il vient de la vérification faite sur le clone terminé, que git a donc
     // créé là. La fin du clonage n'arrive qu'après son nettoyage : le dossier n'existe plus.
     let dest = clones.join("sha256");

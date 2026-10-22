@@ -98,8 +98,8 @@ fn a_successful_commit_is_remembered_in_the_recent_messages_of_the_repository() 
     let subject = h.get_by(|n| n.placeholder() == Some("Résumé du commit (obligatoire)"));
     subject.focus();
     subject.type_text("Message à retenir");
-    h.run_steps(3);
-    h.get_by_label_contains("Commit (2 fichiers)").click();
+    wait_until(&mut h, "résumé saisi", |h| has_text_input(h, "Message à retenir"));
+    click_label_containing(&mut h, "Commit (2 fichiers)");
     wait_git(&mut h, "commit créé", || {
         try_git(&repo, &["log", "-1", "--format=%s"]).is_some_and(|s| s.trim() == "Message à retenir")
     });

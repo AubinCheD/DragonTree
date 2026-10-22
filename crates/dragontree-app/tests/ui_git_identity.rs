@@ -53,8 +53,8 @@ fn the_dialog_writes_the_global_identity_and_a_commit_without_identity_offers_it
     let subject = h.get_by(|n| n.placeholder() == Some("Résumé du commit (obligatoire)"));
     subject.focus();
     subject.type_text("Sans identité");
-    h.run_steps(3);
-    h.get_by_label_contains("Commit (2 fichiers)").click();
+    wait_until(&mut h, "résumé saisi", |h| has_text_input(h, "Sans identité"));
+    click_label_containing(&mut h, "Commit (2 fichiers)");
     wait_until(&mut h, "notification d'identité manquante", |h| {
         h.query_by_label("Commit impossible : aucune identité git").is_some()
     });

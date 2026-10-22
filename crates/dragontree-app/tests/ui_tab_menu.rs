@@ -41,10 +41,10 @@ fn the_tab_menu_closes_the_tab_it_was_opened_on_even_if_an_earlier_tab_closes_me
     let mut h = harness(StartOptions { open: repos, ..start(tmp.path()) });
     wait_until(&mut h, "trois onglets", |_| open_names(tmp.path()) == ["alpha", "bravo", "charlie"]);
 
-    // « alpha » devient l'onglet actif.
+    // « alpha » devient l'onglet actif : son nom paraît aussi dans la barre d'outils.
     let at = tab_center(&h, "alpha");
     click_at(&mut h, at, egui::PointerButton::Primary);
-    h.run_steps(3);
+    wait_until(&mut h, "alpha actif", |h| h.query_all_by_label("alpha").count() >= 2);
 
     // Menu ouvert sur « bravo » (deuxième position).
     let at = tab_center(&h, "bravo");

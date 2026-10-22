@@ -164,6 +164,13 @@ pub fn copied_text(h: &mut Harness<'static, DragonTreeApp>) -> Option<String> {
     None
 }
 
+/// L'élément unique (case, bouton radio) de libellé exactement `label` est affiché et coché : à attendre après un clic
+/// dont la suite dépend (choix d'une cible avant de valider).
+pub fn checked(h: &Harness<'static, DragonTreeApp>, label: &str) -> bool {
+    h.query_by(|n| text_of(n).as_deref() == Some(label))
+        .is_some_and(|n| n.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True))
+}
+
 /// Un champ de saisie contient exactement `value`.
 pub fn has_text_input(h: &Harness<'static, DragonTreeApp>, value: &str) -> bool {
     h.query_by(|n| n.role() == egui::accesskit::Role::TextInput && n.value().as_deref() == Some(value)).is_some()

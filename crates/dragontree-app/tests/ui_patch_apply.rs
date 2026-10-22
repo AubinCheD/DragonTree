@@ -54,8 +54,7 @@ fn a_dropped_patch_file_opens_the_preview_and_apply_changes_the_file() {
     assert!(h.query_by_label_contains("s'applique sans conflit").is_some());
     assert_eq!(content(&repo), "1\n2\n", "rien n'est appliqué avant la confirmation");
 
-    h.run_steps(3);
-    h.get_by_label("Appliquer").click();
+    click_label(&mut h, "Appliquer");
     wait_git(&mut h, "fichier modifié", || content(&repo) == "1\n2\n3\n");
     assert_eq!(git(&repo, &["diff", "--cached", "--name-only"]), "", "cible : copie de travail seulement");
 }
@@ -69,10 +68,9 @@ fn the_index_can_be_the_target() {
     let mut h = open(&repo, tmp.path());
     drop_file(&mut h, &file);
     wait_until(&mut h, "aperçu du patch", |h| h.query_by_label("Appliquer un patch").is_some());
-    h.get_by_label("Index").click();
-    h.run_steps(3);
-    h.run_steps(3);
-    h.get_by_label("Appliquer").click();
+    click_label(&mut h, "Index");
+    wait_until(&mut h, "cible : index", |h| checked(h, "Index"));
+    click_label(&mut h, "Appliquer");
     wait_git(&mut h, "index modifié", || {
         try_git(&repo, &["diff", "--cached", "--name-only"]).is_some_and(|s| s.trim() == "a.txt")
     });
@@ -107,10 +105,9 @@ fn a_format_patch_offers_git_am_and_creates_the_commit() {
     let mut h = open(&repo, tmp.path());
     drop_file(&mut h, &file);
     wait_until(&mut h, "aperçu du patch", |h| h.query_by_label("Appliquer un patch").is_some());
-    h.get_by_label_contains("git am").click();
-    h.run_steps(3);
-    h.run_steps(3);
-    h.get_by_label("Créer les commits").click();
+    click_label(&mut h, "Créer les commits (git am)");
+    wait_until(&mut h, "cible : git am", |h| checked(h, "Créer les commits (git am)"));
+    click_label(&mut h, "Créer les commits");
     wait_git(&mut h, "commit créé", || {
         try_git(&repo, &["log", "-1", "--format=%s"]).is_some_and(|s| s.trim() == "Ajoute deux")
     });
@@ -127,12 +124,11 @@ fn a_pasted_patch_is_previewed_then_applied() {
     let area = h.get_by(|n| n.placeholder() == Some("Collez le patch ici (Ctrl+V)"));
     area.focus();
     h.event(egui::Event::Paste(patch));
-    h.run_steps(3);
-    h.get_by_label("Aperçu").click();
+    // « Aperçu » n'est utilisable qu'une fois le texte collé.
+    click_label(&mut h, "Aperçu");
     wait_until(&mut h, "aperçu du patch", |h| h.query_by_label("Appliquer un patch").is_some());
     wait_until(&mut h, "vérification", |h| h.query_by_label_contains("s'applique sans conflit").is_some());
-    h.run_steps(3);
-    h.get_by_label("Appliquer").click();
+    click_label(&mut h, "Appliquer");
     wait_git(&mut h, "fichier modifié", || content(&repo) == "1\n2\n3\n");
 }
 

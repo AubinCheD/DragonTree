@@ -41,13 +41,11 @@ fn has(h: &H, label: &str) -> bool {
     h.query_all_by_label(label).next().is_some()
 }
 
-/// Clique le bouton de validation une fois le dialogue stabilisé : centré, il bouge quand l'aperçu change sa hauteur,
-/// et un clic à côté le fermerait.
+/// Clique le bouton de validation une fois l'aperçu calculé, en une image (`click_label`) : centré, le dialogue bouge
+/// quand l'aperçu change sa hauteur, et un clic réparti sur plusieurs images tomberait à côté et le fermerait.
 fn validate(h: &mut H) {
-    h.run_steps(4);
     wait_until(h, "aperçu calculé", |h| !has(h, "Calcul de l'aperçu…"));
-    h.run_steps(4);
-    h.get_by_label("Ignorer").click();
+    click_label(h, "Ignorer");
 }
 
 /// Ouvre le dialogue par le menu Dépôt (la commande reste grisée tant que les références ne sont pas lues).
@@ -122,10 +120,11 @@ fn the_file_menu_proposes_patterns_and_can_target_info_exclude() {
     wait_until(&mut h, "motifs proposés", |h| has(h, "*.log"));
     h.get_by_label("*.log").click();
     wait_until(&mut h, "aperçu", |h| has(h, &preview_row("x.log")) && has(h, &preview_row("sub/y.log")));
-    // Le dialogue est centré : ses boutons bougent d'une image à l'autre tant que la hauteur de l'aperçu change.
-    h.run_steps(4);
-    h.get_by_label(".git/info/exclude (local, jamais commité)").click();
-    h.run_steps(4);
+    // Le dialogue est centré : ses boutons bougent d'une image à l'autre tant que la hauteur de l'aperçu change (clic
+    // en une image).
+    let exclude = ".git/info/exclude (local, jamais commité)";
+    click_label(&mut h, exclude);
+    wait_until(&mut h, "cible choisie", |h| checked(h, exclude));
     // Le changement de cible relance l'aperçu, qui reste celui du motif.
     wait_until(&mut h, "aperçu relancé", |h| has(h, &preview_row("x.log")));
     validate(&mut h);
@@ -148,8 +147,7 @@ fn a_folder_gitignore_is_offered_for_files_in_a_folder() {
     h.get_by_label("*.log").click();
     // Le dialogue est centré : on attend l'aperçu du motif choisi avant de cliquer plus bas.
     wait_until(&mut h, "premier aperçu", |h| has(h, &preview_row("sub/y.log")) && has(h, &preview_row("x.log")));
-    h.run_steps(4);
-    h.get_by_label("sub/.gitignore (propre à ce dossier)").click();
+    click_label(&mut h, "sub/.gitignore (propre à ce dossier)");
     // Limité au dossier : x.log (à la racine) n'est plus concerné.
     wait_until(&mut h, "aperçu du dossier", |h| has(h, &preview_row("sub/y.log")) && !has(h, &preview_row("x.log")));
     validate(&mut h);

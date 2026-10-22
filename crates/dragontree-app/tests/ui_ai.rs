@@ -90,9 +90,9 @@ fn a_message_typed_while_claude_works_is_kept_and_the_answer_is_only_suggested()
         h.query_by_label_contains("Suggestion de Claude : Titre de Claude").is_some()
     });
     assert!(has_text_input(&h, "Mon propre titre"));
-    // La zone de commit se met à la bonne hauteur une image après l'apparition de la ligne : on attend qu'elle soit stable.
-    h.run_steps(8);
-    h.get_by_label("Remplacer le message").click();
+    // La zone de commit se met à la bonne hauteur une image après l'apparition de la ligne : clic en une image, à la
+    // position du bouton dans l'image qui précède (`click_label`).
+    click_label(&mut h, "Remplacer le message");
     wait_until(&mut h, "message remplacé", |h| has_text_input(h, "Titre de Claude"));
 }
 
@@ -161,8 +161,8 @@ fn an_answer_arriving_after_the_commit_does_not_fill_the_next_message() {
     let subject = h.get_by(|n| n.placeholder() == Some("Résumé du commit (obligatoire)"));
     subject.focus();
     subject.type_text("Commit immédiat");
-    h.run_steps(3);
-    h.get_by_label_contains("Commit (2 fichiers)").click();
+    wait_until(&mut h, "résumé saisi", |h| has_text_input(h, "Commit immédiat"));
+    click_label_containing(&mut h, "Commit (2 fichiers)");
     wait_git(&mut h, "commit créé", || {
         try_git(&repo, &["log", "-1", "--format=%s"]).is_some_and(|s| s.trim() == "Commit immédiat")
     });

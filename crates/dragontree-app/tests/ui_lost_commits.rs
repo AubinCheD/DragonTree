@@ -89,8 +89,8 @@ fn a_new_branch_recovers_the_lost_commit_from_its_context_menu() {
     let name = h.get_by(|n| n.placeholder() == Some("nom-de-la-branche (ex. feature/ma-fonction)"));
     name.focus();
     name.type_text("secours");
-    h.run_steps(3);
-    h.get_by_label("Créer").click();
+    wait_until(&mut h, "nom saisi", |h| has_text_input(h, "secours"));
+    click_label(&mut h, "Créer");
     wait_git(&mut h, "branche créée sur le commit abandonné", || {
         try_git(&repo, &["log", "-1", "--format=%s", "secours"]).is_some_and(|s| s.trim() == "Commit abandonné")
     });
