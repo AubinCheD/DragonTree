@@ -183,18 +183,18 @@ Seul ce qui a été écarté, ou documenté comme limite, reste ouvert. Rien n'e
 | # | Ce qui reste | Pourquoi | Entrée |
 |---|---|---|---|
 | L1 | Identifiants SHA-256 de 32 octets (les dépôts SHA-256 sont refusés avec une erreur explicite) | `Oid` est un `[u8; 20]` utilisé partout ; coût disproportionné pour un format rare et expérimental | L1 |
-| RV4d | Forges en HTTP simple (refusées à l'ajout du compte) | le jeton ne doit jamais circuler en clair | RV4 d |
-| RV4c | Proxy SOCKS, proxy à authentification (NTLM, Kerberos), `http.proxy` de git | hors du plan ; `NO_PROXY` ne vaut que pour les variables d'environnement | RV4 c |
-| RV4b | Instances : profil désigné par un nom 8.3, une jonction ou un lecteur `subst` ; instance élevée et non élevée | clé calculée sur le chemin normalisé, sans le résoudre ; droits d'écriture du tube | RV4 b |
-| RV3, RV4a | SSH sans limite de débit du fetch automatique ; deux worktrees d'un même dépôt sur deux files ; outil de diff externe fermé avec l'application | git ne propose pas la limite pour SSH ; verrous de git ; ce n'est pas une opération du dépôt | RV3, RV4 a |
+| RV4d | Forges en HTTP simple (refusées à l'ajout du compte) | le jeton ne doit jamais circuler en clair | RV4d |
+| RV4c | Proxy SOCKS, proxy à authentification (NTLM, Kerberos), `http.proxy` de git | hors du plan ; `NO_PROXY` ne vaut que pour les variables d'environnement | RV4c |
+| RV4b | Instances : profil désigné par un nom 8.3, une jonction ou un lecteur `subst` ; instance élevée et non élevée | clé calculée sur le chemin normalisé, sans le résoudre ; droits d'écriture du tube | RV4b |
+| RV3, RV4a | SSH sans limite de débit du fetch automatique ; deux worktrees d'un même dépôt sur deux files ; outil de diff externe fermé avec l'application | git ne propose pas la limite pour SSH ; verrous de git ; ce n'est pas une opération du dépôt | RV3, RV4a |
 | RV5c | Textes déjà affichés non retraduits après un changement de langue | décision du plan | RV5 |
 | P4 | Dans cmd ou PowerShell, l'invite revient avant le texte de `--help` | une application graphique n'est pas attendue par le shell | P4 |
-| L3 | Fenêtre Réglages ouverte pendant la relecture : sa liste modifiée remplace celle du fichier ; réglages perdus à la déconnexion de Windows | brouillon de la fenêtre ; pas d'enregistrement à la fin de session | L3 |
+| L3 | Fenêtre Réglages ouverte pendant la relecture : sa liste modifiée remplace celle du fichier ; à la déconnexion de Windows, taille et position de la fenêtre et onglet actif perdus (les réglages, eux, sont écrits à chaque modification) | brouillon de la fenêtre ; winit 0.30 ne signale pas la fin de session (`WM_QUERYENDSESSION`, `WM_ENDSESSION`) | L3 |
 | L4 | Refus d'authentification d'un fetch manuel non reconnu avec un git traduit | les opérations visibles gardent la langue de l'utilisateur | L4 |
 | N1 | Vue des pull requests : dates Azure DevOps, plafonds de résultats, relecteur GitLab « désigné », remotes lus sans `include.path`, `insteadOf` ni alias SSH | limites des API et de la lecture de `.git/config` | N1 |
 | N3 | Icône avec MSVC : `link.exe` à confirmer | toolchain MSVC non installée sur le poste | N3 |
 | P1 | Marque : EUIPO/TMview et INPI à vérifier à la main | accès automatique impossible | P1 |
-| T3 | Confirmer avec l'utilisateur que la visibilité des stashs répond à sa demande | jamais confirmé | T3 |
+| T3 | Fait (section Stashes avant Remotes et Tags, stashs dans le graphe) ; à confirmer : que cette visibilité des stashs répond à la demande de l'utilisateur | jamais confirmé par l'utilisateur | T3 |
 
 ### Bugs à corriger
 
@@ -655,7 +655,7 @@ Seul ce qui a été écarté, ou documenté comme limite, reste ouvert. Rien n'e
 - **État :** réalisé.
   - Avant : le manifeste déclarait la licence MIT (`Cargo.toml:9`), mais le dépôt n'avait pas de fichier `LICENSE`.
   - `LICENSE` à la racine : texte MIT standard, « Copyright (c) 2026 DragonTree contributors ». La licence de la police Phosphor reste à part (`assets/fonts/LICENSE-Phosphor.txt`) ; le README les cite toutes deux (section « Licence »).
-  - Le README annonce 1 077 tests (nombre réel au 2026-10-22, fin de la branche `points-restants` ; 870 le 2026-10-20, 277 le 2026-10-17).
+  - Le README annonce 1 091 tests (nombre réel au 2026-10-22, fin de la branche `points-restants` après sa revue finale ; 1 077 avant la revue finale, 870 le 2026-10-20, 277 le 2026-10-17).
   - Vérification du nom consignée ci-dessous ; aucune démarche d'achat, de dépôt ni d'inscription (décision du plan).
 - **Vérification du nom (2026-10-22, recherche web uniquement) :**
   - **Domaines** (registres RDAP publics) :
@@ -806,6 +806,7 @@ Seul ce qui a été écarté, ou documenté comme limite, reste ouvert. Rien n'e
     - Onglets ouverts, onglet actif et espace de travail actif décrivent la fenêtre : ceux de la session. Si le fichier avait un autre espace actif, ses onglets ouverts sont rangés dans cet espace (après ceux que la session y aurait rangés) ; l'espace que la fenêtre affiche prend les onglets de la fenêtre, comme dans toute session (des onglets que le fichier y avait rangés ne sont pas gardés).
     - Repli, si une valeur fusionnée ne se relit pas (énumération à données fusionnée entrée par entrée ; aucune aujourd'hui) : la règle au premier niveau seulement (un réglage changé par la session y prend sa valeur entière, table ou liste comprise, sans les entrées du fichier), puis, en dernier recours, le fichier tel quel (modifications de la session perdues).
   - Limite : la fenêtre Réglages ouverte pendant la relecture garde son brouillon d'avant ; si l'on y a modifié une liste (dossiers scannés, commandes…), « Enregistrer » la remplace entière par ce brouillon, sans les entrées que le fichier relu y avait ajoutées (`take_edits`). Les autres réglages ne sont pas touchés.
+  - Limite, déconnexion de Windows (README, « Limites connues ») : winit 0.30.13 ne traite ni `WM_QUERYENDSESSION` ni `WM_ENDSESSION`, et eframe n'appelle alors ni `save` ni `on_exit`. Les réglages, écrits à chaque modification, ne sont pas perdus ; seul ce qu'écrit `save` (à la fermeture et à l'enregistrement périodique d'eframe) peut l'être : taille et position de la fenêtre, onglet actif (`remember_tabs`).
   - Réalisé, avertissement (`app.rs`, `menu_bar.rs`) :
     - indicateur « Réglages non enregistrés » à droite de la barre de menus, tant que la session a des modifications que le fichier n'a pas reçues ; infobulle avec le chemin et l'erreur (lecture, ou écriture après relecture), un clic relance l'enregistrement (donc la relecture) ;
     - notification « Modifications des réglages non enregistrées » à la première modification refusée, une seule par série (l'indicateur, lui, reste visible à chaque modification) ;
@@ -940,7 +941,8 @@ La branche `points-restants` traite tous les points qui restaient ouverts après
   - L1 : l'erreur explicite suffit, les identifiants de 32 octets sont écartés (coût d'un `Oid` de taille variable) ; L3 : la fusion des réglages relus se fait sur trois versions (départ de la session, session, fichier) et les onglets ouverts, l'onglet actif et l'espace actif restent ceux de la fenêtre ;
   - les tests ne lisent jamais la configuration git globale : l'isolation est la valeur par défaut des helpers communs (déterminisme, aucune écriture dans la configuration de l'utilisateur) ;
   - les noms de marques tiers cités dans la vérification du nom (P1) sont gardés : ce sont des constats, sans démarche d'achat ni de dépôt.
-- **Qualité :** 1 077 tests (10 autres sont ignorés par défaut), clippy (`-D warnings`) et rustfmt verts.
+- **Revue finale de la branche :** une vague de corrections en commits ordinaires « (revue finale) » : la fermeture attend aussi les opérations enchaînées et renonce devant une question (RV4a), le push forcé pousse le commit modifié lui-même (L5), retouches de « Espaces » (L6), tests d'interface attendant des conditions plutôt qu'un nombre d'images.
+- **Qualité :** 1 091 tests (10 autres sont ignorés par défaut), clippy (`-D warnings`) et rustfmt verts.
 - **Reste ouvert :** seulement ce qui a été écarté ou documenté comme limite, listé dans « Reste ouvert » plus haut avec un renvoi vers chaque entrée : identifiants SHA-256 de 32 octets, forges en HTTP simple, proxy SOCKS et à authentification, instances (profil 8.3 ou `subst`, élevée et non élevée), SSH sans limite de débit du fetch automatique, textes figés après un changement de langue, invite de `--help` dans cmd et PowerShell, fenêtre Réglages et déconnexion de Windows, fetch manuel avec un git traduit, limites de la vue des pull requests, `link.exe` pour l'icône MSVC, recherche de marque EUIPO et INPI, confirmation de T3.
 
 ## État du plan d'implémentation

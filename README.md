@@ -277,7 +277,7 @@ dépôt (pas de collision sur `index.lock`), résultats périmés ignorés.
 cargo test --workspace
 ```
 
-1 077 tests (et 10 tests ignorés par défaut) : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
+1 091 tests (et 10 tests ignorés par défaut) : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
 temporaires (y compris remotes locaux), API des forges sur des réponses JSON représentatives, et parcours
 d'interface de bout en bout (egui_kittest : indexer puis commiter, indexer un hunk, ouvrir un dépôt depuis la
 liste, créer une branche, résoudre un conflit, rebase interactif, stash/pop, annulation, menus, worktrees, bisect,
@@ -285,8 +285,8 @@ Git Flow, LFS, commandes personnalisées, pull requests de tous les comptes).
 Les tests ne lisent jamais votre configuration git globale : les helpers communs font désigner à `GIT_CONFIG_GLOBAL`,
 `HOME`, `USERPROFILE` et `XDG_CONFIG_HOME` un dossier temporaire avant toute commande git (la configuration système
 de Git pour Windows reste lue).
-Tests réels facultatifs (les ignorés) : `cargo test -- --ignored` avec les variables décrites en tête
-des fichiers `tests/live*.rs`.
+Tests facultatifs (ignorés par défaut) : `cargo test -- --ignored` ; ceux qui joignent un vrai compte prennent les
+variables décrites en tête des fichiers `tests/live*.rs`.
 
 ## Limites connues et suite
 
@@ -334,8 +334,11 @@ aussi ce qui reste ouvert. Celles qui touchent une fonction sont aussi dans sa s
   lancée sans (deux fenêtres).
 - Réglages : la fenêtre Réglages ouverte pendant la relecture d'un fichier d'abord illisible remplace, à
   « Enregistrer », une liste qu'elle a modifiée (dossiers scannés, commandes…) par son brouillon, sans les entrées que
-  le fichier relu y avait ajoutées ; la déconnexion de Windows n'enregistre pas les réglages changés depuis le dernier
-  enregistrement périodique (30 s).
+  le fichier relu y avait ajoutées.
+- Déconnexion de Windows : DragonTree n'en est pas prévenu (winit 0.30 ne traite pas `WM_QUERYENDSESSION` ni
+  `WM_ENDSESSION`), sa fermeture habituelle n'a donc pas lieu. Les réglages, écrits à chaque modification, ne sont pas
+  perdus ; ce qui n'est écrit qu'à la fermeture ou à l'enregistrement périodique peut l'être : taille et position de
+  la fenêtre, onglet actif.
 - Icône de l'exécutable : vérifiée avec GNU ; avec MSVC, objet lié par lld-link, `link.exe` à confirmer.
 - Nom du projet : aucun conflit trouvé pour un logiciel, mais l'EUIPO (TMview) et l'INPI n'ont pas pu être interrogés
   automatiquement : à vérifier à la main avant tout dépôt de marque.
