@@ -1,5 +1,11 @@
 # DragonTree — clone de Git Fork en Rust — Plan d'implémentation
 
+> **Plan historique, réalisé.** Toutes ses tâches (0 à 24) sont terminées depuis le 2026-10-17, revue finale
+> comprise. Le suivi s'est fait dans un journal d'exécution non versionné : les cases ci-dessous n'ont jamais été
+> cochées et ne le seront pas. Ce document n'est plus tenu à jour ; l'état réel, les écarts et ce qui reste à faire
+> sont dans [`docs/feuille-de-route.md`](../../feuille-de-route.md) (sections « État du plan d'implémentation » et
+> « Reste à faire »).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Recréer Git Fork (v2.23) en Rust natif : onglets par dépôt, barre latérale droite listant automatiquement les dépôts trouvés sous des dossiers racines, comptes GitHub/GitLab/Azure DevOps multiples et clonage intégré, en consommant beaucoup moins que les ~300 Mo de Fork.

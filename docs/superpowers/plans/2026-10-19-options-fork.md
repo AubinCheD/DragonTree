@@ -1,5 +1,12 @@
 # Plan — barre de menus et options de Fork (F / V / R / C / H)
 
+> **Plan historique, réalisé.** Ses 48 tâches sont terminées (branche `options-fork`, 2026-10-20) : barre de menus,
+> toutes les options F, V, R, C et H, un commit par option, puis la synthèse de la documentation. Le suivi s'est fait
+> dans un journal d'exécution non versionné : les cases ci-dessous n'ont pas été cochées et ne le seront pas. Ce
+> document n'est plus tenu à jour ; l'état réel et ce qui reste à faire sont dans
+> [`docs/feuille-de-route.md`](../../feuille-de-route.md) (sections « Branche `options-fork` (2026-10-20) » et
+> « Reste à faire »).
+
 > **Pour les agents d'exécution :** ce plan s'exécute tâche par tâche (superpowers:subagent-driven-development).
 > Chaque tâche produit **exactement un commit**. Les étapes utilisent des cases à cocher (`- [ ]`).
 

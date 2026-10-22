@@ -222,7 +222,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | # | Point | Origine | Priorité |
 |---|---|---|---|
 | P1 | Publication open source : licence, vérification du nom, README (fait ; EUIPO et INPI à vérifier à la main) | objectif annoncé par l'utilisateur | moyenne |
-| P2 | Cases du plan jamais cochées | état du plan | basse |
+| P2 | Cases du plan jamais cochées (fait : plans signalés comme historiques) | état du plan | basse |
 | P3 | Stabilité de `ui_network` vérifiée sur 3 passages seulement | correction des tests instables | basse |
 | P4 | `--help` en build release depuis une console Windows (à vérifier) | relevé en vérifiant le code | basse |
 | L1 | Dépôts SHA-256 non pris en charge | limite connue (README) | basse |
@@ -662,11 +662,15 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** fichier `LICENSE` présent ; résultat des vérifications du nom consigné.
 - **Priorité :** moyenne.
 
-#### P2 — Cases du plan jamais cochées
+#### P2 — Cases du plan jamais cochées (fait)
 
 - **Contexte :** le plan a été suivi grâce à un journal d'exécution non versionné, et ses cases n'ont pas été cochées.
-- **État :** `docs/superpowers/plans/2026-10-16-dragontree.md` compte 58 cases, toutes vides, alors que les tâches 0 à 24 sont terminées (voir État du plan).
-- **À faire :** cocher les étapes faites, ou signaler en tête du plan qu'il est historique et renvoyer à ce document.
+- **État :** réalisé.
+  - Avant : `docs/superpowers/plans/2026-10-16-dragontree.md` comptait 58 cases, toutes vides, alors que les tâches 0 à 24 sont terminées (voir État du plan). De même, `docs/superpowers/plans/2026-10-19-options-fork.md` comptait 91 cases vides, alors que ses 48 tâches sont terminées (branche `options-fork`).
+  - Les deux plans portent en tête un avertissement : plan historique et réalisé, cases jamais cochées et laissées telles quelles, document plus tenu à jour, renvoi à ce document (sections « État du plan d'implémentation » ou « Branche `options-fork` », et « Reste à faire »). Les cases ne sont pas cochées.
+  - Le plan en cours (`docs/superpowers/plans/2026-10-21-points-restants.md`) n'est pas concerné.
+- **À faire :** cocher les étapes faites, ou signaler en tête du plan qu'il est historique et renvoyer à ce document (fait : avertissement en tête des deux plans).
+- **Critère de fin (atteint) :** chaque plan terminé dit en tête qu'il est historique et renvoie à la feuille de route.
 - **Priorité :** basse.
 
 #### P3 — Stabilité de `ui_network`
@@ -718,7 +722,7 @@ La branche `options-fork` livre toutes les options des tableaux ci-dessus (F2–
 
 Plan : `docs/superpowers/plans/2026-10-16-dragontree.md` (non réécrit ici).
 
-- **Tâches 0 à 24 :** toutes faites selon le journal d'exécution, mais aucune case n'est cochée (P2).
+- **Tâches 0 à 24 :** toutes faites selon le journal d'exécution ; aucune case n'est cochée, le plan dit en tête qu'il est historique (P2).
 - **Mesures de la tâche 24 :**
   - 110 Mo de mémoire privée avec 3 onglets, dont le gros dépôt ;
   - historique complet en 1,24 s ;
