@@ -530,10 +530,10 @@ fn diff_base_args(o: &DiffOptions) -> Vec<String> {
 }
 
 /// Choisit le diff du fichier demandé dans la sortie, lue avec la limite [`MAX_DIFF_BYTES`] : une sortie coupée donne un
-/// diff `truncated`, sans hunks.
+/// diff `truncated`, sans hunks (une sortie lue avec la limite n'est jamais plus longue qu'elle).
 fn pick_diff(out: &Output, old_path: Option<&str>, path: &str) -> FileDiff {
     let stdout = &out.stdout;
-    if out.stdout_truncated || stdout.len() > MAX_DIFF_BYTES {
+    if out.stdout_truncated {
         return FileDiff {
             old_path: old_path.map(str::to_string),
             new_path: Some(path.to_string()),

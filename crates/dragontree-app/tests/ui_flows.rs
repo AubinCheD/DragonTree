@@ -1,9 +1,12 @@
 //! Parcours d'interface de bout en bout (egui_kittest) sur de vrais dépôts temporaires.
 //! Les commandes git tournent en arrière-plan : on fait avancer l'interface jusqu'au résultat.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use common::SilentServer;
 use dragontree_app::{DragonTreeApp, StartOptions};
 use dragontree_git::Git;
 use egui_kittest::Harness;
@@ -520,19 +523,6 @@ fn ignore_menu_appends_to_an_existing_gitignore() {
     assert_eq!(std::fs::read(repo.join(".gitignore")).unwrap(), b"# fichiers g\xe9n\xe9r\xe9s\nbin/\nnotes.txt\n");
 }
 
-/// Serveur HTTP qui accepte les connexions sans jamais répondre (clone bloqué).
-fn silent_http_server() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        let mut held = Vec::new();
-        for stream in listener.incoming().flatten() {
-            held.push(stream);
-        }
-    });
-    port
-}
-
 #[test]
 fn closing_the_clone_window_cleans_up_the_cancelled_clone() {
     let tmp = tempfile::tempdir().unwrap();
@@ -541,7 +531,9 @@ fn closing_the_clone_window_cleans_up_the_cancelled_clone() {
     std::fs::create_dir_all(&profile).unwrap();
     let settings = serde_json::json!({ "default_clone_dir": clones });
     std::fs::write(profile.join("settings.json"), settings.to_string()).unwrap();
-    let port = silent_http_server();
+    // Serveur muet : le clone reste bloqué.
+    let server = SilentServer::start();
+    let port = server.port;
     let mut h = harness(StartOptions { window: Some("clone".into()), ..start(tmp.path()) });
 
     let hint = "https://github.com/organisation/depot.git";

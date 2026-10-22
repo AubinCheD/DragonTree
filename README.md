@@ -92,8 +92,9 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   que la fenêtre est ouverte et par Actualiser ; l'erreur d'un compte s'affiche à sa place sans bloquer les autres,
   comme une organisation Azure DevOps qui n'a pas répondu, et un compte Azure DevOps sans organisation est expliqué.
 - Surveillance du dossier (rafraîchissement automatique), fetch automatique silencieux (sur une file à part : il ne
-  fait pas attendre les écritures, et cède la place à un fetch, pull ou push lancé à la main), palette **Ctrl+P**
-  (dépôts, branches, commandes), journal des commandes git, thèmes clair/sombre. Les opérations d'un dépôt ouvert
+  fait pas attendre les écritures ; un fetch, pull ou push lancé à la main attend la fin de celui qui tourne, sans
+  l'interrompre, et le dit), palette **Ctrl+P** (dépôts, branches, commandes), journal des commandes git, thèmes
+  clair/sombre. Les opérations d'un dépôt ouvert
   dans plusieurs onglets passent par une seule file, dans l'ordre des clics.
 - **Interface en français ou en anglais** (Réglages › Apparence › Langue), changement immédiat sans redémarrer.
 

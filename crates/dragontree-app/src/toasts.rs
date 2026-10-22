@@ -94,6 +94,12 @@ impl Toasts {
         self.items.iter().any(|t| t.toast.kind == ToastKind::Error)
     }
 
+    /// Titres des notifications affichées (tests unitaires).
+    #[cfg(test)]
+    pub(crate) fn titles(&self) -> Vec<String> {
+        self.items.iter().map(|t| t.toast.title.clone()).collect()
+    }
+
     /// Affiche les notifications ; renvoie l'action dont le bouton a été cliqué.
     pub fn show(&mut self, ctx: &egui::Context, p: &Palette) -> Option<ToastAction> {
         let mut clicked = None;

@@ -26,15 +26,6 @@ fn quit_menu_entry_requests_closing_the_window() {
     assert!(closed, "Quitter doit émettre ViewportCommand::Close");
 }
 
-/// Dépôt avec un commit et un remote `origin` servi par `server` (muet : un fetch y reste bloqué).
-fn repo_with_silent_remote(base: &std::path::Path, server: &SilentServer) -> std::path::PathBuf {
-    let dir = base.join("depot");
-    init_repo(&dir);
-    commit_file(&dir, "a.txt", "1\n", "Premier commit");
-    git(&dir, &["remote", "add", "origin", &format!("http://127.0.0.1:{}/depot.git", server.port)]);
-    dir
-}
-
 /// Lance un fetch visible (bouton de la barre d'outils) qui reste bloqué sur le serveur muet.
 fn blocked_fetch(tmp: &std::path::Path, server: &SilentServer) -> egui_kittest::Harness<'static, DragonTreeApp> {
     let repo = repo_with_silent_remote(tmp, server);

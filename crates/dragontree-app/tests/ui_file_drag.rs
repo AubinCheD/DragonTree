@@ -31,12 +31,6 @@ fn open(base: &Path, repo: &Path) -> Harness<'static, DragonTreeApp> {
     h
 }
 
-/// Fichiers indexés ; `None` si la lecture échoue (sous Windows, l'index est illisible un instant pendant que
-/// l'application le remplace) : les attentes relisent alors à l'image suivante.
-fn staged(repo: &Path) -> Option<Vec<String>> {
-    try_git(repo, &["diff", "--cached", "--name-only"]).map(|out| out.lines().map(str::to_string).collect())
-}
-
 /// Centre de la ligne de liste d'un fichier (l'élément le plus à gauche de ce libellé : le titre du diff est à droite).
 fn row_center(h: &Harness<'static, DragonTreeApp>, name: &str) -> egui::Pos2 {
     h.query_all_by_label(name)

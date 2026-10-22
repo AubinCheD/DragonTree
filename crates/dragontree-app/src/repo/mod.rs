@@ -121,6 +121,8 @@ pub struct RunningOp {
     pub progress: Option<Progress>,
     pub cancel: CancelToken,
     pub silent: bool,
+    /// Attend la fin du fetch automatique en cours avant de partir (voir `op_queue`).
+    pub waiting: bool,
 }
 
 /// Liste de commits du graphe : les commits dans l'ordre d'affichage, leur graphe et l'index oid → ligne.
@@ -369,6 +371,8 @@ pub enum RepoEvent {
     /// Modèle de message de commit (`commit.template`) lu pour préremplir la zone de commit.
     CommitTemplate(u64, Option<String>),
     OpProgress(u64, Progress),
+    /// L'opération attend (vrai), ou n'attend plus, la fin du fetch automatique en cours.
+    OpWaiting(u64, bool),
     OpDone {
         id: u64,
         title: String,
@@ -994,6 +998,11 @@ impl RepoTab {
                     op.progress = Some(p);
                 }
             }
+            RepoEvent::OpWaiting(id, waiting) => {
+                if let Some(op) = self.running.iter_mut().find(|o| o.id == id) {
+                    op.waiting = waiting;
+                }
+            }
             RepoEvent::OpDone { id, title, result, refresh } => {
                 let silent = self.running.iter().find(|o| o.id == id).is_some_and(|o| o.silent);
                 self.running.retain(|o| o.id != id);
@@ -1269,13 +1278,16 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                 .show(ui, |ui| self.bisect_banner(ui, shared, &p));
         }
         if let Some(op) = self.running.iter().find(|o| !o.silent) {
-            let (title, progress, cancel) = (op.title.clone(), op.progress.clone(), op.cancel.clone());
+            let (title, progress, cancel, waiting) =
+                (op.title.clone(), op.progress.clone(), op.cancel.clone(), op.waiting);
             egui::Panel::top(("progress", self.id))
                 .frame(Frame::new().fill(p.hover).inner_margin(egui::Margin::symmetric(10, 4)))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         let text = match &progress {
+                            // Un fetch automatique tourne : il n'est pas arrêté (voir `op_queue`), on attend sa fin.
+                            _ if waiting => tr!("{title} — en attente de la fin du fetch automatique…", title),
                             Some(pg) => match (pg.percent, pg.total) {
                                 (Some(pc), Some(t)) => format!("{title} — {} {pc}% ({}/{t})", pg.phase, pg.current),
                                 (Some(pc), None) => format!("{title} — {} {pc}%", pg.phase),

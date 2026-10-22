@@ -97,8 +97,9 @@ fn the_diff_of_a_50_mib_file_is_truncated_without_holding_more_than_the_limit() 
     let head = Oid::from_hex(t.run(&["rev-parse", "HEAD"]).trim()).unwrap();
     let options = DiffOptions::default();
     // Au-delà de la limite (8 Mio) : les tampons de lecture des deux tubes et les morceaux en transit, 64 Kio chacun
-    // (huit au plus en attente) ; mesuré : environ 200 Kio.
-    let max = MAX_DIFF_BYTES + 1024 * 1024;
+    // (huit au plus en attente) ; mesuré : environ 210 Kio. La marge est assez étroite pour voir une file de morceaux
+    // sans borne : avec elle, l'un des quatre diffs au moins dépassait 512 Kio (mesuré : de 450 à 900 Kio).
+    let max = MAX_DIFF_BYTES + 512 * 1024;
 
     // Commit qui ajoute le fichier : plus de 50 Mio de sortie.
     let added = FileChange { path: "gros.txt".into(), old_path: None, kind: ChangeKind::Added };

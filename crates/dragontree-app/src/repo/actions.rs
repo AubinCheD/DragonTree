@@ -14,16 +14,15 @@ use crate::toasts::{Toast, ToastKind};
 
 type OpFn = dyn FnOnce(&Repo, &NetOptions, &mut dyn FnMut(Progress)) -> Result<Option<String>, GitError> + Send;
 
-/// Attente maximale de l'arrêt d'un fetch automatique avant une opération réseau visible (l'annulation arrête git en
-/// moins de quelques secondes ; au-delà, l'opération part quand même).
-const STOP_SILENT_OPS: Duration = Duration::from_secs(10);
-
 #[derive(Default, Clone, Copy)]
 pub struct OpOptions {
     /// Opération réseau : injecte l'authentification du compte associé au dépôt.
     pub network: bool,
     /// Pas de notification de succès, pas de fenêtre d'authentification (auto-fetch).
     pub silent: bool,
+    /// Opération locale qui réécrit les refs distantes (suppression d'un remote) : comme une opération réseau
+    /// visible, elle ne tourne pas en même temps qu'un fetch automatique (voir `op_queue`).
+    pub remote_refs: bool,
 }
 
 /// Variables d'environnement qui authentifient git avec le jeton du compte (vide sans compte ni jeton). Lit le
@@ -44,8 +43,10 @@ impl RepoTab {
     }
 
     /// Lance `f` sur une file du dépôt, partagée avec ses autres onglets (voir `op_queue`) : celle du réseau
-    /// silencieux pour une opération réseau silencieuse (fetch automatique), sinon celle des écritures. Une
-    /// opération réseau visible arrête d'abord l'opération silencieuse en cours, qui mettrait à jour les mêmes refs.
+    /// silencieux pour une opération réseau silencieuse (fetch automatique), sinon celle des écritures. À son tour,
+    /// une opération réseau visible (ou qui réécrit les refs distantes) annule le fetch automatique qui n'a pas
+    /// commencé et attend la fin de celui qui tourne, sans l'arrêter : il met à jour les mêmes refs. L'interface
+    /// affiche cette attente (`RepoEvent::OpWaiting`) ; annuler l'opération l'interrompt.
     pub(crate) fn run_op(&mut self, shared: &Shared, title: &str, refresh: Refresh, opts: OpOptions, f: Box<OpFn>) {
         let Some(repo) = self.repo.clone() else { return };
         let Some(queues) = self.queues(shared) else { return };
@@ -58,6 +59,7 @@ impl RepoTab {
             progress: None,
             cancel: cancel.clone(),
             silent: opts.silent,
+            waiting: false,
         });
         let account = if opts.network { self.net_account(shared) } else { None };
         let (sender, tab, title) = (shared.jobs.sender(), self.id, title.to_string());
@@ -65,18 +67,25 @@ impl RepoTab {
             tab,
             id,
             title: title.clone(),
-            network: opts.network,
+            network: opts.network || opts.remote_refs,
             silent: opts.silent,
             cancel: cancel.clone(),
         };
         let (queue, background) = match (opts.network, opts.silent) {
             (true, true) => (queues.background, None),
-            (true, false) => (queues.writes, Some(queues.background)),
-            (false, _) => (queues.writes, None),
+            _ if opts.network || opts.remote_refs => (queues.writes, Some(queues.background)),
+            _ => (queues.writes, None),
         };
         queue.submit(pending, move || {
             if let Some(background) = background {
-                background.cancel_and_wait(STOP_SILENT_OPS);
+                let mut waited = false;
+                background.make_way(&cancel, || {
+                    waited = true;
+                    sender.send(AppEvent::Repo(tab, RepoEvent::OpWaiting(id, true)));
+                });
+                if waited {
+                    sender.send(AppEvent::Repo(tab, RepoEvent::OpWaiting(id, false)));
+                }
             }
             let net = NetOptions { env: auth_env(account.as_ref()), cancel, non_interactive: opts.silent };
             let progress_sender = sender.clone();
@@ -118,7 +127,7 @@ impl RepoTab {
         silent: bool,
         f: impl FnOnce(&Repo, &NetOptions, &mut dyn FnMut(Progress)) -> Result<Option<String>, GitError> + Send + 'static,
     ) {
-        self.run_op(shared, title, refresh, OpOptions { network: true, silent }, Box::new(f));
+        self.run_op(shared, title, refresh, OpOptions { network: true, silent, remote_refs: false }, Box::new(f));
     }
 
     // --- Réseau -------------------------------------------------------------------------
@@ -507,6 +516,37 @@ mod tests {
         panic!("opération {id} de l'onglet {tab} jamais terminée");
     }
 
+    /// Traite les événements de `tab` comme l'application, jusqu'à ce que `until` en reconnaisse un (inclus).
+    fn pump(
+        events: &Receiver<AppEvent>,
+        shared: &mut Shared,
+        tab: &mut RepoTab,
+        what: &str,
+        mut until: impl FnMut(&RepoEvent) -> bool,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while let Ok(ev) = events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            if let AppEvent::Repo(id, ev) = ev
+                && id == tab.id
+            {
+                let reached = until(&ev);
+                tab.handle_event(ev, shared);
+                if reached {
+                    return;
+                }
+            }
+        }
+        panic!("jamais reçu : {what}");
+    }
+
+    /// Résultat de l'opération `id` si `ev` est sa fin.
+    fn done_with(ev: &RepoEvent, id: u64) -> Option<&Result<Option<String>, GitError>> {
+        match ev {
+            RepoEvent::OpDone { id: i, result, .. } if *i == id => Some(result),
+            _ => None,
+        }
+    }
+
     #[test]
     fn two_tabs_on_the_same_repository_share_one_write_queue() {
         let dir = tempfile::tempdir().unwrap();
@@ -586,34 +626,135 @@ mod tests {
         gate.send(()).unwrap();
     }
 
+    /// Un fetch automatique qui tourne n'est jamais arrêté par une opération réseau visible (git tué pendant l'écriture
+    /// des refs laisserait des `*.lock`) : elle attend sa fin, et le montre. Celui qui n'a pas commencé est annulé.
     #[test]
-    fn a_visible_network_operation_stops_the_automatic_fetch_first() {
+    fn a_visible_network_operation_cancels_the_waiting_automatic_fetch_and_waits_for_the_running_one() {
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
         let dir = tempfile::tempdir().unwrap();
-        let (shared, events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
-        let queues = tabs[0].queues(&shared).unwrap();
-        // Fetch automatique bloqué (serveur muet), qui ne s'arrête que si on l'annule.
-        let fetch = PendingOp {
-            tab: 1,
-            id: 99,
-            title: "Fetch".into(),
-            network: true,
-            silent: true,
-            cancel: CancelToken::new(),
-        };
-        let cancel = fetch.cancel.clone();
-        queues.background.submit(fetch, move || {
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while !cancel.is_cancelled() && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        });
-        let saw_fetch_running = Arc::new(Mutex::new(None));
-        let (seen, background) = (saw_fetch_running.clone(), queues.background.clone());
-        tabs[0].run_net(&shared, "Pull", Refresh::NONE, false, move |_, _, _| {
-            *seen.lock().unwrap() = Some(!background.is_idle());
+        let (mut shared, events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let tab = &mut tabs[0];
+        // Opération 1 : fetch automatique en cours, bloqué jusqu'à `gate` (serveur lent) ; il note s'il a été annulé.
+        let (started_tx, started_rx) = mpsc::channel();
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let (first_cancelled, first_done) = (Arc::new(Mutex::new(None)), Arc::new(AtomicBool::new(false)));
+        let (cancelled, done) = (first_cancelled.clone(), first_done.clone());
+        tab.run_net(&shared, "Fetch", Refresh::NONE, true, move |_, n, _| {
+            started_tx.send(()).unwrap();
+            let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+            *cancelled.lock().unwrap() = Some(n.cancel.is_cancelled());
+            done.store(true, SeqCst);
             Ok(None)
         });
-        wait_done(&events, 1, 1);
-        assert_eq!(*saw_fetch_running.lock().unwrap(), Some(false), "le fetch automatique est arrêté avant le pull");
+        started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        // Opération 2 : un second fetch automatique, en attente derrière le premier.
+        let second_ran = Arc::new(AtomicBool::new(false));
+        let ran = second_ran.clone();
+        tab.run_net(&shared, "Fetch", Refresh::NONE, true, move |_, _, _| {
+            ran.store(true, SeqCst);
+            Ok(None)
+        });
+        // Opération 3 : pull visible ; il note si le premier fetch était fini quand il est parti.
+        let pull_saw_fetch_done = Arc::new(Mutex::new(None));
+        let (saw, done) = (pull_saw_fetch_done.clone(), first_done.clone());
+        tab.run_net(&shared, "Pull", Refresh::NONE, false, move |_, _, _| {
+            *saw.lock().unwrap() = Some(done.load(SeqCst));
+            Ok(None)
+        });
+        let token = |tab: &RepoTab, id| tab.running.iter().find(|op| op.id == id).unwrap().cancel.clone();
+
+        // Le fetch qui n'a pas commencé est annulé ; celui qui tourne ne l'est pas.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !token(tab, 2).is_cancelled() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(token(tab, 2).is_cancelled(), "fetch automatique en attente annulé");
+        assert!(!token(tab, 1).is_cancelled(), "le fetch automatique en cours n'est pas arrêté");
+        // Le pull attend, et l'interface le montre.
+        pump(&events, &mut shared, tab, "attente du pull", |ev| matches!(ev, RepoEvent::OpWaiting(3, true)));
+        assert!(tab.running.iter().any(|op| op.id == 3 && op.waiting), "attente affichée");
+        assert_eq!(*pull_saw_fetch_done.lock().unwrap(), None, "le pull ne part pas pendant le fetch");
+
+        // Fin du fetch : le pull part ensuite ; le fetch annulé n'a pas lancé git ni rien notifié.
+        gate_tx.send(()).unwrap();
+        let (mut second, mut pull) = (None, None);
+        pump(&events, &mut shared, tab, "fin du second fetch et du pull", |ev| {
+            second = second.or_else(|| done_with(ev, 2).map(|r| matches!(r, Err(GitError::Cancelled))));
+            pull = pull.or_else(|| done_with(ev, 3).map(Result::is_ok));
+            second.is_some() && pull.is_some()
+        });
+        assert_eq!((second, pull), (Some(true), Some(true)), "second fetch annulé, pull réussi");
+        assert_eq!(*first_cancelled.lock().unwrap(), Some(false), "fetch jamais annulé");
+        assert_eq!(*pull_saw_fetch_done.lock().unwrap(), Some(true), "le pull est parti après la fin du fetch");
+        assert!(!second_ran.load(SeqCst), "le fetch annulé n'a rien lancé");
+        assert!(tab.running.is_empty(), "toutes terminées (la fin du premier fetch arrive avant celle du second)");
+        assert_eq!(shared.toasts.titles(), Vec::<String>::new(), "aucune notification");
+    }
+
+    /// La suppression d'un remote réécrit les refs distantes : elle compte comme une opération réseau pour le fetch
+    /// automatique, et attend la fin de celui qui tourne.
+    #[test]
+    fn removing_a_remote_waits_for_the_running_automatic_fetch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut shared, events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let tab = &mut tabs[0];
+        let git = Git::discover().unwrap();
+        git.cmd(dir.path()).args(["remote", "add", "origin", "https://forge.test/contoso/depot.git"]).run().unwrap();
+        let remotes = || git.cmd(dir.path()).arg("remote").run().unwrap().stdout_str();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        tab.run_net(&shared, "Fetch", Refresh::NONE, true, move |_, _, _| {
+            started_tx.send(()).unwrap();
+            let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+            Ok(None)
+        });
+        started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+        tab.execute_dialog(super::super::Dialog::RemoveRemote { name: "origin".into() }, &mut shared);
+        let group = tab.queues(&shared).unwrap().group().to_string();
+        assert!(shared.queues.network_busy(&group), "pas de nouveau fetch automatique pendant la suppression");
+        pump(&events, &mut shared, tab, "attente de la suppression", |ev| matches!(ev, RepoEvent::OpWaiting(2, true)));
+        assert_eq!(remotes().trim(), "origin", "rien n'est supprimé pendant le fetch");
+        gate_tx.send(()).unwrap();
+        let mut removed = None;
+        pump(&events, &mut shared, tab, "fin de la suppression", |ev| {
+            removed = done_with(ev, 2).map(Result::is_ok);
+            removed.is_some()
+        });
+        assert_eq!(removed, Some(true));
+        assert_eq!(remotes().trim(), "", "remote supprimé après le fetch");
+    }
+
+    /// Un fetch automatique annulé ne fait pas de notification ; une opération visible annulée, si.
+    #[test]
+    fn a_cancelled_automatic_fetch_shows_no_notification() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut shared, events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let tab = &mut tabs[0];
+        let queues = tab.queues(&shared).unwrap();
+        // Les deux files sont occupées : les opérations sont annulées avant leur tour.
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let (gate2_tx, gate2_rx) = mpsc::channel::<()>();
+        queues.background.then(move || {
+            let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+        });
+        queues.writes.then(move || {
+            let _ = gate2_rx.recv_timeout(Duration::from_secs(10));
+        });
+        tab.run_net(&shared, "Fetch", Refresh::NONE, true, |_, _, _| Ok(Some("Fetch terminé".into())));
+        tab.run_simple(&shared, "Commit", Refresh::NONE, |_| Ok(Some("Commit créé".into())));
+        for op in &tab.running {
+            op.cancel.cancel();
+        }
+        gate_tx.send(()).unwrap();
+        gate2_tx.send(()).unwrap();
+        let (mut fetch, mut commit) = (false, false);
+        pump(&events, &mut shared, tab, "fin des deux opérations", |ev| {
+            fetch |= done_with(ev, 1).is_some_and(|r| matches!(r, Err(GitError::Cancelled)));
+            commit |= done_with(ev, 2).is_some_and(|r| matches!(r, Err(GitError::Cancelled)));
+            fetch && commit
+        });
+        assert_eq!(shared.toasts.titles(), ["Commit : annulé"], "seule l'opération visible le signale");
     }
 }

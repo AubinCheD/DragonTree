@@ -159,22 +159,34 @@ impl PrimaryInstance {
 pub struct Listener {
     stop: Arc<std::sync::atomic::AtomicBool>,
     pipe: String,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Listener {
     pub fn start(key: &str, on_message: impl FnMut(Forwarded) + Send + 'static) -> io::Result<Listener> {
         let pipe = pipe_name(key);
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        sys::listen(&pipe, stop.clone(), on_message)?;
-        Ok(Listener { stop, pipe })
+        let thread = sys::listen(&pipe, stop.clone(), on_message)?;
+        Ok(Listener { stop, pipe, thread: Some(thread) })
     }
 }
 
 impl Drop for Listener {
-    /// Le thread attend un client : on le réveille par une connexion vide après avoir levé le drapeau d'arrêt.
+    /// Le thread attend un client : on le réveille par une connexion vide après avoir levé le drapeau d'arrêt, puis
+    /// on attend qu'il ait fermé le tube (au plus 1 s) : le profil rouvert aussitôt pourra le recréer (le tube est créé
+    /// avec `FILE_FLAG_FIRST_PIPE_INSTANCE`, refusé tant que l'ancien existe).
     fn drop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = sys::send(&self.pipe, &[], Duration::from_millis(200));
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        if let Some(thread) = self.thread.take() {
+            while !thread.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if thread.is_finished() {
+                let _ = thread.join();
+            }
+        }
     }
 }
 
@@ -232,7 +244,7 @@ mod sys {
         name: &str,
         stop: Arc<AtomicBool>,
         mut on_message: impl FnMut(Forwarded) + Send + 'static,
-    ) -> io::Result<()> {
+    ) -> io::Result<std::thread::JoinHandle<()>> {
         let name = wide(name);
         // SAFETY: nom terminé par un zéro ; sécurité par défaut (pointeur nul) ; le handle rendu est possédé par `File`.
         let pipe = unsafe {
@@ -251,7 +263,7 @@ mod sys {
             }
             File::from_raw_handle(handle)
         };
-        std::thread::Builder::new().name("dragontree-instance".into()).spawn(move || {
+        let thread = std::thread::Builder::new().name("dragontree-instance".into()).spawn(move || {
             let handle = pipe.as_raw_handle() as HANDLE;
             loop {
                 // SAFETY: handle du tube valide tant que `pipe` existe ; appel synchrone (pas d'OVERLAPPED).
@@ -274,7 +286,7 @@ mod sys {
                 unsafe { DisconnectNamedPipe(handle) };
             }
         })?;
-        Ok(())
+        Ok(thread)
     }
 
     /// Écrit `bytes` dans le tube `name` après avoir permis à son serveur de passer au premier plan ; réessaie tant que
@@ -325,7 +337,11 @@ mod sys {
         Err(unsupported())
     }
 
-    pub fn listen(_: &str, _: Arc<AtomicBool>, _: impl FnMut(Forwarded) + Send + 'static) -> io::Result<()> {
+    pub fn listen(
+        _: &str,
+        _: Arc<AtomicBool>,
+        _: impl FnMut(Forwarded) + Send + 'static,
+    ) -> io::Result<std::thread::JoinHandle<()>> {
         Err(unsupported())
     }
 

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
-use dragontree_i18n::tr;
+use dragontree_i18n::{tr, trn};
 
 use crate::error::GitError;
 
@@ -235,8 +235,8 @@ impl GitCommand {
         let (code, stderr, cancelled) = match &result {
             // Arrêtée par DragonTree, comme une annulation : le code du processus arrêté ne dit rien.
             Ok(o) if o.stdout_truncated => {
-                let limit = limit.unwrap_or_default();
-                (None, tr!("sortie de plus de {limit} octets : lecture arrêtée et git arrêté", limit), true)
+                let size = size_text(limit.unwrap_or_default());
+                (None, tr!("sortie de plus de {size} : lecture arrêtée et git arrêté", size), true)
             }
             Ok(o) => (Some(o.code), o.stderr.clone(), false),
             Err(GitError::Failed { code, stderr, .. }) => (Some(*code), stderr.clone(), false),
@@ -448,6 +448,18 @@ impl Supervised<'_> {
             stderr: stderr_buf,
             stdout_truncated: false,
         })
+    }
+}
+
+/// Taille lisible pour le journal : en Mio ou en Kio quand elle tombe juste (`8 Mio`), sinon en octets.
+fn size_text(bytes: usize) -> String {
+    const KIB: usize = 1024;
+    const MIB: usize = 1024 * KIB;
+    match bytes {
+        0 => trn!(0, "{n} octet", "{n} octets"),
+        b if b % MIB == 0 => tr!("{n} Mio", n = b / MIB),
+        b if b % KIB == 0 => tr!("{n} Kio", n = b / KIB),
+        b => trn!(b, "{n} octet", "{n} octets"),
     }
 }
 
@@ -728,5 +740,19 @@ mod job {
         pub fn wait_empty(&self, _timeout: std::time::Duration) {}
 
         pub fn let_survive(&self) {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::size_text;
+
+    #[test]
+    fn the_journal_gives_a_readable_size() {
+        assert_eq!(size_text(8 * 1024 * 1024), "8 Mio");
+        assert_eq!(size_text(64 * 1024), "64 Kio");
+        assert_eq!(size_text(4), "4 octets");
+        assert_eq!(size_text(1), "1 octet");
+        assert_eq!(size_text(1500), "1500 octets");
     }
 }

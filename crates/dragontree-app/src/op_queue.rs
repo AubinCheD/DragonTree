@@ -6,12 +6,21 @@
 //! - **Réseau silencieux** (fetch automatique) : une file à part par dépôt (`common_dir`, commun à ses worktrees, qui
 //!   partagent les refs) : un fetch lent ne fait plus attendre une indexation.
 //!
-//! Entre les deux, deux fetchs ne mettent jamais à jour les mêmes refs en même temps :
-//! - un fetch automatique n'est pas lancé quand une opération réseau visible attend ou tourne sur une file
-//!   d'écriture du dépôt ([`OpQueues::network_busy`]), ni quand la file silencieuse n'est pas vide (un autre onglet du
-//!   même dépôt fetche déjà) : il attend l'échéance suivante ;
-//! - une opération réseau visible qui démarre annule l'opération silencieuse en cours et attend sa fin
-//!   ([`OpQueue::cancel_and_wait`]).
+//! Entre les deux, le fetch automatique ne tourne jamais en même temps qu'une opération du dépôt qui écrit ses refs
+//! distantes : opération réseau visible (fetch, pull, push, test de connexion…) ou opération locale qui réécrit
+//! `refs/remotes` (suppression d'un remote), toutes dites « réseau » ici ([`PendingOp::network`]) :
+//! - un fetch automatique n'est pas lancé quand une telle opération attend ou tourne sur une file d'écriture du dépôt
+//!   ([`OpQueues::network_busy`]), ni quand la file silencieuse n'est pas vide (un autre onglet du même dépôt fetche
+//!   déjà) : il attend l'échéance suivante ;
+//! - une telle opération, à son tour, annule le fetch automatique qui n'a pas encore commencé (git n'est pas lancé)
+//!   mais attend la fin de celui qui tourne, sans l'arrêter ([`OpQueue::make_way`]) : git tué pendant l'écriture des
+//!   refs (transaction, réécriture de `packed-refs`) laisserait des fichiers `*.lock`, et le `git maintenance --auto`
+//!   qu'il lance serait tué avec lui. Seule la fermeture de l'application l'arrête (décision RV4a : c'est le choix
+//!   de l'utilisateur).
+//!
+//! Limite : deux opérations réseau visibles lancées depuis deux worktrees du même dépôt sont sur deux files
+//! d'écriture et peuvent tourner ensemble ; elles écrivent alors les mêmes refs distantes. Les verrous de git
+//! (`*.lock`) font échouer l'une des deux (« cannot lock ref »), sans dommage ; l'utilisateur a lancé les deux.
 //!
 //! Chaque file tient la liste de ses opérations en attente ou en cours ([`OpQueue::pending`],
 //! [`OpQueues::pending`]) : de quoi les retrouver toutes, et les annuler, à la fermeture de l'application.
@@ -26,6 +35,9 @@ use crate::app::TabId;
 use crate::jobs::SerialWorker;
 use crate::settings::path_key;
 
+/// Intervalle auquel [`OpQueue::make_way`] revérifie l'annulation de l'opération qui attend.
+const WAKE_UP: Duration = Duration::from_millis(50);
+
 /// Opération en attente ou en cours sur une file.
 #[derive(Clone, Debug)]
 pub struct PendingOp {
@@ -33,14 +45,22 @@ pub struct PendingOp {
     pub tab: TabId,
     pub id: u64,
     pub title: String,
+    /// Opération réseau, ou locale qui réécrit les refs distantes (suppression d'un remote) : le fetch automatique ne
+    /// tourne pas en même temps (voir le module).
     pub network: bool,
     pub silent: bool,
     pub cancel: CancelToken,
 }
 
+/// Opération de la liste d'une file, et si sa tâche a commencé.
+struct Entry {
+    op: PendingOp,
+    started: bool,
+}
+
 struct QueueInner {
     worker: SerialWorker,
-    pending: Mutex<Vec<PendingOp>>,
+    pending: Mutex<Vec<Entry>>,
     /// Signalée quand une opération quitte la liste.
     changed: Condvar,
     /// Dépôt de la file (dossier git commun, voir [`path_key`]) : regroupe les files d'écriture de ses worktrees.
@@ -65,7 +85,7 @@ struct Done {
 
 impl Drop for Done {
     fn drop(&mut self) {
-        lock(&self.inner.pending).retain(|op| (op.tab, op.id) != self.key);
+        lock(&self.inner.pending).retain(|e| (e.op.tab, e.op.id) != self.key);
         self.inner.changed.notify_all();
     }
 }
@@ -85,8 +105,12 @@ impl OpQueue {
     /// Ajoute `op` à la liste et `f` à la file : `f` s'exécute après ce qui y est déjà, puis `op` quitte la liste.
     pub fn submit(&self, op: PendingOp, f: impl FnOnce() + Send + 'static) {
         let done = Done { inner: Arc::clone(&self.inner), key: (op.tab, op.id) };
-        lock(&self.inner.pending).push(op);
+        lock(&self.inner.pending).push(Entry { op, started: false });
         self.inner.worker.submit(move || {
+            // Marquée sous le verrou : `make_way` l'annule avant (sa tâche ne lancera pas git) ou l'attend après.
+            if let Some(entry) = lock(&done.inner.pending).iter_mut().find(|e| (e.op.tab, e.op.id) == done.key) {
+                entry.started = true;
+            }
             let _done = done;
             f();
         });
@@ -99,7 +123,7 @@ impl OpQueue {
 
     /// Opérations en attente ou en cours, dans l'ordre de la file.
     pub fn pending(&self) -> Vec<PendingOp> {
-        lock(&self.inner.pending).clone()
+        lock(&self.inner.pending).iter().map(|e| e.op.clone()).collect()
     }
 
     pub fn is_idle(&self) -> bool {
@@ -108,7 +132,37 @@ impl OpQueue {
 
     /// Une opération réseau attend ou tourne.
     pub fn has_network_op(&self) -> bool {
-        lock(&self.inner.pending).iter().any(|op| op.network)
+        lock(&self.inner.pending).iter().any(|e| e.op.network)
+    }
+
+    /// Laisse la place à une opération qui ne doit pas tourner en même temps que celles de cette file (une opération
+    /// réseau visible face au fetch automatique) : annule celles qui n'ont pas commencé (leur tâche ne lancera pas
+    /// git), puis attend la fin de celles qui tournent, sans les annuler. `on_wait` est appelé une fois, si l'attente
+    /// commence. Renvoie faux si `stop` (l'annulation de l'opération qui attend) est déclenché pendant l'attente.
+    /// Jamais depuis une tâche de cette même file (elle s'attendrait elle-même).
+    pub fn make_way(&self, stop: &CancelToken, on_wait: impl FnOnce()) -> bool {
+        let mut on_wait = Some(on_wait);
+        let mut pending = lock(&self.inner.pending);
+        loop {
+            for entry in pending.iter().filter(|e| !e.started) {
+                entry.op.cancel.cancel();
+            }
+            if !pending.iter().any(|e| e.started) {
+                return true;
+            }
+            if stop.is_cancelled() {
+                return false;
+            }
+            if let Some(f) = on_wait.take() {
+                // Sans le verrou : `f` prévient l'interface, qui lit cette liste à chaque image.
+                drop(pending);
+                f();
+                pending = lock(&self.inner.pending);
+                continue;
+            }
+            // Réveillée à chaque fin d'opération, et régulièrement pour voir l'annulation de `stop`.
+            pending = self.inner.changed.wait_timeout(pending, WAKE_UP).unwrap_or_else(PoisonError::into_inner).0;
+        }
     }
 
     /// Annule les opérations en attente ou en cours et attend que la file soit vide, au plus `timeout` ; renvoie vrai
@@ -116,8 +170,8 @@ impl OpQueue {
     pub fn cancel_and_wait(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         let mut pending = lock(&self.inner.pending);
-        for op in pending.iter() {
-            op.cancel.cancel();
+        for entry in pending.iter() {
+            entry.op.cancel.cancel();
         }
         while !pending.is_empty() {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -291,6 +345,55 @@ mod tests {
         assert_eq!(queue.pending().iter().map(|o| o.id).collect::<Vec<_>>(), [1, 2]);
         assert!(queue.cancel_and_wait(Duration::from_secs(10)), "file vidée");
         assert!(queue.is_idle() && queued_cancel.is_cancelled());
+    }
+
+    #[test]
+    fn making_way_cancels_what_has_not_started_and_waits_for_what_runs() {
+        let queue = OpQueue::new("test", String::new());
+        let running = op(1, 1, true, true);
+        let running_cancel = running.cancel.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        queue.submit(running, move || {
+            started_tx.send(()).unwrap();
+            let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+        });
+        let queued = op(1, 2, true, true);
+        let queued_cancel = queued.cancel.clone();
+        queue.submit(queued, || {});
+        started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+        let (waiting_tx, waiting_rx) = mpsc::channel();
+        let waiter = std::thread::spawn({
+            let queue = queue.clone();
+            move || queue.make_way(&CancelToken::new(), move || waiting_tx.send(()).unwrap())
+        });
+        waiting_rx.recv_timeout(Duration::from_secs(10)).expect("attente signalée");
+        assert!(queued_cancel.is_cancelled(), "l'opération qui n'a pas commencé est annulée");
+        assert!(!running_cancel.is_cancelled(), "celle qui tourne n'est pas arrêtée");
+        assert!(!waiter.is_finished(), "elle est attendue");
+        gate_tx.send(()).unwrap();
+        assert!(waiter.join().unwrap(), "place faite à sa fin");
+        assert!(!running_cancel.is_cancelled());
+
+        // File vide : rien à attendre, `on_wait` n'est pas appelé.
+        assert!(queue.make_way(&CancelToken::new(), || panic!("pas d'attente")));
+    }
+
+    #[test]
+    fn making_way_stops_waiting_when_the_waiting_operation_is_cancelled() {
+        let queue = OpQueue::new("test", String::new());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        queue.submit(op(1, 1, true, true), move || {
+            started_tx.send(()).unwrap();
+            let _ = gate_rx.recv_timeout(Duration::from_secs(10));
+        });
+        started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let stop = CancelToken::new();
+        let canceller = stop.clone();
+        assert!(!queue.make_way(&stop, move || canceller.cancel()), "l'attente s'arrête à l'annulation");
+        gate_tx.send(()).unwrap();
     }
 
     #[test]

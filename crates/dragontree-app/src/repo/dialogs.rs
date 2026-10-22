@@ -8,7 +8,7 @@ use dragontree_git::{
 use dragontree_i18n::{tr, trn};
 use egui::{RichText, Ui};
 
-use super::actions::StashOp;
+use super::actions::{OpOptions, StashOp};
 use super::patches::{PatchPreview, PatchTarget};
 use super::{Refresh, RepoTab};
 use crate::app::{AppAction, Shared};
@@ -627,7 +627,7 @@ impl RepoTab {
         });
     }
 
-    fn execute_dialog(&mut self, dialog: Dialog, shared: &mut Shared) {
+    pub(super) fn execute_dialog(&mut self, dialog: Dialog, shared: &mut Shared) {
         match dialog {
             Dialog::CreateBranch { start, name, checkout, .. } => {
                 self.op_create_branch(shared, name.trim().to_string(), start, checkout)
@@ -720,10 +720,19 @@ impl RepoTab {
                 });
             }
             Dialog::RemoveRemote { name } => {
-                self.run_simple(shared, tr!("Suppression du remote"), Refresh::REFS.with_extras(), move |r| {
-                    r.remove_remote(&name)?;
-                    Ok(Some(tr!("Remote {name} supprimé", name)))
-                });
+                // Supprime ses refs distantes : pas en même temps qu'un fetch automatique (voir `op_queue`).
+                let opts = OpOptions { remote_refs: true, ..OpOptions::default() };
+                let title = tr!("Suppression du remote");
+                self.run_op(
+                    shared,
+                    title,
+                    Refresh::REFS.with_extras(),
+                    opts,
+                    Box::new(move |r, _, _| {
+                        r.remove_remote(&name)?;
+                        Ok(Some(tr!("Remote {name} supprimé", name)))
+                    }),
+                );
             }
             Dialog::DropStash { oid, label } => self.op_stash(shared, oid, label, StashOp::Drop),
             Dialog::CreateWorktree { start, path, .. } => {

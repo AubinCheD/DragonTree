@@ -83,6 +83,21 @@ pub fn commit_file(dir: &Path, file: &str, content: &str, msg: &str) {
     git(dir, &["commit", "-q", "-m", msg]);
 }
 
+/// Fichiers indexés ; `None` si la lecture échoue (sous Windows, l'index est illisible un instant pendant que
+/// l'application le remplace) : les attentes relisent alors à l'image suivante.
+pub fn staged(repo: &Path) -> Option<Vec<String>> {
+    try_git(repo, &["diff", "--cached", "--name-only"]).map(|out| out.lines().map(str::to_string).collect())
+}
+
+/// Dépôt `depot` avec un commit (`a.txt`) et un remote `origin` servi par `server` (muet : un fetch y reste bloqué).
+pub fn repo_with_silent_remote(base: &Path, server: &SilentServer) -> PathBuf {
+    let dir = base.join("depot");
+    init_repo(&dir);
+    commit_file(&dir, "a.txt", "1\n", "Premier commit");
+    git(&dir, &["remote", "add", "origin", &format!("http://127.0.0.1:{}/depot.git", server.port)]);
+    dir
+}
+
 /// Dépôt avec historique, un fichier modifié et un fichier non suivi.
 pub fn demo_repo(base: &Path) -> PathBuf {
     let dir = base.join("demo");
