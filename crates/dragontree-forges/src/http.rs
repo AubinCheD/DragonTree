@@ -1,8 +1,15 @@
 //! Client HTTP partagé (ureq 3, native-tls/SChannel) et helpers de réponse.
+//!
+//! Proxy : celui des variables d'environnement (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, avec `NO_PROXY`) s'il y en a
+//! un, sinon celui que la configuration de Windows désigne pour chaque URL (voir `proxy`).
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use dragontree_i18n::tr;
 
 use crate::model::ForgeError;
+use crate::proxy::{self, ProxySource};
 
 /// `User-Agent` envoyé à toutes les forges.
 pub(crate) const USER_AGENT: &str = "DragonTree/0.1";
@@ -27,7 +34,7 @@ const ERROR_BODY_CHARS: usize = 500;
 
 /// Requête GET avec les en-têtes donnés. Les statuts non 2xx sont renvoyés tels quels.
 pub(crate) fn get(url: &str, headers: &[(&str, &str)]) -> Result<Response, ForgeError> {
-    let mut request = agent().get(url);
+    let mut request = agent_for(url).get(url);
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
@@ -36,7 +43,7 @@ pub(crate) fn get(url: &str, headers: &[(&str, &str)]) -> Result<Response, Forge
 
 /// Requête POST avec un corps JSON et les en-têtes donnés. Les statuts non 2xx sont renvoyés tels quels.
 pub(crate) fn post_json(url: &str, headers: &[(&str, &str)], body: &str) -> Result<Response, ForgeError> {
-    post_json_with(agent(), url, headers, body)
+    post_json_with(&agent_for(url), url, headers, body)
 }
 
 /// `post_json` avec un agent donné (les tests en passent un sans proxy, indépendant de l'environnement).
@@ -107,30 +114,49 @@ pub(crate) fn parse_error(e: serde_json::Error) -> ForgeError {
     ForgeError::Parse(e.to_string())
 }
 
-/// Agent partagé, construit au premier appel.
-fn agent() -> &'static ureq::Agent {
-    use std::sync::OnceLock;
+/// Agent pour `url` : celui du proxy des variables d'environnement s'il y en a un (construit une fois), sinon celui
+/// du proxy que Windows désigne pour cette URL.
+fn agent_for(url: &str) -> ureq::Agent {
+    static FROM_ENV: OnceLock<Option<ureq::Agent>> = OnceLock::new();
+    match FROM_ENV.get_or_init(|| ureq::Proxy::try_from_env().map(|proxy| build_agent(Some(proxy)))) {
+        Some(agent) => agent.clone(),
+        None => system_agent(url, &proxy::SYSTEM),
+    }
+}
+
+/// Agent du proxy que la configuration `source` désigne pour `url` (connexion directe sans proxy) ; un agent par
+/// proxy, gardé pour les requêtes suivantes (connexions réutilisées).
+fn system_agent(url: &str, source: &dyn ProxySource) -> ureq::Agent {
+    static AGENTS: OnceLock<Mutex<HashMap<Option<String>, ureq::Agent>>> = OnceLock::new();
+    // Un proxy illisible pour ureq : connexion directe, comme sans proxy.
+    let proxy = proxy::system_proxy_for(url, source).filter(|uri| ureq::Proxy::new(uri).is_ok());
+    let mut agents = AGENTS.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    agents
+        .entry(proxy)
+        .or_insert_with_key(|proxy| build_agent(proxy.as_deref().and_then(|uri| ureq::Proxy::new(uri).ok())))
+        .clone()
+}
+
+/// Agent avec le TLS du système, les délais et le proxy donnés.
+fn build_agent(proxy: Option<ureq::Proxy>) -> ureq::Agent {
     use std::time::Duration;
     use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
-    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        let tls = TlsConfig::builder()
-            .provider(TlsProvider::NativeTls)
-            // Magasin de certificats Windows : respecte les autorités d'entreprise
-            // (proxy filtrant), comme git avec SChannel.
-            .root_certs(RootCerts::PlatformVerifier)
-            .build();
-        ureq::Agent::config_builder()
-            .tls_config(tls)
-            .proxy(ureq::Proxy::try_from_env())
-            .timeout_connect(Some(Duration::from_secs(10)))
-            .timeout_global(Some(Duration::from_secs(30)))
-            .http_status_as_error(false)
-            .user_agent(USER_AGENT)
-            .build()
-            .new_agent()
-    })
+    let tls = TlsConfig::builder()
+        .provider(TlsProvider::NativeTls)
+        // Magasin de certificats Windows : respecte les autorités d'entreprise
+        // (proxy filtrant), comme git avec SChannel.
+        .root_certs(RootCerts::PlatformVerifier)
+        .build();
+    ureq::Agent::config_builder()
+        .tls_config(tls)
+        .proxy(proxy)
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_global(Some(Duration::from_secs(30)))
+        .http_status_as_error(false)
+        .user_agent(USER_AGENT)
+        .build()
+        .new_agent()
 }
 
 fn map_transport_error(e: ureq::Error) -> ForgeError {
@@ -305,10 +331,60 @@ mod tests {
 
     #[test]
     fn agent_uses_native_tls_and_returns_statuses_as_data() {
-        let config = agent().config();
+        let agent = build_agent(None);
+        let config = agent.config();
         assert_eq!(config.tls_config().provider(), ureq::tls::TlsProvider::NativeTls);
         assert!(!config.http_status_as_error());
         assert_eq!(config.timeouts().connect, Some(std::time::Duration::from_secs(10)));
         assert_eq!(config.timeouts().global, Some(std::time::Duration::from_secs(30)));
+    }
+
+    /// Proxy manuel de Windows simulé (la configuration de la machine n'est pas lue).
+    struct WindowsProxy {
+        proxy: String,
+        bypass: &'static str,
+    }
+
+    impl ProxySource for WindowsProxy {
+        fn settings(&self) -> Option<proxy::SystemSettings> {
+            Some(proxy::SystemSettings {
+                proxy: Some(self.proxy.clone()),
+                bypass: Some(self.bypass.into()),
+                ..Default::default()
+            })
+        }
+
+        fn auto_proxy(&self, _: &str, _: bool, _: Option<&str>) -> Option<proxy::AutoProxy> {
+            None
+        }
+    }
+
+    fn proxy_of(agent: &ureq::Agent) -> Option<(String, u16)> {
+        agent.config().proxy().map(|p| (p.host().to_string(), p.port()))
+    }
+
+    /// RV4c : sans variable d'environnement, l'agent prend le proxy de Windows pour l'URL, sauf exclusion.
+    #[test]
+    fn the_agent_takes_the_windows_proxy_of_the_url_unless_it_is_bypassed() {
+        let source = WindowsProxy { proxy: "proxy.contoso.com:8080".into(), bypass: "<local>;*.contoso.com" };
+        let agent = system_agent("https://api.github.com/user", &source);
+        assert_eq!(proxy_of(&agent), Some(("proxy.contoso.com".into(), 8080)));
+        assert_eq!(proxy_of(&system_agent("https://git.contoso.com/api/v4/user", &source)), None, "exclusion");
+        assert_eq!(proxy_of(&system_agent("https://intranet/api/v4/user", &source)), None, "<local>");
+        assert_eq!(proxy_of(&system_agent("http://127.0.0.1:8080/api", &source)), None, "bouclage");
+        // Le même agent sert les requêtes suivantes vers ce proxy (connexions réutilisées).
+        let again = system_agent("https://dev.azure.com/fabrikam", &source);
+        assert!(std::ptr::eq(agent.config(), again.config()), "agent gardé");
+    }
+
+    /// La requête passe vraiment par le proxy de Windows (un serveur local qui joue le proxy la reçoit).
+    #[test]
+    fn a_request_goes_through_the_windows_proxy() {
+        let (port, received) = one_shot_server("502 Bad Gateway", "");
+        let source = WindowsProxy { proxy: format!("http=127.0.0.1:{port}"), bypass: "" };
+        let url = "http://gitlab.contoso.test/api/v4/user";
+        let _ = system_agent(url, &source).get(url).call();
+        let request = received.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert!(request.contains("gitlab.contoso.test"), "{request}");
     }
 }

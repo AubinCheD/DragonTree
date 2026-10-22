@@ -12,6 +12,7 @@ mod http;
 mod location;
 mod model;
 mod open_pulls;
+mod proxy;
 mod pullrequest;
 pub mod secrets;
 

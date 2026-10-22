@@ -215,6 +215,12 @@ associez un compte : **Dépôt › Utiliser le compte…** (ou les réglages du 
 correspondent à un remote, **Dépôt › Ne plus utiliser de compte** retire l'association. Le compte associé est affiché
 dans la barre d'outils de l'onglet ; un worktree lié sans compte propre utilise celui du dépôt principal.
 
+Proxy : les appels aux API des forges (vérification d'un compte, listes de dépôts et de pull requests) passent par le
+proxy des variables d'environnement (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, avec `NO_PROXY`) s'il y en a un, sinon
+par celui de Windows (Paramètres › Réseau et Internet › Proxy) : détection automatique, script de configuration (PAC)
+ou proxy manuel, avec sa liste d'exclusions. Ni les proxys SOCKS ni ceux qui demandent une authentification (NTLM,
+Kerberos) ne sont pris en charge, et le `http.proxy` de git n'est pas lu. git lui-même suit sa propre configuration.
+
 ## Architecture
 
 ```text
