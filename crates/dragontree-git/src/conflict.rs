@@ -67,6 +67,11 @@ fn split_pieces(bytes: &[u8]) -> Vec<&[u8]> {
 }
 
 /// Texte d'une ligne pour l'affichage : UTF-8 si elle en est, sinon Windows-1252.
+///
+/// Ligne par ligne, comme la vue diff (`DiffLine::raw`) : un fichier qui mêle les deux (une branche convertie en
+/// UTF-8, l'autre restée en Windows-1252) s'affiche lisiblement des deux côtés. Contrepartie assumée : une ligne
+/// Windows-1252 dont les octets forment par hasard de l'UTF-8 valide (`Ã©`, C3 A9, rare dans un vrai texte) s'affiche
+/// comme de l'UTF-8 (`é`). Seul l'affichage est en cause : les octets écrits sont toujours ceux d'origine.
 fn decode_line(line: &[u8]) -> String {
     match std::str::from_utf8(line) {
         Ok(text) => text.to_string(),

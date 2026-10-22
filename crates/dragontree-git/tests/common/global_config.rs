@@ -50,6 +50,13 @@ thread_local! {
 /// test), c'est elle qui est renvoyée : un fichier encore vide reçoit `initial` ; un fichier qui a déjà un autre
 /// contenu fait échouer le test (deux tests du même binaire qui veulent chacun leur contenu ne peuvent pas tourner en
 /// même temps : les réunir en un seul test). Un `initial` vide accepte n'importe quel contenu.
+///
+/// Règle qui en découle : un test qui écrit dans la configuration globale (`git config --global`, écriture du
+/// fichier) ne partage jamais son binaire avec un test qui appelle cette fonction avec un contenu : selon l'ordre des
+/// tests, celui-ci trouverait le fichier déjà écrit et échouerait. Aujourd'hui, les tests d'isolation de `ui_flows`,
+/// de `repo_ops` et des tests unitaires de l'application écrivent une clé de vérification ; aucun test de contenu
+/// n'est dans ces binaires. Un test de contenu qui écrit lui-même (identité, clé SSH) est seul dans son binaire, ou
+/// avec des tests qui n'appellent que l'isolation par défaut.
 pub fn isolate_global_git_config(initial: &str) -> Arc<GlobalGitConfig> {
     let mut current = CURRENT.lock().unwrap_or_else(PoisonError::into_inner);
     let config = match current.upgrade() {

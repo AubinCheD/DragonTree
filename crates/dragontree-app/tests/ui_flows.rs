@@ -11,19 +11,6 @@ use dragontree_app::{DragonTreeApp, StartOptions};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
-/// Texte copié dans le presse-papiers pendant les prochaines images.
-fn copied_text(h: &mut Harness<'static, DragonTreeApp>) -> Option<String> {
-    for _ in 0..5 {
-        h.step();
-        for cmd in &h.output().platform_output.commands {
-            if let egui::OutputCommand::CopyText(text) = cmd {
-                return Some(text.clone());
-            }
-        }
-    }
-    None
-}
-
 /// Le champ « Résumé du commit » est vide (son texte indicatif est alors exposé).
 fn subject_is_empty(h: &Harness<'static, DragonTreeApp>) -> bool {
     h.query_by(|n| n.placeholder() == Some("Résumé du commit (obligatoire)"))
