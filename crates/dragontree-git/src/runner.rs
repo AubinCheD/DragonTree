@@ -504,10 +504,17 @@ pub(crate) type StderrSink<'a> = &'a mut dyn FnMut(&str);
 /// Taille maximale conservée du stderr (on garde la fin, où se trouvent les erreurs).
 const MAX_STDERR: usize = 256 * 1024;
 
-/// Morceaux (64 Kio au plus chacun) lus dans les tubes et pas encore traités : au-delà, les threads de lecture
-/// attendent. La mémoire d'une sortie limitée (`Supervised::stdout_limit`) reste ainsi bornée même si la boucle de
-/// lecture prend du retard.
-const CHUNKS_IN_FLIGHT: usize = 8;
+/// Taille d'une lecture dans un tube, donc taille maximale d'un morceau.
+#[doc(hidden)]
+pub const CHUNK_SIZE: usize = 64 * 1024;
+
+/// Morceaux lus dans les tubes et pas encore traités : au-delà, les threads de lecture attendent. La mémoire d'une
+/// sortie limitée (`Supervised::stdout_limit`) reste ainsi bornée même si la boucle de lecture prend du retard : au-delà
+/// de la limite, au plus ces morceaux en file, un morceau tenu par chaque thread de lecture bloqué, celui que la boucle
+/// traite et les deux tampons de lecture, soit `(CHUNKS_IN_FLIGHT + 5) × CHUNK_SIZE` (448 Kio), plus le stderr gardé
+/// (vide pour un diff). Deux suffisent au débit : la boucle copie un morceau bien plus vite que le tube ne le remplit.
+#[doc(hidden)]
+pub const CHUNKS_IN_FLIGHT: usize = 2;
 
 /// Silence, après la fin du processus, au-delà duquel `Supervised::detach_after_exit` cesse de lire ses tubes.
 const DETACH_QUIET: Duration = Duration::from_millis(300);
@@ -527,7 +534,7 @@ fn spawn_reader<R: Read + Send + 'static>(
 ) {
     std::thread::spawn(move || {
         if let Some(mut pipe) = pipe {
-            let mut buf = vec![0u8; 64 * 1024];
+            let mut buf = vec![0u8; CHUNK_SIZE];
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) | Err(_) => break,

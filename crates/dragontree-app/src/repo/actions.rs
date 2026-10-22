@@ -87,12 +87,18 @@ impl RepoTab {
         queue.submit(pending, move || {
             if let Some(background) = background {
                 let mut waited = false;
-                background.make_way(&cancel, || {
+                let gave_way = background.make_way(&cancel, || {
                     waited = true;
                     sender.send(AppEvent::Repo(tab, RepoEvent::OpWaiting(id, true)));
                 });
                 if waited {
                     sender.send(AppEvent::Repo(tab, RepoEvent::OpWaiting(id, false)));
+                }
+                // « Annuler » pendant l'attente : l'opération s'arrête là, sans lancer git.
+                if !gave_way {
+                    let result = Err(GitError::Cancelled);
+                    sender.send(AppEvent::Repo(tab, RepoEvent::OpDone { id, title, result, refresh }));
+                    return;
                 }
             }
             let net = NetOptions { env: auth_env(account.as_ref(), &urls), cancel, non_interactive: opts.silent };

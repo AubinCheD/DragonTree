@@ -14,13 +14,27 @@ pub struct NetOptions {
     /// Variables d'environnement supplémentaires (authentification d'un compte).
     pub env: Vec<(String, String)>,
     pub cancel: CancelToken,
-    /// Interdit les fenêtres d'authentification (opérations en arrière-plan).
+    /// Opération en arrière-plan (fetch automatique) : aucune fenêtre d'authentification, et une connexion HTTP qui ne
+    /// transmet presque plus rien est abandonnée (voir `with_net`).
     pub non_interactive: bool,
 }
 
+/// Débit (octets par seconde) et durée en dessous desquels une opération en arrière-plan abandonne une connexion HTTP
+/// (`http.lowSpeedLimit`, `http.lowSpeedTime`) : un fetch automatique bloqué sur un serveur qui ne répond plus se termine
+/// de lui-même au lieu de retenir indéfiniment les opérations réseau visibles qui l'attendent. Sans effet sur SSH : un
+/// fetch automatique bloqué en SSH dure jusqu'à la fermeture de l'application, et l'opération visible qui l'attend
+/// peut toujours être annulée.
+const BACKGROUND_LOW_SPEED: (&str, &str) = ("http.lowSpeedLimit=1000", "http.lowSpeedTime=60");
+
 pub(crate) fn with_net(cmd: GitCommand, n: &NetOptions) -> GitCommand {
     let cmd = cmd.env("GIT_EDITOR", "true").envs(&n.env).cancel(n.cancel.clone());
-    if n.non_interactive { cmd.non_interactive() } else { cmd }
+    if n.non_interactive {
+        // Options de git avant la sous-commande, que l'appelant ajoute ensuite.
+        let (limit, time) = BACKGROUND_LOW_SPEED;
+        cmd.non_interactive().args(["-c", limit, "-c", time])
+    } else {
+        cmd
+    }
 }
 
 pub(crate) fn run_with_progress(cmd: GitCommand, on: &mut dyn FnMut(Progress)) -> Result<(), GitError> {
@@ -45,15 +59,18 @@ impl Repo {
         n: &NetOptions,
         on: &mut dyn FnMut(Progress),
     ) -> Result<(), GitError> {
+        run_with_progress(self.fetch_command(remote, prune, n), on)
+    }
+
+    fn fetch_command(&self, remote: Option<&str>, prune: bool, n: &NetOptions) -> GitCommand {
         let mut cmd = self.net(n).args(["fetch", "--progress"]);
         if prune {
             cmd = cmd.arg("--prune");
         }
-        cmd = match remote {
+        match remote {
             Some(r) => cmd.arg(r),
             None => cmd.arg("--all"),
-        };
-        run_with_progress(cmd, on)
+        }
     }
 
     pub fn pull(
@@ -207,4 +224,34 @@ pub fn init_repo(git: &Git, path: &Path) -> Result<(), GitError> {
 pub fn trust_directory(git: &Git, path: &Path) -> Result<(), GitError> {
     let p = path.to_string_lossy().replace('\\', "/");
     git.cmd(&std::env::temp_dir()).args(["config", "--global", "--add", "safe.directory", &p]).run().map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    /// Ligne de commande du fetch du dépôt (sans le lancer).
+    fn fetch_line(non_interactive: bool) -> String {
+        let repo = Repo {
+            git: Git::with_exe(PathBuf::from("git")),
+            workdir: PathBuf::from("."),
+            git_dir: PathBuf::from(".git"),
+            common_dir: PathBuf::from(".git"),
+        };
+        let n = NetOptions { non_interactive, ..Default::default() };
+        repo.fetch_command(None, true, &n).display()
+    }
+
+    /// Un fetch automatique abandonne une connexion HTTP qui ne transmet presque plus rien ; un fetch visible, non.
+    #[test]
+    fn a_background_fetch_gives_up_a_stalled_http_connection() {
+        assert_eq!(
+            fetch_line(true),
+            "git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch --progress --prune --all",
+            "options avant la sous-commande"
+        );
+        assert_eq!(fetch_line(false), "git fetch --progress --prune --all");
+    }
 }

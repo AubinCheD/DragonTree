@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dragontree_git::{CancelToken, Repo};
 
@@ -166,8 +166,10 @@ impl OpQueue {
     }
 
     /// Annule les opérations en attente ou en cours et attend que la file soit vide, au plus `timeout` ; renvoie vrai
-    /// si elle l'est. Jamais depuis une tâche de cette même file (elle s'attendrait elle-même).
+    /// si elle l'est (tests : vider une file entre deux étapes). Jamais depuis une tâche de cette même file.
+    #[cfg(test)]
     pub fn cancel_and_wait(&self, timeout: Duration) -> bool {
+        use std::time::Instant;
         let deadline = Instant::now() + timeout;
         let mut pending = lock(&self.inner.pending);
         for entry in pending.iter() {
@@ -253,6 +255,7 @@ impl OpQueues {
 mod tests {
     use std::path::PathBuf;
     use std::sync::mpsc;
+    use std::time::Instant;
 
     use dragontree_git::Git;
 

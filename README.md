@@ -93,9 +93,9 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   comme une organisation Azure DevOps qui n'a pas répondu, et un compte Azure DevOps sans organisation est expliqué.
 - Surveillance du dossier (rafraîchissement automatique), fetch automatique silencieux (sur une file à part : il ne
   fait pas attendre les écritures ; un fetch, pull ou push lancé à la main attend la fin de celui qui tourne, sans
-  l'interrompre, et le dit), palette **Ctrl+P** (dépôts, branches, commandes), journal des commandes git, thèmes
-  clair/sombre. Les opérations d'un dépôt ouvert
-  dans plusieurs onglets passent par une seule file, dans l'ordre des clics.
+  l'interrompre, et le dit ; en HTTP, il abandonne une connexion restée presque muette pendant une minute), palette
+  **Ctrl+P** (dépôts, branches, commandes), journal des commandes git, thèmes clair/sombre. Les opérations d'un dépôt
+  ouvert dans plusieurs onglets passent par une seule file, dans l'ordre des clics.
 - **Interface en français ou en anglais** (Réglages › Apparence › Langue), changement immédiat sans redémarrer.
 
 ## Performances (mesurées sur un dépôt de 86 524 commits et 3 600 références)

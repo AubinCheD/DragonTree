@@ -10,7 +10,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::TestRepo;
 use dragontree_git::diff::MAX_DIFF_BYTES;
+use dragontree_git::runner::{CHUNK_SIZE, CHUNKS_IN_FLIGHT};
 use dragontree_git::{ChangeKind, DiffOptions, FileChange, Oid, Repo};
+
+/// Mémoire tolérée au-delà de la limite pendant un diff, déduite de ce que le code garantit (voir
+/// `runner::CHUNKS_IN_FLIGHT`) : les morceaux en file, un morceau tenu par chacun des deux threads de lecture bloqués,
+/// celui que la boucle traite et les deux tampons de lecture, plus 64 Kio pour les petites allocations (commande,
+/// threads, résultat). Avec 2 morceaux en file : 512 Kio ; mesuré : environ 210 Kio. Une file sans borne dépasse cette
+/// marge (essayée : l'un des quatre diffs au moins la dépassait, de 450 à 900 Kio au-delà).
+const MARGIN: usize = (CHUNKS_IN_FLIGHT + 5) * CHUNK_SIZE + 64 * 1024;
+const _: () = assert!(MARGIN <= 512 * 1024, "marge trop large pour voir une file de morceaux sans borne");
 
 /// Allocateur du système qui tient le compte des octets alloués et de leur maximum.
 struct Counting;
@@ -96,10 +105,7 @@ fn the_diff_of_a_50_mib_file_is_truncated_without_holding_more_than_the_limit() 
     let repo = Repo::open(&t.git, t.path()).unwrap();
     let head = Oid::from_hex(t.run(&["rev-parse", "HEAD"]).trim()).unwrap();
     let options = DiffOptions::default();
-    // Au-delà de la limite (8 Mio) : les tampons de lecture des deux tubes et les morceaux en transit, 64 Kio chacun
-    // (huit au plus en attente) ; mesuré : environ 210 Kio. La marge est assez étroite pour voir une file de morceaux
-    // sans borne : avec elle, l'un des quatre diffs au moins dépassait 512 Kio (mesuré : de 450 à 900 Kio).
-    let max = MAX_DIFF_BYTES + 512 * 1024;
+    let max = MAX_DIFF_BYTES + MARGIN;
 
     // Commit qui ajoute le fichier : plus de 50 Mio de sortie.
     let added = FileChange { path: "gros.txt".into(), old_path: None, kind: ChangeKind::Added };

@@ -56,3 +56,24 @@ fn a_visible_fetch_waits_for_the_running_automatic_fetch_and_says_so() {
     wait_until(&mut h, "plus d'attente affichée", |h| h.query_by_label(waiting).is_none());
     server.release();
 }
+
+/// « Annuler » pendant l'attente : le fetch visible s'arrête sans lancer git (aucune connexion de plus) et le dit ; le
+/// fetch automatique continue.
+#[test]
+fn cancelling_a_visible_fetch_while_it_waits_stops_it_without_launching_git() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = SilentServer::start();
+    let repo = repo_with_silent_remote(tmp.path(), &server);
+    let mut h = harness(StartOptions { open: vec![repo], auto_fetch_every: Some(Duration::ZERO), ..start(tmp.path()) });
+    wait_until(&mut h, "fetch automatique bloqué sur le serveur muet", |_| server.connections() > 0);
+    click_label(&mut h, "Fetch");
+    let waiting = "Fetch — en attente de la fin du fetch automatique…";
+    wait_until(&mut h, "attente affichée", |h| h.query_by_label(waiting).is_some());
+
+    click_label(&mut h, "Annuler");
+    wait_until(&mut h, "annulation notifiée", |h| h.query_by_label("Fetch : annulé").is_some());
+    assert!(h.query_by_label(waiting).is_none(), "plus d'attente affichée");
+    assert_eq!(server.connections(), 1, "git n'a pas été lancé pour le fetch annulé");
+    assert_eq!(server.closed(), 0, "le fetch automatique continue");
+    server.release();
+}
