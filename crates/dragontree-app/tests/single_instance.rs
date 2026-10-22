@@ -70,3 +70,18 @@ fn a_second_start_on_the_same_profile_forwards_its_repositories_to_the_first() {
     drop(first);
     assert!(matches!(single_instance::start(&key, &Forwarded::default(), TIMEOUT), Startup::Primary(_)));
 }
+
+/// Relancer aussitôt après la fermeture de la première instance donne toujours une première instance : son tube peut
+/// exister encore un instant, sa création est réessayée.
+#[test]
+fn the_profile_can_be_claimed_again_right_after_the_first_instance_closes() {
+    let profile = tempfile::tempdir().unwrap();
+    let key = single_instance::profile_key(profile.path());
+    for round in 0..50 {
+        match single_instance::start(&key, &Forwarded::default(), TIMEOUT) {
+            Startup::Primary(first) => drop(first),
+            Startup::Forwarded => panic!("tour {round} : transmis à une instance fermée"),
+            Startup::Alone(e) => panic!("tour {round} : instance seule ({e})"),
+        }
+    }
+}

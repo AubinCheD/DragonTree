@@ -43,3 +43,24 @@ fn a_repository_sent_by_a_second_instance_opens_and_the_window_comes_forward() {
     wait_until(&mut h, "fenêtre au premier plan", |h| viewport_command_sent(h, &egui::ViewportCommand::Focus));
     wait_until(&mut h, "dépôt ouvert dans un onglet", |_| open_tabs(tmp.path()) == [repo.clone()]);
 }
+
+/// Une capture d'écran (`--screenshot`) est une instance à part : sans `--profile`, elle lit le profil d'une instance
+/// peut-être ouverte. Elle n'écrit donc jamais les réglages.
+#[test]
+fn a_screenshot_run_never_writes_the_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("depot");
+    init_repo(&repo);
+    commit_file(&repo, "a.txt", "a\n", "Initial");
+    let start = dragontree_app::StartOptions {
+        open: vec![repo],
+        screenshot: Some(tmp.path().join("capture.png")),
+        // Jamais atteint : la capture n'est pas demandée pendant le test.
+        screenshot_after: Duration::from_secs(3600),
+        ..start(tmp.path())
+    };
+    let mut h = harness(start);
+    // L'ouverture de l'onglet et le changement de largeur des panneaux marquent les réglages à enregistrer.
+    h.run_steps(10);
+    assert!(!tmp.path().join("profil").join("settings.json").exists(), "réglages écrits par une capture d'écran");
+}

@@ -4,16 +4,27 @@
 //! - Au démarrage (`main.rs`, jamais dans `DragonTreeApp::new` : les tests d'interface créent autant d'applications
 //!   qu'ils veulent), un mutex nommé `Local\DragonTree-<clé>` désigne la première instance du profil ; la clé est une
 //!   empreinte stable du dossier du profil (`profile_key`) : `--profile <dossier>` donne une instance distincte.
-//! - La première instance écoute sur un tube nommé `\\.\pipe\DragonTree-<clé>` (thread de fond). Une instance
+//! - La première instance écoute sur un tube nommé `\\.\pipe\DragonTree-<session>-<clé>` (thread de fond). Une instance
 //!   suivante lui envoie les dépôts de sa ligne de commande (dossiers en arguments et `--open`, en chemins absolus :
 //!   son dossier courant n'est pas celui de la première), lui permet de passer au premier plan
 //!   (`AllowSetForegroundWindow` : Windows refuse sinon qu'une application en arrière-plan prenne le focus), puis
 //!   quitte. Les autres options de la seconde instance sont ignorées.
 //! - La première instance ouvre ces dépôts (`AppAction::OpenRepo`), ou seulement passe au premier plan si aucun n'est
 //!   donné.
+//! - Le nom du tube porte la session Windows, comme le mutex (`Local\`) : un même utilisateur ouvert dans deux sessions
+//!   a deux instances.
+//! - Une première instance qui se ferme arrête d'écouter avant de libérer son mutex : l'instance suivante redemande la
+//!   place après chaque tentative d'envoi (`SEND_ATTEMPT`), et réessaie un instant de créer le tube s'il existe encore
+//!   (`PIPE_RETRY`).
 //!
-//! Le tube garde la sécurité par défaut de Windows : seuls l'utilisateur qui l'a créé, les administrateurs et le
-//! système peuvent y écrire ; les clients distants sont refusés.
+//! Sécurité, des deux côtés :
+//! - serveur : le tube garde la sécurité par défaut de Windows (seuls l'utilisateur qui l'a créé, les administrateurs
+//!   et le système peuvent y écrire), les clients distants sont refusés, et un tube du même nom créé avant la première
+//!   instance est refusé (`FILE_FLAG_FIRST_PIPE_INSTANCE`) ;
+//! - client : les tubes sont communs à toute la machine et leur nom est prévisible, un autre utilisateur a pu le créer
+//!   avant la première instance. Avant d'écrire, l'instance suivante vérifie que le serveur du tube est un processus
+//!   du même utilisateur (SID de son jeton) ; sinon elle n'envoie rien, ne lui donne pas le droit de passer au
+//!   premier plan, et démarre seule.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -62,7 +73,9 @@ impl Forwarded {
 
 /// Clé d'un profil : empreinte FNV-1a sur 64 bits de son dossier normalisé (`path_key` : casse et séparateurs), en
 /// hexadécimal. Stable d'une exécution et d'une version à l'autre, contrairement au hachage de la bibliothèque
-/// standard : deux versions de DragonTree sur le même profil se reconnaissent.
+/// standard : deux versions de DragonTree sur le même profil se reconnaissent. Le chemin n'est pas résolu sur le
+/// disque : un nom court 8.3 (`C:\PROGRA~1`), une jonction ou un lecteur `subst` qui désignent le même dossier donnent
+/// une autre clé, donc une autre instance.
 pub fn profile_key(dir: &Path) -> String {
     let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
     format!("{:016x}", fnv1a(path_key(&dir).as_bytes()))
@@ -77,10 +90,21 @@ pub fn mutex_name(key: &str) -> String {
     format!(r"Local\DragonTree-{key}")
 }
 
-/// Tube nommé où écoute la première instance.
+/// Tube nommé où écoute la première instance. Les tubes sont communs à toute la machine : le nom porte la session
+/// Windows, comme le mutex (`Local\`), pour qu'un même utilisateur ouvert dans deux sessions ait deux instances.
 pub fn pipe_name(key: &str) -> String {
-    format!(r"\\.\pipe\DragonTree-{key}")
+    match sys::session_id() {
+        Ok(session) => format!(r"\\.\pipe\DragonTree-{session}-{key}"),
+        Err(_) => format!(r"\\.\pipe\DragonTree-{key}"),
+    }
 }
+
+/// Durée d'une tentative d'envoi : au-delà, la place de première instance est redemandée (celle qui se ferme ferme son
+/// tube avant de libérer son mutex).
+const SEND_ATTEMPT: Duration = Duration::from_secs(1);
+/// Le tube d'une première instance qui vient de se fermer peut exister encore un instant : sa création est réessayée
+/// pendant cette durée au plus.
+const PIPE_RETRY: Duration = Duration::from_secs(2);
 
 /// Issue du démarrage (`start`).
 pub enum Startup {
@@ -93,18 +117,23 @@ pub enum Startup {
 }
 
 /// Établit l'instance unique du profil `key`, ou transmet `message` à la première instance. Si la première ne répond
-/// pas (elle se ferme, par exemple), la place est redemandée jusqu'à `timeout`.
+/// pas (elle se ferme, par exemple), la place est redemandée, jusqu'à `timeout`. Un tube tenu par un autre utilisateur
+/// n'est jamais utilisé : l'instance démarre seule.
 pub fn start(key: &str, message: &Forwarded, timeout: Duration) -> Startup {
     let deadline = Instant::now() + timeout;
     loop {
+        let left = deadline.saturating_duration_since(Instant::now());
         match sys::claim(&mutex_name(key)) {
             Ok(Some(mutex)) => {
-                return PrimaryInstance::listen(key, mutex).map_or_else(Startup::Alone, Startup::Primary);
+                let retry_until = Instant::now() + left.min(PIPE_RETRY);
+                return PrimaryInstance::listen(key, mutex, retry_until).map_or_else(Startup::Alone, Startup::Primary);
             }
-            Ok(None) => match send(key, message, deadline.saturating_duration_since(Instant::now())) {
+            Ok(None) => match send(key, message, left.min(SEND_ATTEMPT)) {
                 Ok(()) => return Startup::Forwarded,
-                Err(e) if Instant::now() >= deadline => return Startup::Alone(e),
-                Err(_) => std::thread::sleep(Duration::from_millis(50)),
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied || Instant::now() >= deadline => {
+                    return Startup::Alone(e);
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
             },
             Err(e) => return Startup::Alone(e),
         }
@@ -112,7 +141,8 @@ pub fn start(key: &str, message: &Forwarded, timeout: Duration) -> Startup {
 }
 
 /// Envoie `message` à la première instance du profil `key` et lui permet de passer au premier plan. Attend au plus
-/// `timeout` que son tube soit libre (un autre message en cours) ou créé (elle démarre).
+/// `timeout` que son tube soit libre (un autre message en cours) ou créé (elle démarre). Refuse (`PermissionDenied`)
+/// un tube dont le serveur n'est pas un processus du même utilisateur.
 pub fn send(key: &str, message: &Forwarded, timeout: Duration) -> io::Result<()> {
     sys::send(&pipe_name(key), &message.encode(), timeout)
 }
@@ -127,19 +157,28 @@ pub struct PrimaryInstance {
 }
 
 impl PrimaryInstance {
-    fn listen(key: &str, mutex: sys::Mutex) -> io::Result<PrimaryInstance> {
+    /// Écoute du profil `key` pour la première instance, qui tient `mutex` ; la création du tube est réessayée jusqu'à
+    /// `retry_until` (celui d'une instance qui vient de se fermer peut exister encore un instant).
+    fn listen(key: &str, mutex: sys::Mutex, retry_until: Instant) -> io::Result<PrimaryInstance> {
         let (tx, messages) = mpsc::channel();
         let ctx: Arc<OnceLock<egui::Context>> = Arc::default();
-        let wake = ctx.clone();
-        let listener = Listener::start(key, move |mut message| {
-            // Sur le thread d'écoute, pas sur celui de l'interface : seuls les dossiers existants sont gardés.
-            message.open.retain(|p| p.is_dir());
-            if tx.send(message).is_ok()
-                && let Some(ctx) = wake.get()
-            {
-                ctx.request_repaint();
+        let listener = loop {
+            let (tx, wake) = (tx.clone(), ctx.clone());
+            let started = Listener::start(key, move |mut message| {
+                // Sur le thread d'écoute, pas sur celui de l'interface : seuls les dossiers existants sont gardés.
+                message.open.retain(|p| p.is_dir());
+                if tx.send(message).is_ok()
+                    && let Some(ctx) = wake.get()
+                {
+                    ctx.request_repaint();
+                }
+            });
+            match started {
+                Ok(listener) => break listener,
+                Err(e) if Instant::now() >= retry_until => return Err(e),
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
-        })?;
+        };
         Ok(PrimaryInstance { _listener: listener, _mutex: mutex, messages, ctx })
     }
 
@@ -204,12 +243,19 @@ mod sys {
         ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GetLastError, HANDLE,
         INVALID_HANDLE_VALUE,
     };
+    use windows_sys::Win32::Security::{
+        GetLengthSid, GetTokenInformation, IsValidSid, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
     use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND};
     use windows_sys::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId, PIPE_READMODE_BYTE,
         PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
     };
-    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+    use windows_sys::Win32::System::Threading::{
+        CreateMutexW, GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
 
     use super::{Forwarded, MAX_MESSAGE};
@@ -221,6 +267,60 @@ mod sys {
 
     fn wide(s: &str) -> Vec<u16> {
         std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect()
+    }
+
+    /// Session Windows de ce processus.
+    pub fn session_id() -> io::Result<u32> {
+        let mut session = 0u32;
+        // SAFETY: `session` est rempli par l'API.
+        if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(session)
+    }
+
+    /// Utilisateur (SID) du processus dont `process` est un handle ouvert avec `PROCESS_QUERY_LIMITED_INFORMATION`.
+    fn token_user(process: HANDLE) -> Option<Vec<u8>> {
+        // SAFETY: handles possédés par `OwnedHandle` ; le tampon reçoit un `TOKEN_USER` suivi de son SID, de la
+        // taille demandée par le premier appel.
+        unsafe {
+            let mut token: HANDLE = std::ptr::null_mut();
+            if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+                return None;
+            }
+            let token = OwnedHandle::from_raw_handle(token);
+            let mut size = 0u32;
+            GetTokenInformation(token.as_raw_handle() as HANDLE, TokenUser, std::ptr::null_mut(), 0, &mut size);
+            if size == 0 {
+                return None;
+            }
+            // Tampon aligné pour un `TOKEN_USER` (des pointeurs).
+            let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
+            let info = buffer.as_mut_ptr().cast::<core::ffi::c_void>();
+            if GetTokenInformation(token.as_raw_handle() as HANDLE, TokenUser, info, size, &mut size) == 0 {
+                return None;
+            }
+            let sid = (*info.cast::<TOKEN_USER>()).User.Sid;
+            if IsValidSid(sid) == 0 {
+                return None;
+            }
+            let len = GetLengthSid(sid) as usize;
+            Some(std::slice::from_raw_parts(sid.cast::<u8>(), len).to_vec())
+        }
+    }
+
+    /// Le processus `pid` appartient au même utilisateur que celui-ci. Faux s'il ne peut pas être interrogé.
+    pub fn same_user(pid: u32) -> bool {
+        // SAFETY: le handle du processus est possédé par `OwnedHandle` ; `GetCurrentProcess` est un pseudo-handle.
+        unsafe {
+            let other = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if other.is_null() {
+                return false;
+            }
+            let other = OwnedHandle::from_raw_handle(other);
+            let (theirs, ours) = (token_user(other.as_raw_handle() as HANDLE), token_user(GetCurrentProcess()));
+            theirs.is_some() && theirs == ours
+        }
     }
 
     /// Crée le mutex `name` ; `None` s'il existait déjà (une autre instance le tient).
@@ -305,12 +405,16 @@ mod sys {
                 Err(e) => return Err(e),
             }
         };
+        // Le nom du tube est prévisible et commun à la machine : un autre utilisateur a pu le créer avant la première
+        // instance. Les chemins et le droit de passer au premier plan ne vont qu'à un processus du même utilisateur.
         let mut pid = 0u32;
         // SAFETY: handle du tube valide tant que `pipe` existe ; `pid` est rempli par l'API.
-        if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut pid) } != 0 {
-            // SAFETY: simple autorisation donnée à un processus ; sans effet si celui-ci n'en a pas besoin.
-            unsafe { AllowSetForegroundWindow(pid) };
+        let known = unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut pid) } != 0;
+        if !known || !same_user(pid) {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "tube tenu par un autre utilisateur"));
         }
+        // SAFETY: simple autorisation donnée à un processus ; sans effet si celui-ci n'en a pas besoin.
+        unsafe { AllowSetForegroundWindow(pid) };
         pipe.write_all(bytes)?;
         // Attend que la première instance ait tout lu avant de fermer (puis de quitter).
         let _ = pipe.sync_all();
@@ -334,6 +438,10 @@ mod sys {
     }
 
     pub fn claim(_name: &str) -> io::Result<Option<Mutex>> {
+        Err(unsupported())
+    }
+
+    pub fn session_id() -> io::Result<u32> {
         Err(unsupported())
     }
 
@@ -377,6 +485,42 @@ mod tests {
         assert_eq!(key, profile_key(Path::new("c:/users/contoso/appdata/roaming/dragontree/")), "casse, séparateurs");
         assert_ne!(key, profile_key(Path::new(r"C:\tests\profil")), "autre profil, autre instance");
         assert_eq!(mutex_name("0123"), r"Local\DragonTree-0123");
-        assert_eq!(pipe_name("0123"), r"\\.\pipe\DragonTree-0123");
+    }
+
+    /// Le tube est propre à la session Windows, comme le mutex (`Local\`) : le même utilisateur ouvert dans deux
+    /// sessions a deux instances.
+    #[cfg(windows)]
+    #[test]
+    fn the_pipe_name_carries_the_session() {
+        let session = sys::session_id().expect("session courante");
+        assert_eq!(pipe_name("0123"), format!(r"\\.\pipe\DragonTree-{session}-0123"));
+    }
+
+    /// Le client ne parle qu'à un serveur du même utilisateur : un autre a pu créer le tube avant la première instance.
+    #[cfg(windows)]
+    #[test]
+    fn only_a_process_of_the_same_user_is_trusted() {
+        assert!(sys::same_user(std::process::id()), "ce processus");
+        assert!(!sys::same_user(4), "le processus System");
+        assert!(!sys::same_user(u32::MAX), "un processus qui n'existe pas");
+    }
+
+    /// Une première instance qui tient encore le mutex mais n'écoute plus (elle se ferme) : la suivante ne l'attend
+    /// pas jusqu'au bout du délai, elle redemande la place dès qu'elle est libre.
+    #[cfg(windows)]
+    #[test]
+    fn a_closing_first_instance_gives_way_quickly() {
+        let dir = std::env::temp_dir().join(format!("dragontree-instance-test-{}", std::process::id()));
+        let key = profile_key(&dir);
+        let held = sys::claim(&mutex_name(&key)).unwrap().expect("mutex libre");
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        let started = Instant::now();
+        let outcome = start(&key, &Forwarded::default(), Duration::from_secs(10));
+        releaser.join().unwrap();
+        assert!(matches!(outcome, Startup::Primary(_)), "première instance après la fermeture de l'autre");
+        assert!(started.elapsed() < Duration::from_secs(5), "attendu {:?}", started.elapsed());
     }
 }

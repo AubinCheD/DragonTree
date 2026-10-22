@@ -123,6 +123,9 @@ pub struct Shared {
     /// Intervalle du fetch automatique imposé par les tests (`StartOptions::auto_fetch_every`) ; sinon celui des
     /// réglages.
     pub auto_fetch_every: Option<Duration>,
+    /// Capture d'écran (`--screenshot`) : les réglages ne sont jamais écrits. Instance à part (voir `single_instance`),
+    /// elle lit sans `--profile` le profil d'une instance peut-être ouverte, qui les écrit.
+    pub settings_read_only: bool,
     /// Files d'opérations des dépôts, partagées par leurs onglets (voir `op_queue`).
     pub queues: crate::op_queue::OpQueues,
 }
@@ -155,6 +158,7 @@ impl Shared {
             tools: Vec::new(),
             ai_check: AiCheck::Idle,
             auto_fetch_every: None,
+            settings_read_only: false,
             queues: Default::default(),
         };
         (shared, rx)
@@ -165,6 +169,10 @@ impl Shared {
     }
 
     pub fn save_settings(&mut self) {
+        if self.settings_read_only {
+            self.settings_dirty = false;
+            return;
+        }
         if let Err(e) = self.settings_store.save(&self.settings) {
             self.toasts.push(Toast::error(tr!("Impossible d'enregistrer les réglages"), e.to_string()));
         }
@@ -297,6 +305,7 @@ impl DragonTreeApp {
         let applied_diff_font = settings.diff_font;
         let (mut shared, rx) = Shared::new(ctx.clone(), settings, settings_store, start.profile_dir.clone(), git);
         shared.auto_fetch_every = start.auto_fetch_every;
+        shared.settings_read_only = start.screenshot.is_some();
         if let Some(msg) = settings_error {
             shared.toasts.push(Toast::error(tr!("Réglages réinitialisés"), msg));
         }
@@ -1290,6 +1299,9 @@ impl eframe::App for DragonTreeApp {
     /// autre voie que la fenêtre), et les onglets ne font rien attendre en se fermant ; le processus se termine
     /// aussitôt après, et Windows tue avec lui ce qui resterait de git (Job Object).
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Plus aucun message d'une autre instance n'est accepté (il serait perdu) : le profil est libéré, et une
+        // instance lancée maintenant devient la première.
+        self.instance = None;
         Operations::new(&self.shared.queues, self.clone.as_ref()).stop_all();
         for tab in &mut self.tabs {
             if let TabKind::Repo(r) = &mut tab.kind {

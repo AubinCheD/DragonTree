@@ -145,8 +145,9 @@ Réglages : `%APPDATA%\DragonTree\settings.json` ; cache des dépôts : `%LOCALA
 
 **Instance unique** : une seule fenêtre par profil. Lancer `dragontree.exe C:\dépôt` alors que DragonTree est ouvert
 ouvre le dépôt dans la fenêtre existante, qui passe au premier plan (sans dépôt : elle passe seulement au premier
-plan) ; les autres options de ce second lancement sont ignorées. `--profile <dossier>` donne une instance distincte,
-et une capture d'écran (`--screenshot`) est toujours une instance à part.
+plan) ; les autres options de ce second lancement sont ignorées. `--profile <dossier>` donne une instance distincte
+(le même dossier désigné par un nom court 8.3, une jonction ou un lecteur `subst` aussi), et une capture d'écran
+(`--screenshot`) est toujours une instance à part, qui n'écrit jamais les réglages.
 
 **Fermeture** : si des opérations (fetch, pull, push, commit, clonage…) attendent ou tournent, fermer la fenêtre
 demande d'attendre leur fin (la fenêtre se ferme ensuite d'elle-même) ou de quitter quand même (elles sont arrêtées) ;
