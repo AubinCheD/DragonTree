@@ -1,15 +1,15 @@
 # DragonTree — feuille de route
 
-Rédigé le 2026-10-18, mis à jour le 2026-10-19 puis le 2026-10-20 (branche `options-fork`, voir plus bas). Ce document reprend les demandes du 2026-10-18 :
+Rédigé le 2026-10-18, mis à jour le 2026-10-19, le 2026-10-20 (branche `options-fork`) puis le 2026-10-22 (branche `points-restants`), voir plus bas. Ce document reprend les demandes du 2026-10-18 :
 
 - renommer le projet (fait) ;
 - choisir la langue (fait) ;
 - voir et changer de worktree (fait : T1, via R3) ;
-- voir les stashs (la fonction existe : T3) ;
-- filtrer l'historique sur la branche active (la fonction existe : T4) ;
+- voir ses stashs (fait : T3) ;
+- filtrer l'historique sur la branche active (fait : T4) ;
 - recenser les options de menu de Git Fork pour choisir celles à implémenter (recensement fait, toutes les options retenues et livrées : T2, N2).
 
-La mise à jour du 2026-10-19 ajoute l'état vérifié dans le code et la liste de tout ce qui reste à faire (T1, T2, N2 et B1 sont depuis terminés : voir la section **Branche `options-fork` (2026-10-20)**) :
+La mise à jour du 2026-10-19 ajoutait l'état vérifié dans le code et la liste de tout ce qui restait à faire (tout est depuis terminé, ou documenté comme limite : voir les sections **Branche `options-fork` (2026-10-20)** et **Branche `points-restants` (2026-10-22)**) :
 
 - la section **Reste à faire** donne la synthèse ;
 - la section **Détail des points restants** donne le détail ;
@@ -23,7 +23,7 @@ Les références `crates/…:ligne` renvoient au code du 2026-10-19.
   - La section « Stashes » est dans la barre latérale gauche. Un clic sur un stash affiche son diff, et le clic droit propose Appliquer, Pop et Supprimer. Sur un gros dépôt, la section se retrouve sous des centaines de branches.
   - Le bouton « Toutes les branches / Branche courante » est à droite du champ de recherche, au-dessus de l'historique. Il est discret.
   - Les points V2, V3, V7 et R4 ci-dessous les rendent visibles comme dans Fork.
-  - L'utilisateur n'a pas encore confirmé que c'était bien le problème (voir T3 et T4).
+  - L'utilisateur n'a jamais confirmé que c'était bien le problème (voir T3 et T4) ; les deux sont néanmoins faits.
 - **Fork n'existe qu'en anglais.** Son développeur a refusé la traduction ([TrackerWin #392](https://github.com/fork-dev/TrackerWin/issues/392)). Le choix de la langue est donc un plus de DragonTree.
 - **Les deux décisions en attente depuis le 2026-10-17 sont levées :** la proposition Worktrees est réalisée (R3) et toutes les options de menu sont implémentées (branche `options-fork`).
 
@@ -174,7 +174,27 @@ Activation et licence, mises à jour automatiques, modèle « Lean Branching » 
 
 ## Reste à faire
 
-Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Terminés depuis le 2026-10-19 : T1, T2, N2, B1, B5, B6 (branche `options-fork`), B2, B3, B4 et B7 (branche `points-restants`).
+Synthèse au 2026-10-22. Chaque point est détaillé plus bas, sous son identifiant. Les options de Fork restent dans les tableaux ci-dessus et ne sont pas répétées. Tout ce que les sections B, T, N, RV, P et L listaient est fait ou corrigé : T1, T2, N2, B1, B5 et B6 par la branche `options-fork`, tous les autres par la branche `points-restants` (voir la section du même nom plus bas). Les tableaux gardent chaque ligne avec son état, pour mémoire.
+
+### Reste ouvert
+
+Seul ce qui a été écarté, ou documenté comme limite, reste ouvert. Rien n'est planifié.
+
+| # | Ce qui reste | Pourquoi | Entrée |
+|---|---|---|---|
+| L1 | Identifiants SHA-256 de 32 octets (les dépôts SHA-256 sont refusés avec une erreur explicite) | `Oid` est un `[u8; 20]` utilisé partout ; coût disproportionné pour un format rare et expérimental | L1 |
+| RV4d | Forges en HTTP simple (refusées à l'ajout du compte) | le jeton ne doit jamais circuler en clair | RV4 d |
+| RV4c | Proxy SOCKS, proxy à authentification (NTLM, Kerberos), `http.proxy` de git | hors du plan ; `NO_PROXY` ne vaut que pour les variables d'environnement | RV4 c |
+| RV4b | Instances : profil désigné par un nom 8.3, une jonction ou un lecteur `subst` ; instance élevée et non élevée | clé calculée sur le chemin normalisé, sans le résoudre ; droits d'écriture du tube | RV4 b |
+| RV3, RV4a | SSH sans limite de débit du fetch automatique ; deux worktrees d'un même dépôt sur deux files ; outil de diff externe fermé avec l'application | git ne propose pas la limite pour SSH ; verrous de git ; ce n'est pas une opération du dépôt | RV3, RV4 a |
+| RV5c | Textes déjà affichés non retraduits après un changement de langue | décision du plan | RV5 |
+| P4 | Dans cmd ou PowerShell, l'invite revient avant le texte de `--help` | une application graphique n'est pas attendue par le shell | P4 |
+| L3 | Fenêtre Réglages ouverte pendant la relecture : sa liste modifiée remplace celle du fichier ; réglages perdus à la déconnexion de Windows | brouillon de la fenêtre ; pas d'enregistrement à la fin de session | L3 |
+| L4 | Refus d'authentification d'un fetch manuel non reconnu avec un git traduit | les opérations visibles gardent la langue de l'utilisateur | L4 |
+| N1 | Vue des pull requests : dates Azure DevOps, plafonds de résultats, relecteur GitLab « désigné », remotes lus sans `include.path`, `insteadOf` ni alias SSH | limites des API et de la lecture de `.git/config` | N1 |
+| N3 | Icône avec MSVC : `link.exe` à confirmer | toolchain MSVC non installée sur le poste | N3 |
+| P1 | Marque : EUIPO/TMview et INPI à vérifier à la main | accès automatique impossible | P1 |
+| T3 | Confirmer avec l'utilisateur que la visibilité des stashs répond à sa demande | jamais confirmé | T3 |
 
 ### Bugs à corriger
 
@@ -629,7 +649,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **État :** réalisé.
   - Avant : le manifeste déclarait la licence MIT (`Cargo.toml:9`), mais le dépôt n'avait pas de fichier `LICENSE`.
   - `LICENSE` à la racine : texte MIT standard, « Copyright (c) 2026 DragonTree contributors ». La licence de la police Phosphor reste à part (`assets/fonts/LICENSE-Phosphor.txt`) ; le README les cite toutes deux (section « Licence »).
-  - Le README annonce 1 032 tests (nombre réel au 2026-10-22 ; 870 le 2026-10-20, 277 le 2026-10-17).
+  - Le README annonce 1 077 tests (nombre réel au 2026-10-22, fin de la branche `points-restants` ; 870 le 2026-10-20, 277 le 2026-10-17).
   - Vérification du nom consignée ci-dessous ; aucune démarche d'achat, de dépôt ni d'inscription (décision du plan).
 - **Vérification du nom (2026-10-22, recherche web uniquement) :**
   - **Domaines** (registres RDAP publics) :
@@ -886,7 +906,25 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 
 ## Branche `options-fork` (2026-10-20)
 
-La branche `options-fork` livre toutes les options des tableaux ci-dessus (F2–F4, V2–V13, R1–R20, C2–C8, H1–H4) ainsi que la barre de menus Fichier / Affichage / Dépôt / Configuration (T2), un commit par option (id en tête du sujet), corrections de relecture en `fixup!`. Elle résout T1 (worktrees, via R3), T2, N2, B1, B5 et B6 (via C3), et tranche les raccourcis (Ctrl+Maj+L reste le journal, Pull = Ctrl+Maj+U, Ctrl+Maj+C reste Cloner). Tout passe par un registre de commandes unique (`crates/dragontree-app/src/commands.rs`) : menus, raccourcis, palette Ctrl+P et fenêtre des raccourcis en dérivent. Les commandes personnalisées (R15) refusent les valeurs dangereuses pour `cmd.exe` et passent aussi les valeurs acceptées en variables `DT_*` ; l'IA (C7) lance Claude Code sans aucun outil, consigne sur stdin, et reste désactivée par défaut. La suite compte 870 tests, clippy et rustfmt sont verts. Restent ouverts : B2 à B4 et B7, T3 à T6, N1, N3, RV1 à RV5, P1 à P4, L1 à L6.
+La branche `options-fork` livre toutes les options des tableaux ci-dessus (F2–F4, V2–V13, R1–R20, C2–C8, H1–H4) ainsi que la barre de menus Fichier / Affichage / Dépôt / Configuration (T2), un commit par option (id en tête du sujet), corrections de relecture en `fixup!`. Elle résout T1 (worktrees, via R3), T2, N2, B1, B5 et B6 (via C3), et tranche les raccourcis (Ctrl+Maj+L reste le journal, Pull = Ctrl+Maj+U, Ctrl+Maj+C reste Cloner). Tout passe par un registre de commandes unique (`crates/dragontree-app/src/commands.rs`) : menus, raccourcis, palette Ctrl+P et fenêtre des raccourcis en dérivent. Les commandes personnalisées (R15) refusent les valeurs dangereuses pour `cmd.exe` et passent aussi les valeurs acceptées en variables `DT_*` ; l'IA (C7) lance Claude Code sans aucun outil, consigne sur stdin, et reste désactivée par défaut. La suite compte 870 tests, clippy et rustfmt sont verts. Restaient ouverts alors : B2 à B4 et B7, T3 à T6, N1, N3, RV1 à RV5, P1 à P4 (tous traités depuis par la branche `points-restants`, ci-dessous).
+
+## Branche `points-restants` (2026-10-22)
+
+La branche `points-restants` traite tous les points qui restaient ouverts après `options-fork` : B2, B3, B4 et B7 (bugs), T3 à T6, N1 et N3, RV1 à RV5, P1 à P4, puis les pistes L1 à L6, plus l'isolation des tests de la configuration git globale. Un commit par tâche (id en tête du sujet) ; les corrections de revue sont des commits ordinaires `<id> — Corrige … (revue)`, sans `fixup!` ni réécriture de l'historique.
+
+- **Livré :** stashs avant remotes et tags dans la barre latérale (T3), choix « branche courante seulement » mémorisé par dépôt (T4), glisser-déposer entre listes, colonne du graphe redimensionnable, date de mise à jour dans la liste de clonage et aperçu du résultat des conflits (T5), compte associé à un dépôt existant (T6), fenêtre Fichier › Pull requests… (N1), icône intégrée à l'exécutable (N3) ; filtre et coloration en arrière-plan avec cache (RV1), lecture des diffs bornée à 8 Mio (RV2), fetch automatique sur une file à part et une file par dépôt (RV3), confirmation à la fermeture, instance unique par profil, proxy de Windows, cas des forges (RV4), `--lang` et `--theme` temporaires (RV5) ; licence MIT et vérification du nom (P1), plans historiques signalés (P2), stabilité de `ui_network` (P3), `--help` dans cmd et PowerShell (P4) ; dépôts SHA-256 refusés avec une erreur explicite (L1), conflits Windows-1252 (L2), réglages illisibles relus à l'enregistrement (L3), indicateur d'authentification refusée du fetch automatique (L4), push forcé protégé après un amend (L5), indexation partielle avec « Espaces » (L6).
+- **Décisions à retenir :**
+  - un fetch ou un pull lancé à la main n'arrête jamais un fetch automatique qui tourne (tuer git pendant l'écriture des références laisse des fichiers `*.lock`) : il annule celui qui n'a pas commencé, sinon attend et le dit ; en HTTP, le fetch automatique abandonne de lui-même une connexion muette (`http.lowSpeedLimit`, `http.lowSpeedTime`), pas en SSH ;
+  - `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` ne vaut que pendant qu'une commande tourne : ce que git laisse tourner après une commande terminée (démon fsmonitor, éditeur de `git mergetool`) survit, car le tuer commande par commande casserait ces cas ; à la fermeture, aucune opération git en cours ne survit ;
+  - instance unique : le client vérifie que le serveur du tube est du même utilisateur avant d'y envoyer quoi que ce soit ;
+  - un fetch automatique ne lance jamais d'invite d'identifiants (`GIT_ASKPASS` et `SSH_ASKPASS` neutralisés) et tourne avec `LC_ALL=C` pour reconnaître un refus d'authentification ;
+  - T6 liste aussi les comptes qui ne correspondent pas au remote, après ceux qui correspondent et avec un avertissement (une organisation Azure DevOps ou un serveur auto-hébergé peut ne pas correspondre textuellement) ;
+  - `--lang` et `--theme` montrent leur valeur dans les menus et dans Réglages ; l'enregistrer demande de la choisir dans un menu ;
+  - L1 : l'erreur explicite suffit, les identifiants de 32 octets sont écartés (coût d'un `Oid` de taille variable) ; L3 : la fusion des réglages relus se fait sur trois versions (départ de la session, session, fichier) et les onglets ouverts, l'onglet actif et l'espace actif restent ceux de la fenêtre ;
+  - les tests ne lisent jamais la configuration git globale : l'isolation est la valeur par défaut des helpers communs (déterminisme, aucune écriture dans la configuration de l'utilisateur) ;
+  - les noms de marques tiers cités dans la vérification du nom (P1) sont gardés : ce sont des constats, sans démarche d'achat ni de dépôt.
+- **Qualité :** 1 077 tests (10 autres sont ignorés par défaut), clippy (`-D warnings`) et rustfmt verts.
+- **Reste ouvert :** seulement ce qui a été écarté ou documenté comme limite, listé dans « Reste ouvert » plus haut avec un renvoi vers chaque entrée : identifiants SHA-256 de 32 octets, forges en HTTP simple, proxy SOCKS et à authentification, instances (profil 8.3 ou `subst`, élevée et non élevée), SSH sans limite de débit du fetch automatique, textes figés après un changement de langue, invite de `--help` dans cmd et PowerShell, fenêtre Réglages et déconnexion de Windows, fetch manuel avec un git traduit, limites de la vue des pull requests, `link.exe` pour l'icône MSVC, recherche de marque EUIPO et INPI, confirmation de T3.
 
 ## État du plan d'implémentation
 
@@ -901,12 +939,12 @@ Plan : `docs/superpowers/plans/2026-10-16-dragontree.md` (non réécrit ici).
   - critiques : C1 (indexation partielle des fichiers non UTF-8), C2 (Maj+clic qui plantait) ;
   - importants : I3 à I9 ;
   - mineurs reclassés en importants : M1 à M5, M9, M11, M12, M14, M15, M17, M18.
-- **Écarts restants :**
-  - tâche 15 : colonne du graphe → T5 ;
-  - tâche 16 : glisser-déposer entre listes → T5 ;
-  - tâche 18 : colonne « mise à jour » → T5 ;
-  - tâche 19 : cache LRU et seuil de coloration → RV1 ;
-  - tâche 22 : aperçu des conflits → T5.
+- **Écarts qui restaient (tous résolus depuis, branche `points-restants`) :**
+  - tâche 15 : colonne du graphe → T5 (fait) ;
+  - tâche 16 : glisser-déposer entre listes → T5 (fait) ;
+  - tâche 18 : colonne « mise à jour » → T5 (fait) ;
+  - tâche 19 : cache LRU et seuil de coloration → RV1 (fait) ;
+  - tâche 22 : aperçu des conflits → T5 (fait).
 - **Écarts assumés (arbitrages, rien à faire) :**
   - éditeur de séquence `cp` au lieu du mode `--write-todo` (tâches 10 et 12) ;
   - PowerShell comme terminal de repli au lieu de `cmd /K` (tâche 14) ;

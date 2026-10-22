@@ -39,7 +39,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
   renommer, supprimer localement et sur le remote, checkout, fast-forward), tags (annotés, push, suppression),
   merge (ff, no-ff, ff-only, squash), rebase, **rebase interactif** (réordonner, pick/reword/edit/squash/
   fixup/drop), cherry-pick, revert, reset (soft/mixed/hard), stash (avec message, non suivis, garder l'index,
-  choix du stash au pop, renommage, fichiers sélectionnés seulement, snapshot ; les stashs sont aussi dans le graphe),
+  choix du stash au pop, renommage, fichiers sélectionnés seulement, snapshot ; la section Stashes de la barre latérale
+  suit les branches, avant les remotes et les tags, et les stashs sont aussi dans le graphe),
   mise à jour, push ou suppression de **plusieurs branches à la fois** (branches périmées sélectionnables),
   Fetch / Pull / Push rapides sans dialogue (Ctrl+clic), remotes (modifier l'URL, tester la connexion),
   sous-modules (ajouter, déplacer, changer l'URL, supprimer), **pull requests** (créer sur GitHub, GitLab, Azure DevOps),
@@ -79,6 +80,9 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
 - **Outils externes** (Réglages) : diff et merge configurables, avec préréglages VS Code, WinMerge, Beyond Compare,
   KDiff3 et P4Merge. **Identité git globale** (nom, e-mail) dans Configuration. **Clés SSH** (Fichier) : générer,
   choisir, gérer plusieurs clés.
+- **Gros dépôts et gros diffs** : le filtre de l'historique et la coloration syntaxique tournent en arrière-plan (la
+  coloration est mise en cache et s'arrête au-delà de 20 000 lignes) ; un diff de plus de 8 Mio est tronqué et git est
+  arrêté à cette limite, sans que la mémoire monte avec la taille du fichier.
 - **Affichage du diff** : police, taille, largeur de tabulation, espaces visibles ou ignorés (espaces ignorés :
   l'indexation par hunk ou par ligne reste possible ; un hunk entier emporte les changements d'espaces de ses lignes).
 - **IA Claude Code** (facultatif, désactivée par défaut) : message de commit et revue de la branche courante.
@@ -268,7 +272,7 @@ dépôt (pas de collision sur `index.lock`), résultats périmés ignorés.
 cargo test --workspace
 ```
 
-1 032 tests : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
+1 077 tests (et 10 tests ignorés par défaut) : parseurs, graphe, patchs appliqués par un vrai `git apply`, opérations sur des dépôts
 temporaires (y compris remotes locaux), API des forges sur des réponses JSON représentatives, et parcours
 d'interface de bout en bout (egui_kittest : indexer puis commiter, indexer un hunk, ouvrir un dépôt depuis la
 liste, créer une branche, résoudre un conflit, rebase interactif, stash/pop, annulation, menus, worktrees, bisect,
@@ -276,11 +280,37 @@ Git Flow, LFS, commandes personnalisées, pull requests de tous les comptes).
 Les tests ne lisent jamais votre configuration git globale : les helpers communs font désigner à `GIT_CONFIG_GLOBAL`,
 `HOME`, `USERPROFILE` et `XDG_CONFIG_HOME` un dossier temporaire avant toute commande git (la configuration système
 de Git pour Windows reste lue).
-Tests réels facultatifs (ignorés par défaut) : `cargo test -- --ignored` avec les variables décrites en tête
+Tests réels facultatifs (les ignorés) : `cargo test -- --ignored` avec les variables décrites en tête
 des fichiers `tests/live*.rs`.
 
 ## Limites connues et suite
 
+Ces limites sont des choix assumés ou des cas non traités ; chacune a son entrée dans `docs/feuille-de-route.md`, qui dit
+aussi ce qui reste ouvert. Celles qui touchent une fonction sont aussi dans sa section (Utilisation, Langue, Comptes).
+
+**Dépôts et git**
+
+- Dépôts SHA-256 (`git init --object-format=sha256`) non pris en charge : leur ouverture, et leur clonage (le dossier
+  cloné est alors supprimé), s'arrêtent sur un message qui le dit. DragonTree ne gère que des identifiants SHA-1 de
+  20 octets, pas ceux de 32 octets de SHA-256 ; pour un tel dépôt, utilisez git en ligne de commande.
+- Un refus d'authentification n'est reconnu que dans les messages anglais de git : le fetch automatique lance git en
+  anglais pour cela, mais pour un fetch lancé à la main avec un git traduit, l'avertissement « Authentification
+  refusée » peut manquer.
+- Le fetch automatique abandonne en HTTP une connexion restée presque muette pendant une minute ; en SSH, cette limite
+  de débit ne s'applique pas : un serveur muet l'occupe jusqu'à sa fin ou à la fermeture de l'application, et un fetch,
+  pull ou push lancé à la main attend alors (« Annuler » y met fin).
+- Deux opérations réseau lancées à la main depuis deux worktrees d'un même dépôt peuvent tourner ensemble ; git en fait
+  échouer une (verrou de référence), sans dommage.
+- Un outil de diff encore ouvert par « Ouvrir dans l'outil de diff externe » est fermé avec DragonTree, sans question.
+
+**Comptes et forges**
+
+- Forges en HTTP simple (GitLab, GitHub Enterprise ou Azure DevOps Server sans HTTPS) : refusées à l'ajout du compte,
+  car DragonTree ne joint les forges qu'en HTTPS (le jeton ne circule jamais en clair) ; un compte déjà enregistré
+  ainsi reste appelé en HTTPS. Un dépôt dont le remote est en `http://` garde les identifiants habituels de git :
+  l'en-tête du compte ne vise que HTTPS.
+- Proxy des forges : ni SOCKS, ni proxy à authentification (NTLM, Kerberos), ni `http.proxy` de git ; `NO_PROXY` ne
+  vaut que pour les variables d'environnement, pas pour le proxy de Windows (voir Comptes).
 - Vue des pull requests : Azure DevOps ne donne pas de date de mise à jour (la date affichée est celle de création) ;
   500 résultats au plus par recherche GitHub et 1 000 par liste GitLab ou Azure DevOps ; sur GitLab, « À relire » et
   « Relecture demandée » veulent dire « relecteur désigné » : GitLab garde les relecteurs après leur relecture et sa
@@ -288,13 +318,22 @@ des fichiers `tests/live*.rs`.
   locaux sont lus dans `.git/config` sans suivre `include.path` ni `url.<base>.insteadOf`, ni les valeurs continuées
   sur plusieurs lignes ou un fichier qui n'est pas en UTF-8 ; un remote qui passe par un alias d'hôte SSH
   (`~/.ssh/config`) n'est jamais relié à sa pull request.
-- Forges en HTTP simple (GitLab, GitHub Enterprise ou Azure DevOps Server sans HTTPS) : refusées à l'ajout du compte,
-  car DragonTree ne joint les forges qu'en HTTPS (le jeton ne circule jamais en clair) ; un compte déjà enregistré
-  ainsi reste appelé en HTTPS. Un dépôt dont le remote est en `http://` garde les identifiants habituels de git :
-  l'en-tête du compte ne vise que HTTPS.
-- Dépôts SHA-256 (`git init --object-format=sha256`) non pris en charge : leur ouverture, et leur clonage (le dossier
-  cloné est alors supprimé), s'arrêtent sur un message qui le dit. DragonTree ne gère que des identifiants SHA-1 de
-  20 octets ; pour un tel dépôt, utilisez git en ligne de commande.
+
+**Application**
+
+- Après un changement de langue, les textes déjà affichés restent dans l'ancienne : titre d'une opération en cours,
+  notifications, dialogue ouvert, certains messages d'erreur internes (voir Langue).
+- Dans cmd ou PowerShell, l'invite revient avant le texte de `--help` (voir Utilisation).
+- Instance unique par profil : un dossier de profil désigné par un nom court 8.3, une jonction ou un lecteur `subst`
+  donne une autre instance, et une instance lancée avec les droits d'administrateur ne reconnaît pas celle qui est
+  lancée sans (deux fenêtres).
+- Réglages : la fenêtre Réglages ouverte pendant la relecture d'un fichier d'abord illisible remplace, à
+  « Enregistrer », une liste qu'elle a modifiée (dossiers scannés, commandes…) par son brouillon, sans les entrées que
+  le fichier relu y avait ajoutées ; la déconnexion de Windows n'enregistre pas les réglages changés depuis le dernier
+  enregistrement périodique (30 s).
+- Icône de l'exécutable : vérifiée avec GNU ; avec MSVC, objet lié par lld-link, `link.exe` à confirmer.
+- Nom du projet : aucun conflit trouvé pour un logiciel, mais l'EUIPO (TMview) et l'INPI n'ont pas pu être interrogés
+  automatiquement : à vérifier à la main avant tout dépôt de marque.
 
 ## Licence
 
