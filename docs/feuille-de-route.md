@@ -229,7 +229,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | L2 | Éditeur de conflits limité aux fichiers UTF-8 (corrigé : fichiers Windows-1252 résolus sur leurs octets) | limite constatée dans le code | moyenne |
 | L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session (corrigé : fichier relu à chaque enregistrement puis fusionné, indicateur « Réglages non enregistrés ») | arbitrage de la revue (M9) | basse |
 | L4 | Échec d'authentification du fetch automatique signalé une seule fois (corrigé : indicateur dans l'onglet jusqu'au prochain fetch réussi) | arbitrage de la revue (M2) | basse |
-| L5 | Amend d'un commit déjà poussé avec « Pousser après » : pas de push | arbitrage de la revue (I7b) | basse |
+| L5 | Amend d'un commit déjà poussé avec « Pousser après » : pas de push (corrigé : push forcé proposé, protégé par `--force-with-lease`) | arbitrage de la revue (I7b) | basse |
 | L6 | Option « Espaces » active : diff des changements en lecture seule | arbitrage de la revue (M1) | basse |
 
 ## Détail des points restants
@@ -825,12 +825,40 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** un fetch automatique refusé (serveur local 401) affiche l'indicateur ; un fetch de tous les remotes réussi l'efface.
 - **Priorité :** basse.
 
-#### L5 et L6 — Arbitrages de la revue au coût assumé
+#### L5 — Amend d'un commit déjà poussé avec « Pousser après » (corrigé)
 
-Chacun de ces arbitrages a un coût annoncé. Ce sont des pistes d'amélioration, de priorité basse.
+- **Contexte :** arbitrage de la revue (I7b) au coût assumé : le push qui suit un commit n'est jamais forcé d'office. Piste : proposer explicitement un push forcé dans un dialogue de confirmation.
+- **État :** corrigé.
+  - Avant : `push_after_commit` (`crates/dragontree-app/src/repo/actions.rs`) écartait le push quand le commit modifié par « Amend » était déjà poussé (branche sans commit en avance) : rien n'était poussé, notification « Le commit n'a pas été poussé » (Push › Forcer à faire à la main).
+  - Réalisé, moteur (`crates/dragontree-git/src/net.rs`) :
+    - `Repo::head_if_pushed` : HEAD s'il est aussi la référence de suivi de la branche courante (`git rev-parse HEAD @{upstream}`), sinon `None` (HEAD détachée, pas de branche suivie, HEAD en avance, en retard ou divergente) ;
+    - `Repo::push_with_lease` : `git push --force-with-lease=refs/heads/<branche distante>:<commit remplacé>`. Bail fixé à une valeur : jamais de `--force` nu, ni de bail sans valeur, qui prendrait pour valeur attendue la référence de suivi, qu'un fetch (automatique) a pu avancer entre-temps.
+  - Réalisé, interface (`repo/actions.rs`, `repo/dialogs.rs`) :
+    - le commit (« Amend » et « Pousser après le commit », branche sans commit en avance) lit `head_if_pushed` dans la même opération, juste avant l'amend (`AfterCommit::OfferForcePush`) : le bail porte sur le commit que l'amend remplace ;
+    - commit réussi, commit remplacé au sommet de la branche distante : dialogue « Pousser le commit modifié ? », marqué destructeur (Entrée ne le valide pas), qui nomme le commit remplacé et la protection. « Pousser en forçant » lance le push forcé (`OpKind::Push` : le bouton Push est occupé, RV5b) ; « Annuler », Échap ou un clic hors du dialogue gardent le commit modifié en local et affichent la notification d'avant ;
+    - remote qui a bougé entre-temps (un autre clone a poussé, même suivi d'un fetch) : git refuse (« stale info »), la notification « Push a échoué » le dit : « Push forcé refusé : origin/main n'est plus sur <sha>, le commit remplacé (quelqu'un a poussé entre-temps). Rien n'a été écrasé ; le commit modifié reste en local. » ;
+    - commit remplacé qui n'était pas le sommet de la branche distante (branche en retard après un fetch : un push forcé écraserait des commits jamais intégrés), ou autre dialogue ouvert pendant le commit : pas de dialogue, la notification d'avant ;
+    - textes traduits (`en.json`).
+- **Tests :**
+  - Moteur (`crates/dragontree-git/tests/net_ops.rs`) :
+    - `an_amended_pushed_commit_is_replaced_by_a_push_with_a_pinned_lease` : commit remplacé lu avant l'amend, push forcé, remote sur le commit modifié ;
+    - `a_push_with_a_pinned_lease_is_refused_when_the_remote_moved_even_after_a_fetch` : un autre clone pousse, fetch : refus « stale info », commit de l'autre clone gardé. Vu rouge avec un bail sans valeur (`--force-with-lease` seul) : push accepté ;
+    - `head_if_pushed_is_none_unless_head_is_its_upstream` : en avance, en retard, sans branche suivie, HEAD détachée.
+  - Interface (`crates/dragontree-app/tests/ui_network.rs`, remote nu local en `file://`, sans réseau), à la place de `amend_with_push_after_never_force_pushes` :
+    - `amending_a_pushed_commit_offers_a_force_push_that_replaces_it` : dialogue qui nomme le commit remplacé, remote inchangé avant la confirmation ; « Pousser en forçant » : le remote a le commit modifié ;
+    - `cancelling_the_force_push_keeps_the_amended_commit_local` : « Annuler » : notification, remote inchangé, commit modifié en local ;
+    - `the_force_push_is_refused_when_someone_pushed_meanwhile` : un collègue pousse pendant le dialogue, fetch, confirmation : refus signalé, commit du collègue gardé sur le remote ;
+    - `no_force_push_is_offered_when_the_branch_is_behind_its_remote` : branche en retard : pas de dialogue, notification, remote inchangé.
+    - Vus rouges sans la correction (interface d'avant) : « délai dépassé en attendant : dialogue du push forcé » pour les trois premiers.
+- **À faire :** proposer explicitement un push forcé dans un dialogue de confirmation (fait).
+- **Critère de fin (atteint) :** amend d'un commit poussé avec « Pousser après » : dialogue ; confirmé, le remote reçoit le commit modifié ; annulé, rien n'est poussé ; remote qui a bougé entre-temps : push refusé et signalé, sans perte.
+- **Priorité :** basse.
 
-- **L5. Amend d'un commit déjà poussé avec « Pousser après » :** rien n'est poussé, une notification s'affiche (`crates/dragontree-app/src/repo/actions.rs:224-243`). Piste : proposer explicitement un push forcé dans un dialogue de confirmation.
-- **L6. Option « Espaces » active :** le diff des changements passe en lecture seule (`crates/dragontree-app/src/repo/changes.rs:510-524`). Piste : recalculer le diff sans `-w` pour construire le patch, comme la revue le suggérait.
+#### L6 — Option « Espaces » active : diff des changements en lecture seule
+
+- **Contexte :** arbitrage de la revue (M1) au coût assumé.
+- **État :** le diff des changements passe en lecture seule (`crates/dragontree-app/src/repo/changes.rs`, `change_detail`). Piste : recalculer le diff sans `-w` pour construire le patch, comme la revue le suggérait.
+- **Priorité :** basse.
 
 ## Branche `options-fork` (2026-10-20)
 

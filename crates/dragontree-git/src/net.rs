@@ -5,6 +5,7 @@ use std::path::Path;
 use dragontree_i18n::tr;
 
 use crate::error::GitError;
+use crate::oid::Oid;
 use crate::progress::{Progress, parse_progress};
 use crate::repo::Repo;
 use crate::runner::{CancelToken, Git, GitCommand};
@@ -110,6 +111,45 @@ impl Repo {
         }
         cmd = cmd.args([remote.to_string(), format!("refs/heads/{local}:refs/heads/{remote_branch}")]);
         run_with_progress(cmd, on)
+    }
+
+    /// Commit que remplacerait un amend de HEAD sur sa branche distante (L5) : l'identifiant de HEAD s'il est aussi
+    /// celui de la référence de suivi de la branche courante (`@{upstream}`), sinon `None` (HEAD détachée, pas de
+    /// branche suivie ou référence absente, HEAD en avance, en retard ou divergente). À lire juste avant l'amend.
+    pub fn head_if_pushed(&self) -> Result<Option<Oid>, GitError> {
+        // Code 128 : pas de branche suivie (ou HEAD détachée) ; tout autre échec reste une erreur.
+        let out = self.read().args(["rev-parse", "HEAD", "@{upstream}"]).allow_codes(&[128]).run()?;
+        if out.code != 0 {
+            return Ok(None);
+        }
+        let text = out.stdout_str();
+        let mut ids = text.lines().map(|l| Oid::from_hex(l.trim()));
+        Ok(match (ids.next().flatten(), ids.next().flatten()) {
+            (Some(head), Some(upstream)) if head == upstream => Some(head),
+            _ => None,
+        })
+    }
+
+    /// Push forcé de `local` vers `remote_branch`, avec un bail fixé à `expected` (L5, commit modifié par un amend
+    /// alors qu'il était déjà poussé) : `--force-with-lease=refs/heads/<remote_branch>:<expected>`, jamais un
+    /// `--force` nu. `expected` est la valeur de la branche distante que le commit modifié remplace : si le remote a
+    /// bougé depuis (un autre clone a poussé), git refuse le push (« stale info ») et rien n'est écrasé, même après un
+    /// fetch qui aurait avancé la référence de suivi (un bail sans valeur la prendrait pour référence).
+    pub fn push_with_lease(
+        &self,
+        remote: &str,
+        local: &str,
+        remote_branch: &str,
+        expected: Oid,
+        n: &NetOptions,
+        on: &mut dyn FnMut(Progress),
+    ) -> Result<(), GitError> {
+        let lease = format!("--force-with-lease=refs/heads/{remote_branch}:{}", expected.to_hex());
+        let refspec = format!("refs/heads/{local}:refs/heads/{remote_branch}");
+        run_with_progress(
+            self.net(n).args(["push".to_string(), "--progress".into(), lease, remote.into(), refspec]),
+            on,
+        )
     }
 
     /// Teste la connexion à un remote : `git ls-remote --heads <remote>` ; renvoie les noms de ses branches, triés.

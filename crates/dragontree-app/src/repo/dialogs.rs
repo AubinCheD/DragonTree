@@ -25,6 +25,14 @@ pub enum ConfirmAction {
     OpenWorktree(PathBuf),
     /// Lever le verrou LFS d'un fichier même s'il appartient à quelqu'un d'autre (`git lfs unlock --force`).
     LfsForceUnlock(String),
+    /// Pousser en forçant le commit modifié par un amend alors qu'il était déjà poussé (L5), avec un bail fixé à
+    /// `replaced`, le commit remplacé. Annuler (ou fermer) garde le commit en local et le notifie.
+    ForcePushAmended {
+        remote: String,
+        local: String,
+        remote_branch: String,
+        replaced: Oid,
+    },
 }
 
 /// Libellé de l'abandon d'une opération en cours (bandeau et confirmation).
@@ -224,6 +232,9 @@ impl Dialog {
             Dialog::Confirm { title, action: ConfirmAction::OpenWorktree(_), .. } => {
                 (title.clone(), tr!("Ouvrir le worktree").into(), false)
             }
+            Dialog::Confirm { title, action: ConfirmAction::ForcePushAmended { .. }, .. } => {
+                (title.clone(), tr!("Pousser en forçant").into(), true)
+            }
         }
     }
 }
@@ -291,8 +302,18 @@ impl RepoTab {
         }
         if confirmed {
             self.execute_dialog(dialog, shared);
-        } else if !cancelled && !response.should_close() {
+        } else if cancelled || response.should_close() {
+            Self::dialog_dismissed(dialog, shared);
+        } else {
             self.dialog = Some(dialog);
+        }
+    }
+
+    /// Dialogue fermé sans être validé (Annuler, Échap, clic hors du dialogue).
+    fn dialog_dismissed(dialog: Dialog, shared: &mut Shared) {
+        // Push forcé du commit modifié écarté (L5) : le commit reste en local, comme quand le push n'est pas proposé.
+        if let Dialog::Confirm { action: ConfirmAction::ForcePushAmended { remote, remote_branch, .. }, .. } = dialog {
+            super::actions::commit_not_pushed(shared, super::actions::amended_not_pushed(&remote, &remote_branch));
         }
     }
 
@@ -780,6 +801,9 @@ impl RepoTab {
                 }
                 ConfirmAction::OpenWorktree(path) => shared.actions.push(AppAction::OpenRepo(path)),
                 ConfirmAction::LfsForceUnlock(path) => self.op_lfs_force_unlock(shared, path),
+                ConfirmAction::ForcePushAmended { remote, local, remote_branch, replaced } => {
+                    self.op_force_push_amended(shared, remote, local, remote_branch, replaced)
+                }
             },
         }
     }

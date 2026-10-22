@@ -184,6 +184,89 @@ fn force_with_lease_refuses_after_background_fetch() {
     assert_eq!(top.trim(), "travail d'alice");
 }
 
+/// Identifiant de `rev` dans le dépôt `dir`.
+fn rev_of(remote: &TestRepo, dir: &std::path::Path, rev: &str) -> String {
+    remote.git.cmd(dir).args(["rev-parse", rev]).run().unwrap().stdout_str().trim().to_string()
+}
+
+/// Ajoute `file` au dernier commit (amend).
+fn amend_with(repo: &Repo, file: &str) {
+    std::fs::write(repo.workdir.join(file), "modifié\n").unwrap();
+    repo.stage(&[file.into()]).unwrap();
+    repo.commit("init modifié", true).unwrap();
+}
+
+/// Amend d'un commit déjà poussé (L5) : `head_if_pushed`, lu avant l'amend, donne le commit remplacé ; le push
+/// forcé dont le bail est fixé à cette valeur remplace le commit sur le remote.
+#[test]
+fn an_amended_pushed_commit_is_replaced_by_a_push_with_a_pinned_lease() {
+    let remote = seeded_remote();
+    let work = tempfile::tempdir().unwrap();
+    let alice = clone_into(&remote, work.path(), "alice");
+    let replaced = alice.head_if_pushed().unwrap().expect("HEAD est origin/main après le clonage");
+    assert_eq!(replaced.to_hex(), rev_of(&remote, remote.path(), "main"));
+
+    amend_with(&alice, "b.txt");
+    assert_eq!(alice.head_if_pushed().unwrap(), None, "le commit modifié diverge de origin/main");
+    alice.push_with_lease("origin", "main", "main", replaced, &NetOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(rev_of(&remote, remote.path(), "main"), rev_of(&remote, &alice.workdir, "HEAD"));
+}
+
+/// Le bail porte sur la valeur remplacée, pas sur la référence de suivi : un autre clone a poussé, puis un fetch
+/// (automatique) a avancé origin/main ; le push forcé est quand même refusé, et le commit de l'autre clone reste.
+#[test]
+fn a_push_with_a_pinned_lease_is_refused_when_the_remote_moved_even_after_a_fetch() {
+    let remote = seeded_remote();
+    let work = tempfile::tempdir().unwrap();
+    let alice = clone_into(&remote, work.path(), "alice");
+    let bob = clone_into(&remote, work.path(), "bob");
+    let replaced = alice.head_if_pushed().unwrap().unwrap();
+    amend_with(&alice, "b.txt");
+
+    std::fs::write(bob.workdir.join("c.txt"), "c\n").unwrap();
+    bob.stage(&["c.txt".into()]).unwrap();
+    bob.commit("travail de bob", false).unwrap();
+    bob.push("origin", "main", "main", false, false, &NetOptions::default(), &mut |_| {}).unwrap();
+    let bob_head = rev_of(&remote, &bob.workdir, "HEAD");
+    alice.fetch(None, false, &NetOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(rev_of(&remote, &alice.workdir, "origin/main"), bob_head);
+
+    let err =
+        alice.push_with_lease("origin", "main", "main", replaced, &NetOptions::default(), &mut |_| {}).unwrap_err();
+    match &err {
+        GitError::Failed { stderr, .. } => assert!(stderr.contains("stale info"), "{stderr}"),
+        other => panic!("attendu Failed, obtenu {other:?}"),
+    }
+    assert_eq!(rev_of(&remote, remote.path(), "main"), bob_head, "rien n'est écrasé");
+}
+
+/// Pas de valeur à remplacer quand HEAD n'est pas exactement la branche distante suivie.
+#[test]
+fn head_if_pushed_is_none_unless_head_is_its_upstream() {
+    let remote = seeded_remote();
+    let work = tempfile::tempdir().unwrap();
+    let alice = clone_into(&remote, work.path(), "alice");
+    let bob = clone_into(&remote, work.path(), "bob");
+
+    // En avance d'un commit.
+    std::fs::write(alice.workdir.join("n"), "n\n").unwrap();
+    alice.stage(&["n".into()]).unwrap();
+    alice.commit("nouveau", false).unwrap();
+    assert_eq!(alice.head_if_pushed().unwrap(), None);
+    alice.push("origin", "main", "main", false, false, &NetOptions::default(), &mut |_| {}).unwrap();
+    assert!(alice.head_if_pushed().unwrap().is_some());
+
+    // En retard : le commit d'alice est arrivé par un fetch.
+    bob.fetch(None, false, &NetOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(bob.head_if_pushed().unwrap(), None);
+
+    // Branche sans branche suivie, puis HEAD détachée.
+    bob.create_branch("locale", "main", true).unwrap();
+    assert_eq!(bob.head_if_pushed().unwrap(), None);
+    remote.git.cmd(&bob.workdir).args(["checkout", "-q", "--detach"]).run().unwrap();
+    assert_eq!(bob.head_if_pushed().unwrap(), None);
+}
+
 /// Environnement que reçoit le transport d'un fetch (ssh simulé par `core.sshCommand`, qui le note puis échoue) : en
 /// arrière-plan, git parle anglais (son message d'authentification refusée se reconnaît) et aucune invite
 /// d'identifiants n'est possible ; un fetch visible garde la langue de l'utilisateur.

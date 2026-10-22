@@ -1,5 +1,6 @@
 //! Opérations git lancées depuis l'interface : exécutées dans l'ordre sur la file du dépôt.
 
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use dragontree_git::{
@@ -7,6 +8,7 @@ use dragontree_git::{
 };
 use dragontree_i18n::{tr, trn};
 
+use super::dialogs::{ConfirmAction, Dialog};
 use super::{AfterCommit, PendingCommit, Refresh, RepoEvent, RepoTab, RunningOp, Side};
 use crate::app::{AppEvent, Shared};
 use crate::op_queue::PendingOp;
@@ -59,6 +61,26 @@ pub(crate) fn auth_env(account: Option<&dragontree_forges::Account>, remote_urls
         return dragontree_forges::git_auth_env(acc, &token, &urls);
     }
     Vec::new()
+}
+
+/// Raison donnée quand le commit modifié par un amend, déjà poussé, ne l'est pas de nouveau (L5 : push forcé annulé
+/// ou impossible à proposer).
+pub(super) fn amended_not_pushed(remote: &str, remote_branch: &str) -> String {
+    tr!(
+        "Le commit d'origine était déjà sur {remote}/{remote_branch} : le remplacer demande un push forcé. Utilisez Push › Forcer si c'est voulu.",
+        remote,
+        remote_branch
+    )
+}
+
+/// Notification d'un push demandé après le commit mais non lancé.
+pub(super) fn commit_not_pushed(shared: &mut Shared, reason: String) {
+    shared.toast(Toast {
+        kind: ToastKind::Info,
+        title: tr!("Le commit n'a pas été poussé").into(),
+        detail: Some(reason),
+        action: None,
+    });
 }
 
 impl RepoTab {
@@ -355,8 +377,18 @@ impl RepoTab {
     /// Commit (puis push si demandé). Le message saisi n'est effacé qu'après un commit réussi.
     pub(crate) fn op_commit(&mut self, shared: &Shared, message: String, amend: bool, push_after: bool) {
         let after = if push_after { self.push_after_commit(amend) } else { AfterCommit::Nothing };
+        // Amend d'un commit déjà poussé (L5) : le commit remplacé est lu dans la même opération, juste avant l'amend.
+        let replaced = match &after {
+            AfterCommit::OfferForcePush { replaced, .. } => Some(Arc::clone(replaced)),
+            _ => None,
+        };
         let before = self.next_op_id;
         self.run_simple_as(shared, OpKind::Commit, "Commit", Refresh::ALL, move |r| {
+            if let Some(replaced) = &replaced
+                && let Ok(Some(head)) = r.head_if_pushed()
+            {
+                let _ = replaced.set(head);
+            }
             r.commit(&message, amend)?;
             Ok(Some(if amend { tr!("Commit modifié") } else { tr!("Commit créé") }.into()))
         });
@@ -366,8 +398,8 @@ impl RepoTab {
         }
     }
 
-    /// Push qui suivra le commit. Jamais forcé : si le commit modifié (amend) était déjà poussé,
-    /// le push réécrirait l'historique distant, ce que seul un push forcé explicite doit faire.
+    /// Push qui suivra le commit. Jamais forcé d'office : si le commit modifié (amend) était déjà poussé, le push
+    /// réécrirait l'historique distant ; il est alors proposé dans un dialogue de confirmation (L5).
     fn push_after_commit(&self, amend: bool) -> AfterCommit {
         if self.refs.as_ref().and_then(|r| r.current_branch()).is_none() {
             return AfterCommit::PushSkipped(tr!("HEAD détachée : aucune branche à pousser.").into());
@@ -377,12 +409,7 @@ impl RepoTab {
         };
         let already_pushed = self.status.as_ref().is_some_and(|s| s.ahead == 0);
         if amend && already_pushed && !target.set_upstream {
-            let PushTarget { remote, remote_branch, .. } = target;
-            return AfterCommit::PushSkipped(tr!(
-                "Le commit d'origine était déjà sur {remote}/{remote_branch} : le remplacer demande un push forcé. Utilisez Push › Forcer si c'est voulu.",
-                remote,
-                remote_branch
-            ));
+            return AfterCommit::OfferForcePush { target, replaced: Arc::new(OnceLock::new()) };
         }
         AfterCommit::Push(target)
     }
@@ -398,13 +425,54 @@ impl RepoTab {
         match after {
             AfterCommit::Nothing => {}
             AfterCommit::Push(target) => self.push_to(shared, target),
-            AfterCommit::PushSkipped(reason) => shared.toast(Toast {
-                kind: ToastKind::Info,
-                title: tr!("Le commit n'a pas été poussé").into(),
-                detail: Some(reason),
-                action: None,
-            }),
+            AfterCommit::PushSkipped(reason) => commit_not_pushed(shared, reason),
+            // Un dialogue déjà ouvert (lancé pendant le commit) n'est pas remplacé : rien n'est poussé.
+            AfterCommit::OfferForcePush { target, replaced } => match replaced.get() {
+                Some(&replaced) if self.dialog.is_none() => self.offer_force_push(target, replaced),
+                _ => commit_not_pushed(shared, amended_not_pushed(&target.remote, &target.remote_branch)),
+            },
         }
+    }
+
+    /// Dialogue qui propose le push forcé du commit modifié (L5) ; destructeur : Entrée ne le valide pas.
+    fn offer_force_push(&mut self, target: PushTarget, replaced: Oid) {
+        let PushTarget { remote, local, remote_branch, .. } = target;
+        let text = tr!(
+            "Le commit d'origine ({sha}) est déjà sur {remote}/{remote_branch} : le remplacer par le commit modifié demande un push forcé, qui réécrit l'historique distant.\n\nLe push est protégé (--force-with-lease) : il est refusé si {remote}/{remote_branch} n'est plus sur {sha}, par exemple si quelqu'un a poussé entre-temps.\n\nAnnuler garde le commit modifié en local, sans rien pousser.",
+            sha = replaced.short(),
+            remote,
+            remote_branch
+        );
+        self.dialog = Some(Dialog::Confirm {
+            title: tr!("Pousser le commit modifié ?").into(),
+            text,
+            action: ConfirmAction::ForcePushAmended { remote, local, remote_branch, replaced },
+        });
+    }
+
+    /// Push forcé du commit modifié, confirmé dans le dialogue (L5) : bail fixé à `replaced`, le commit remplacé (voir
+    /// `Repo::push_with_lease`). Si le remote a bougé entre-temps, le push est refusé et la notification le dit.
+    pub(super) fn op_force_push_amended(
+        &mut self,
+        shared: &Shared,
+        remote: String,
+        local: String,
+        remote_branch: String,
+        replaced: Oid,
+    ) {
+        self.run_net_as(shared, OpKind::Push, "Push", Refresh::REFS, false, move |r, n, on| {
+            r.push_with_lease(&remote, &local, &remote_branch, replaced, n, on).map_err(|e| match e {
+                // Message de git (non traduit) d'un bail qui ne correspond plus à la branche distante.
+                GitError::Failed { ref stderr, .. } if stderr.contains("stale info") => GitError::Refused(tr!(
+                    "Push forcé refusé : {remote}/{remote_branch} n'est plus sur {sha}, le commit remplacé (quelqu'un a poussé entre-temps). Rien n'a été écrasé ; le commit modifié reste en local.",
+                    remote,
+                    remote_branch,
+                    sha = replaced.short()
+                )),
+                e => e,
+            })?;
+            Ok(Some(tr!("{local} poussée vers {remote}/{remote_branch} (push forcé)", local, remote, remote_branch)))
+        });
     }
 
     /// Charge le message du dernier commit (pour « Amend »).

@@ -44,7 +44,7 @@ mod worktrees;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
@@ -290,6 +290,14 @@ enum AfterCommit {
     Push(actions::PushTarget),
     /// Push demandé mais non lancé ; le texte explique pourquoi.
     PushSkipped(String),
+    /// Amend d'un commit déjà poussé (L5) : `replaced` reçoit, du commit lui-même juste avant l'amend, le commit
+    /// remplacé s'il était exactement la branche distante suivie (`Repo::head_if_pushed`). Le push forcé est alors
+    /// proposé dans un dialogue de confirmation ; sinon (HEAD en retard sur le remote…), rien n'est poussé et une
+    /// notification le dit, comme pour `PushSkipped`.
+    OfferForcePush {
+        target: actions::PushTarget,
+        replaced: Arc<OnceLock<Oid>>,
+    },
 }
 
 #[derive(Default)]

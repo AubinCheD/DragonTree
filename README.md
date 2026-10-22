@@ -31,7 +31,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
 - **Changements locaux** : fichiers non indexés / indexés / en conflit, indexation par fichier (aussi en glissant les fichiers, sélection comprise, entre « Non indexés » et « Indexés »), par **hunk** ou
   par **ligne** (y compris fichiers non suivis et CRLF), annulation de modifications, « Ignorer » dans le
   `.gitignore`, dialogue « Ignorer… » (motif libre ou proposé, `.gitignore` racine ou de dossier ou `.git/info/exclude`,
-  aperçu des fichiers concernés), zone de commit (Amend, pousser après le commit, Ctrl+Entrée) avec indicateur de
+  aperçu des fichiers concernés), zone de commit (Amend, pousser après le commit, avec un push forcé `--force-with-lease`
+  proposé quand Amend modifie un commit déjà poussé, Ctrl+Entrée) avec indicateur de
   longueur 50/72, colonne guide, messages récents et Co-authored-by. Affichage des fichiers ignorés ou masquage des non
   suivis ; remise d'un fichier dans son état à un commit donné.
 - **Opérations** : fetch, pull (merge ou rebase), push (upstream, force-with-lease, tags), branches (créer,
