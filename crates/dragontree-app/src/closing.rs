@@ -7,40 +7,70 @@
 //!   quand même » les annule toutes et ferme, Échap ou un clic à côté renonce à fermer ;
 //! - sinon les opérations silencieuses (fetch automatique) sont annulées et la fenêtre se ferme sans question.
 //!
+//! Une opération compte jusqu'à ce que l'interface ait traité sa fin, pas seulement tant qu'elle est dans sa file
+//! ([`TabWork`]) : la suite qu'elle enchaîne (push après un commit, création d'une pull request après son push,
+//! proposition du push forcé après un amend) ne part qu'à ce moment, et « Attendre » l'attend aussi ; la création d'une
+//! pull request par l'API d'une forge compte aussi. Les événements des tâches sont traités par `App::logic` juste avant
+//! [`Closing::intercept`], fenêtre réduite comprise. Si la fin d'une opération ouvre un dialogue qui attend
+//! l'utilisateur, la fermeture suspendue y renonce pour le montrer (`decision` de [`Closing::intercept`]) ; un dépôt
+//! transmis par une autre instance aussi ([`Closing::cancel`]).
+//!
 //! Une opération annulée arrête son git et ses sous-processus ; ce qui tournerait encore à la fin du processus meurt
-//! avec lui (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, voir le runner de `dragontree_git`).
+//! avec lui (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, voir le runner de `dragontree_git`). Seul un clonage annulé est
+//! attendu à la fin de l'application, 2 s au plus, le temps de supprimer son dossier partiel (`clone::CloneTasks`).
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use dragontree_git::CancelToken;
 use dragontree_i18n::{tr, trn};
 
+use crate::app::TabId;
 use crate::clone::CloneWindow;
 use crate::op_queue::OpQueues;
 use crate::theme::Palette;
 
-/// Opérations de l'application que la fermeture regarde : celles des files des dépôts, et un clonage en cours.
+/// Travail visible d'un onglet tel que l'interface le suit (voir `RepoTab::pending_work`) : une opération lancée dont
+/// la fin n'a pas encore été traitée (elle a pu quitter sa file entre-temps), ou un appel à une forge (création d'une
+/// pull request).
+#[derive(Debug, Clone)]
+pub struct TabWork {
+    /// Opération d'une file (onglet, numéro) : comptée une seule fois avec celle de la file.
+    pub op: Option<(TabId, u64)>,
+    pub title: String,
+    /// Annulation (`None` : un appel à une forge, qui ne s'annule pas).
+    pub cancel: Option<CancelToken>,
+}
+
+/// Opérations de l'application que la fermeture regarde : celles des files des dépôts, le travail suivi par les
+/// onglets, et un clonage en cours.
 pub struct Operations<'a> {
     pub queues: &'a OpQueues,
+    pub tabs: Vec<TabWork>,
     pub clone: Option<&'a CancelToken>,
 }
 
 impl<'a> Operations<'a> {
-    pub fn new(queues: &'a OpQueues, clone: Option<&'a CloneWindow>) -> Operations<'a> {
-        Operations { queues, clone: clone.and_then(CloneWindow::running) }
+    pub fn new(queues: &'a OpQueues, tabs: Vec<TabWork>, clone: Option<&'a CloneWindow>) -> Operations<'a> {
+        Operations { queues, tabs, clone: clone.and_then(CloneWindow::running) }
     }
 
-    /// Opérations visibles en attente ou en cours : leur titre et leur annulation.
-    fn visible(&self) -> Vec<(String, CancelToken)> {
-        let queued = self.queues.pending().into_iter().filter(|op| !op.silent).map(|op| (op.title, op.cancel));
-        let clone = self.clone.map(|c| (tr!("Clonage").to_string(), c.clone()));
-        queued.chain(clone).collect()
+    /// Titres des opérations visibles en attente ou en cours.
+    fn visible(&self) -> Vec<String> {
+        let queued: Vec<_> = self.queues.pending().into_iter().filter(|op| !op.silent).collect();
+        let in_queues: HashSet<(TabId, u64)> = queued.iter().map(|op| (op.tab, op.id)).collect();
+        let tabs = self.tabs.iter().filter(|w| w.op.is_none_or(|key| !in_queues.contains(&key)));
+        let clone = self.clone.map(|_| tr!("Clonage").to_string());
+        queued.into_iter().map(|op| op.title).chain(tabs.map(|w| w.title.clone())).chain(clone).collect()
     }
 
     /// Annule toutes les opérations, silencieuses comprises.
     pub fn stop_all(&self) {
         for op in self.queues.pending() {
             op.cancel.cancel();
+        }
+        for cancel in self.tabs.iter().filter_map(|w| w.cancel.as_ref()) {
+            cancel.cancel();
         }
         if let Some(cancel) = self.clone {
             cancel.cancel();
@@ -79,11 +109,40 @@ impl Closing {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    /// À chaque image : suspend la demande de fermeture de la fenêtre s'il le faut (voir la documentation du module).
-    /// Quand il n'y a plus d'opération visible, la question n'a plus d'objet : la fenêtre se ferme. `forced` : une
-    /// fermeture qui n'est jamais suspendue (celle que demande une capture d'écran).
-    pub fn intercept(&mut self, ctx: &egui::Context, ops: &Operations, forced: bool) {
+    /// Renonce à une fermeture suspendue (question posée ou attente de la fin des opérations) : un dépôt transmis par
+    /// une autre instance (RV4b) vient de s'ouvrir, la fenêtre reste.
+    pub fn cancel(&mut self) {
         if matches!(self.state, State::Asking | State::Waiting) {
+            self.state = State::No;
+        }
+    }
+
+    /// Rend visible et met au premier plan la fenêtre, réduite peut-être, pour une question.
+    fn show_window(ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().minimized == Some(true)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    /// À chaque image, après le traitement des événements des tâches : suspend la demande de fermeture de la fenêtre
+    /// s'il le faut (voir la documentation du module). Quand il n'y a plus d'opération visible, la question n'a plus
+    /// d'objet : la fenêtre se ferme. `forced` : une fermeture qui n'est jamais suspendue (celle que demande une
+    /// capture d'écran). `decision` : la fin d'une opération vient d'ouvrir un dialogue qui attend l'utilisateur
+    /// (proposition du push forcé après un amend…) ; une fermeture suspendue, ou demandée dans cette image, y renonce
+    /// pour le montrer.
+    pub fn intercept(&mut self, ctx: &egui::Context, ops: &Operations, forced: bool, decision: bool) {
+        let requested = ctx.input(|i| i.viewport().close_requested());
+        let suspended = matches!(self.state, State::Asking | State::Waiting);
+        if decision && !forced && (suspended || requested && self.state == State::No) {
+            if requested {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+            self.state = State::No;
+            Self::show_window(ctx);
+            return;
+        }
+        if suspended {
             if ops.visible().is_empty() {
                 self.quit_now(ctx, ops);
             } else {
@@ -91,7 +150,7 @@ impl Closing {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
-        if !ctx.input(|i| i.viewport().close_requested()) || self.state == State::Quitting || forced {
+        if !requested || self.state == State::Quitting || forced {
             return;
         }
         if ops.visible().is_empty() {
@@ -102,10 +161,7 @@ impl Closing {
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         self.state = State::Asking;
         // Fermée depuis la barre des tâches : la fenêtre réduite est rendue visible pour la question.
-        if ctx.input(|i| i.viewport().minimized == Some(true)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        }
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        Self::show_window(ctx);
     }
 
     /// Dialogue de fermeture pendant des opérations (après « Attendre » : attente de leur fin). Destructeur : Entrée
@@ -128,7 +184,7 @@ impl Closing {
             let title = format!("{} {}", crate::icons::WARNING, tr!("Des opérations sont en cours"));
             ui.label(egui::RichText::new(title).strong().size(16.0));
             ui.add_space(8.0);
-            for (title, _) in visible.iter().take(SHOWN) {
+            for title in visible.iter().take(SHOWN) {
                 ui.label(format!("• {title}"));
             }
             if visible.len() > SHOWN {

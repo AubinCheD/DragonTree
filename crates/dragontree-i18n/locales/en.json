@@ -413,6 +413,7 @@
   "core.sshCommand contient une commande qui n'a pas été écrite par DragonTree :": "core.sshCommand contains a command that was not written by DragonTree:",
   "core.sshCommand contient une commande qui n'a pas été écrite par DragonTree : {value}": "core.sshCommand contains a command that was not written by DragonTree: {value}",
   "Côte à côte": "Side by side",
+  "Création de la pull request": "Pull request creation",
   "Création de la pull request impossible": "Could not create the pull request",
   "Création de la pull request…": "Creating the pull request…",
   "Création du dépôt impossible": "Could not create the repository",

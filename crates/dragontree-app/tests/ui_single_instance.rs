@@ -13,6 +13,7 @@ use dragontree_app::DragonTreeApp;
 use dragontree_app::settings::Settings;
 use dragontree_app::single_instance::{self, Forwarded, Startup};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 
 fn open_tabs(base: &Path) -> Vec<std::path::PathBuf> {
     Settings::load_from(&base.join("profil").join("settings.json")).open_tabs
@@ -63,4 +64,44 @@ fn a_screenshot_run_never_writes_the_settings() {
     // L'ouverture de l'onglet et le changement de largeur des panneaux marquent les réglages à enregistrer.
     h.run_steps(10);
     assert!(!tmp.path().join("profil").join("settings.json").exists(), "réglages écrits par une capture d'écran");
+}
+
+/// RV4a (revue finale, A2) : un dépôt transmis pendant une fermeture suspendue (« Attendre ») l'annule : la fenêtre
+/// reste ouverte à la fin des opérations, et le dépôt transmis s'y ouvre au lieu d'être perdu.
+#[test]
+fn a_repository_sent_while_waiting_to_close_cancels_the_closing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = SilentServer::start();
+    let busy = repo_with_silent_remote(tmp.path(), &server);
+    let other = tmp.path().join("contoso-depot");
+    init_repo(&other);
+    commit_file(&other, "a.txt", "a\n", "Initial");
+    let start = dragontree_app::StartOptions { open: vec![busy.clone()], ..start(tmp.path()) };
+    let key = single_instance::profile_key(start.profile_dir.as_ref().unwrap());
+    let Startup::Primary(instance) = single_instance::start(&key, &Forwarded::default(), Duration::from_secs(10))
+    else {
+        panic!("première instance du profil attendue");
+    };
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        let mut app = DragonTreeApp::new(cc, start);
+        app.set_instance(instance);
+        app
+    });
+    click_label(&mut h, "Fetch");
+    wait_until(&mut h, "fetch bloqué sur le serveur muet", |_| server.connections() > 0);
+    assert!(request_close(&mut h), "fermeture suspendue");
+    click_label(&mut h, "Attendre");
+
+    let second = single_instance::start(&key, &Forwarded { open: vec![other.clone()] }, Duration::from_secs(10));
+    assert!(matches!(second, Startup::Forwarded));
+    wait_until(&mut h, "dépôt transmis ouvert", |_| open_tabs(tmp.path()).contains(&other));
+    wait_until(&mut h, "plus de question de fermeture", |h| {
+        h.query_by_label_contains("Des opérations sont en cours").is_none()
+    });
+    server.release();
+    wait_until(&mut h, "fetch terminé", |h| h.query_by_label_contains("Fetch…").is_none());
+    for _ in 0..10 {
+        h.step();
+        assert!(!close_requested(&h), "la fenêtre reste ouverte");
+    }
 }

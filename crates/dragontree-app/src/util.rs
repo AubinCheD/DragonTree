@@ -52,9 +52,44 @@ pub fn open_url(ctx: &egui::Context, url: &str) {
     ctx.open_url(egui::OpenUrl::new_tab(url));
 }
 
+/// Adresse lue dans une réponse d'une forge qu'on peut ouvrir : `https://` seulement (défense en profondeur : une
+/// réponse inattendue ne doit pas lancer un fichier local, un autre protocole ou une page en clair).
+fn is_forge_url(url: &str) -> bool {
+    url.get(..8).is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://")) && url.len() > 8
+}
+
+/// Ouvre une adresse lue dans une réponse d'une forge (pull request créée, liste des pull requests) si c'est une
+/// adresse `https://` ; une autre est ignorée (et signalée sur la sortie d'erreur).
+pub fn open_forge_url(ctx: &egui::Context, url: &str) {
+    if is_forge_url(url) {
+        open_url(ctx, url);
+    } else {
+        eprintln!("DragonTree : adresse d'une forge ignorée, elle n'est pas en https:// ({url})");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_https_addresses_from_a_forge_are_opened() {
+        for url in ["https://github.com/contoso/northwind/pull/1", "HTTPS://dev.azure.com/fabrikam/_git/api"] {
+            assert!(is_forge_url(url), "{url}");
+        }
+        for url in [
+            "http://github.com/contoso/northwind/pull/1",
+            "file:///C:/Windows/System32/calc.exe",
+            "C:\\Windows\\System32\\calc.exe",
+            "javascript:alert(1)",
+            " https://github.com",
+            "https://",
+            "",
+            "httpsé://x",
+        ] {
+            assert!(!is_forge_url(url), "{url}");
+        }
+    }
 
     #[test]
     fn explorer_select_uses_windows_separators() {

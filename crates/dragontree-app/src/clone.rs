@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use dragontree_forges::{ForgeError, RemoteRepo, secrets};
@@ -35,6 +36,38 @@ pub struct CloneDone {
 }
 
 static NEXT_CLONE_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Clonages en cours, nettoyage compris (RV4a) : un clonage annulé (« Quitter quand même ») supprime son dossier partiel
+/// sur son propre thread, qui mourrait avec le processus ; la fin de l'application l'attend un peu
+/// ([`CloneTasks::wait_idle`]). Les clones désignent le même compteur.
+#[derive(Clone, Default)]
+pub struct CloneTasks(Arc<(Mutex<usize>, Condvar)>);
+
+/// Clonage compté dans [`CloneTasks`] jusqu'à sa destruction (fin de la tâche, panique comprise).
+struct CloneTask(CloneTasks);
+
+impl Drop for CloneTask {
+    fn drop(&mut self) {
+        let (count, changed) = &*(self.0).0;
+        *count.lock().unwrap_or_else(PoisonError::into_inner) -= 1;
+        changed.notify_all();
+    }
+}
+
+impl CloneTasks {
+    fn start(&self) -> CloneTask {
+        *self.0.0.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        CloneTask(self.clone())
+    }
+
+    /// Attend la fin des clonages en cours, au plus `timeout` ; renvoie vrai s'il n'y en a plus.
+    pub fn wait_idle(&self, timeout: Duration) -> bool {
+        let (count, changed) = &*self.0;
+        let guard = count.lock().unwrap_or_else(PoisonError::into_inner);
+        let (guard, _) = changed.wait_timeout_while(guard, timeout, |n| *n > 0).unwrap_or_else(PoisonError::into_inner);
+        *guard == 0
+    }
+}
 
 /// Supprime le dossier d'un clonage échoué ou annulé, en réessayant : les processus git
 /// arrêtés peuvent encore tenir des fichiers ouverts quelques instants.
@@ -224,7 +257,9 @@ impl CloneWindow {
         self.error = None;
         self.progress = None;
         let sender = shared.jobs.sender();
+        let task = shared.clone_tasks.start();
         shared.jobs.spawn("clone", move || {
+            let _task = task;
             let mut env = Vec::new();
             if let Some(acc) = &acc
                 && let Ok(Some(token)) = secrets::load_token(&acc.id)

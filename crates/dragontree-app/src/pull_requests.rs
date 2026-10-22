@@ -386,7 +386,7 @@ impl PullRequestsWindow {
         });
         for action in actions {
             match action {
-                RowAction::OpenUrl(url) => crate::util::open_url(ui.ctx(), &url),
+                RowAction::OpenUrl(url) => crate::util::open_forge_url(ui.ctx(), &url),
                 RowAction::OpenRepo(path) => shared.actions.push(AppAction::OpenRepo(path)),
             }
         }

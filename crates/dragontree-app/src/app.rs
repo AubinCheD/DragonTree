@@ -137,6 +137,12 @@ pub struct Shared {
     pub lang_override: Option<Lang>,
     /// Files d'opérations des dépôts, partagées par leurs onglets (voir `op_queue`).
     pub queues: crate::op_queue::OpQueues,
+    /// La fin d'une opération vient d'ouvrir un dialogue qui attend l'utilisateur (proposition du push forcé après un
+    /// amend, fusion après un checkout…) : une fermeture suspendue y renonce pour le montrer (RV4a, voir `closing`).
+    /// Lu et remis à faux à chaque image par `App::logic`.
+    pub dialog_after_op: bool,
+    /// Clonages en cours, que la fin de l'application attend un peu (voir `clone::CloneTasks`).
+    pub clone_tasks: crate::clone::CloneTasks,
 }
 
 impl Shared {
@@ -172,6 +178,8 @@ impl Shared {
             theme_override: None,
             lang_override: None,
             queues: Default::default(),
+            dialog_after_op: false,
+            clone_tasks: Default::default(),
         };
         (shared, rx)
     }
@@ -500,14 +508,16 @@ impl DragonTreeApp {
     }
 
     /// Dépôts transmis par les instances lancées ensuite sur le même profil : ouverts dans des onglets (ou l'onglet
-    /// existant activé), et la fenêtre passe au premier plan, rendue si elle était réduite. Appelée par `logic`, qui
-    /// tourne aussi fenêtre réduite.
+    /// existant activé), et la fenêtre passe au premier plan, rendue si elle était réduite ; une fermeture suspendue
+    /// (question posée ou attente de la fin des opérations, RV4a) y renonce, sinon le dépôt transmis serait perdu.
+    /// Appelée par `logic`, qui tourne aussi fenêtre réduite.
     fn receive_forwarded(&mut self, ctx: &egui::Context) {
         let Some(instance) = &self.instance else { return };
         let messages = instance.take_messages();
         if messages.is_empty() {
             return;
         }
+        self.closing.cancel();
         let paths = messages.into_iter().flat_map(|m| m.open);
         self.shared.actions.extend(paths.map(AppAction::OpenRepo));
         if ctx.input(|i| i.viewport().minimized == Some(true)) {
@@ -1140,6 +1150,15 @@ impl DragonTreeApp {
             .collect()
     }
 
+    /// Travail visible suivi par les onglets de dépôt, que la fermeture attend (voir `closing::TabWork`).
+    fn tab_work(&self) -> Vec<crate::closing::TabWork> {
+        let repos = self.tabs.iter().filter_map(|t| match &t.kind {
+            TabKind::Repo(r) => Some(r.pending_work()),
+            TabKind::Welcome => None,
+        });
+        repos.flatten().collect()
+    }
+
     /// Position actuelle de l'onglet `id` ; `None` s'il a été fermé entre-temps.
     fn tab_position(&self, id: TabId) -> Option<usize> {
         self.tabs.iter().position(|t| t.id == id)
@@ -1237,16 +1256,19 @@ impl DragonTreeApp {
 }
 
 impl eframe::App for DragonTreeApp {
-    /// Appelée à chaque image, avant `ui`, et seule quand la fenêtre est réduite.
+    /// Appelée à chaque image, avant `ui`, et seule quand la fenêtre est réduite. Les événements des tâches sont traités
+    /// ici (une fois par image) : la suite d'une opération (push après un commit…) part dès sa fin, fenêtre réduite
+    /// comprise, et la fermeture la voit (RV4a, voir `closing`).
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let ops = Operations::new(&self.shared.queues, self.clone.as_ref());
-        self.closing.intercept(ctx, &ops, self.screenshot_requested);
+        self.process_events();
+        let decision = std::mem::take(&mut self.shared.dialog_after_op);
+        let ops = Operations::new(&self.shared.queues, self.tab_work(), self.clone.as_ref());
+        self.closing.intercept(ctx, &ops, self.screenshot_requested, decision);
         self.receive_forwarded(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.process_events();
         self.handle_shortcuts(&ctx);
         self.handle_dropped_files(&ctx);
         let p = Palette::current(&ctx);
@@ -1397,7 +1419,7 @@ impl eframe::App for DragonTreeApp {
                 self.quick_open = None;
             }
         }
-        let ops = Operations::new(&self.shared.queues, self.clone.as_ref());
+        let ops = Operations::new(&self.shared.queues, self.tab_work(), self.clone.as_ref());
         self.closing.dialog(&ctx, &ops, &p);
         if let Some(action) = self.shared.toasts.show(&ctx, &p) {
             match action {
@@ -1416,16 +1438,18 @@ impl eframe::App for DragonTreeApp {
 
     /// Fin de l'application, après `save` : les opérations qui tourneraient encore sont annulées (fermeture par une
     /// autre voie que la fenêtre), et les onglets ne font rien attendre en se fermant ; le processus se termine
-    /// aussitôt après, et Windows tue avec lui ce qui resterait de git (Job Object).
+    /// aussitôt après, et Windows tue avec lui ce qui resterait de git (Job Object). Seul un clonage annulé est
+    /// attendu, 2 s au plus : son thread supprime le dossier partiel, et mourrait avec le processus.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // Plus aucun message d'une autre instance n'est accepté (il serait perdu) : le profil est libéré, et une
         // instance lancée maintenant devient la première.
         self.instance = None;
-        Operations::new(&self.shared.queues, self.clone.as_ref()).stop_all();
+        Operations::new(&self.shared.queues, self.tab_work(), self.clone.as_ref()).stop_all();
         for tab in &mut self.tabs {
             if let TabKind::Repo(r) = &mut tab.kind {
                 r.on_app_exit();
             }
         }
+        self.shared.clone_tasks.wait_idle(Duration::from_secs(2));
     }
 }

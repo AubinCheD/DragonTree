@@ -173,9 +173,12 @@ plan) ; les autres options de ce second lancement sont ignorées. `--profile <do
 (le même dossier désigné par un nom court 8.3, une jonction ou un lecteur `subst` aussi), et une capture d'écran
 (`--screenshot`) est toujours une instance à part, qui n'écrit jamais les réglages.
 
-**Fermeture** : si des opérations (fetch, pull, push, commit, clonage…) attendent ou tournent, fermer la fenêtre
-demande d'attendre leur fin (la fenêtre se ferme ensuite d'elle-même) ou de quitter quand même (elles sont arrêtées) ;
-le fetch automatique est arrêté sans question. Aucune opération git en cours ne survit à DragonTree ; ce que git
+**Fermeture** : si des opérations (fetch, pull, push, commit, clonage, création d'une pull request…) attendent ou
+tournent, fermer la fenêtre demande d'attendre leur fin (la fenêtre se ferme ensuite d'elle-même) ou de quitter quand
+même (elles sont arrêtées, un clonage supprime son dossier partiel) ; le fetch automatique est arrêté sans question.
+Attendre attend aussi ce qu'une opération enchaîne (le push de « Pousser après le commit ») ; si sa fin pose une
+question (push forcé proposé après un amend), ou si un dépôt arrive d'un second lancement, la fermeture est
+abandonnée et la fenêtre reste ouverte. Aucune opération git en cours ne survit à DragonTree ; ce que git
 laisse tourner après une commande terminée (démon fsmonitor, éditeur que `git mergetool` a démarré) n'est pas
 touché. Limite : un outil de diff encore ouvert par « Ouvrir dans l'outil de diff externe » (qui
 n'est pas une opération du dépôt) est fermé avec DragonTree, sans question.

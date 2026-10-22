@@ -518,6 +518,8 @@ pub struct RepoTab {
     pr_after_push: Option<(u64, u64)>,
     /// Numéro du dernier dialogue de pull request ouvert (voir `PullRequestForm::generation`).
     pr_generation: u64,
+    /// Créations de pull request envoyées à la forge, sans réponse encore (la fermeture de l'application les attend).
+    pr_creating: usize,
 }
 
 impl RepoTab {
@@ -569,6 +571,7 @@ impl RepoTab {
             branch_drop: None,
             pr_after_push: None,
             pr_generation: 0,
+            pr_creating: 0,
         };
         // Le choix « branche courante seulement » est mémorisé par dépôt (le filtre sur des branches ne l'est pas).
         tab.history.current_branch_only = shared.settings.current_branch_only_of(&tab.path);
@@ -622,6 +625,25 @@ impl RepoTab {
 
     pub fn is_busy(&self) -> bool {
         self.running.iter().any(|o| !o.silent) || (self.repo.is_none() && self.open_error.is_none())
+    }
+
+    /// Travail visible que la fermeture de l'application attend (RV4a, voir `closing`) : les opérations non
+    /// silencieuses dont l'interface n'a pas encore traité la fin (`running`, qui les garde jusque-là, même sorties de
+    /// leur file), et les créations de pull request en cours à la forge. La suite d'un commit (`pending_commit`) ou
+    /// d'un push (`pr_after_push`) part quand l'interface traite la fin de l'opération, dans le même appel qui la
+    /// retire de `running` : elle y est donc toujours comptée, par l'opération qu'elle attend puis par la sienne.
+    pub fn pending_work(&self) -> Vec<crate::closing::TabWork> {
+        let ops = self.running.iter().filter(|o| !o.silent).map(|o| crate::closing::TabWork {
+            op: Some((self.id, o.id)),
+            title: o.title.clone(),
+            cancel: Some(o.cancel.clone()),
+        });
+        let forge = (self.pr_creating > 0).then(|| crate::closing::TabWork {
+            op: None,
+            title: tr!("Création de la pull request").into(),
+            cancel: None,
+        });
+        ops.chain(forge).collect()
     }
 
     pub fn set_view_by_name(&mut self, name: &str) {
@@ -1043,6 +1065,7 @@ impl RepoTab {
                 }
             }
             RepoEvent::OpDone { id, title, result, refresh } => {
+                let had_dialog = self.dialog.is_some();
                 let (silent, kind) = self
                     .running
                     .iter()
@@ -1128,6 +1151,11 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                     shared.settings.remember_message(&self.path, &commit.message.0, &commit.message.1);
                     shared.settings_dirty = true;
                     self.after_commit(shared, commit.after);
+                }
+                // Dialogue ouvert par la fin de l'opération (push forcé proposé, fusion après un checkout, worktree
+                // où la branche est sortie) : une fermeture suspendue y renonce pour le montrer (RV4a).
+                if !had_dialog && self.dialog.is_some() {
+                    shared.dialog_after_op = true;
                 }
             }
             RepoEvent::FsChanged { git_dir, worktree, worktrees } => {

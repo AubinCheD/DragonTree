@@ -301,7 +301,7 @@ impl RepoTab {
             PrStage::Done(pr) => {
                 ui.label(RichText::new(tr!("Pull request n° {number} créée.", number = pr.number)).strong());
                 if ui.link(&pr.url).clicked() {
-                    crate::util::open_url(ui.ctx(), &pr.url);
+                    crate::util::open_forge_url(ui.ctx(), &pr.url);
                 }
                 if let Some(w) = &pr.warning {
                     warning(ui, w, p);
@@ -333,7 +333,7 @@ impl RepoTab {
         match form.action() {
             PrAction::OpenCreated => {
                 if let PrStage::Done(pr) = &form.stage {
-                    crate::util::open_url(&shared.ctx, &pr.url);
+                    crate::util::open_forge_url(&shared.ctx, &pr.url);
                 }
             }
             PrAction::OpenWeb => {
@@ -390,6 +390,8 @@ impl RepoTab {
         form.stage = PrStage::Creating;
         self.dialog = Some(Dialog::PullRequest(Box::new(form)));
         let (id, generation) = (self.id, form_generation);
+        // Attendue par la fermeture de l'application jusqu'à la réponse (`on_pull_request`).
+        self.pr_creating += 1;
         shared.jobs.spawn("pull-request", move || {
             let result = match dragontree_forges::secrets::load_token(&account.id) {
                 Ok(Some(token)) => dragontree_forges::create_pull_request(&account, &token, &location, &request),
@@ -408,6 +410,7 @@ impl RepoTab {
         generation: u64,
         result: Result<CreatedPullRequest, ForgeError>,
     ) {
+        self.pr_creating = self.pr_creating.saturating_sub(1);
         if let Some(Dialog::PullRequest(form)) = &mut self.dialog
             && form.generation == generation
         {
@@ -549,6 +552,21 @@ mod tests {
         tab.on_pull_request(&mut shared, 2, Ok(created()));
         let Some(Dialog::PullRequest(f)) = &tab.dialog else { panic!("dialogue perdu") };
         assert_eq!(f.stage, PrStage::Done(created()));
+    }
+
+    /// RV4a : la fermeture de l'application attend une création envoyée à la forge (dialogue fermé ou non) jusqu'à sa
+    /// réponse.
+    #[test]
+    fn a_pull_request_sent_to_the_forge_is_awaited_until_it_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut tab, mut shared) = tab(dir.path());
+        assert!(tab.pending_work().is_empty());
+        // Comme `start_pull_request`, sans appel à la forge ni lecture du Gestionnaire d'identifiants.
+        tab.pr_creating = 1;
+        let work = tab.pending_work();
+        assert!(matches!(work.as_slice(), [w] if w.op.is_none() && w.cancel.is_none()), "création attendue");
+        tab.on_pull_request(&mut shared, 7, Ok(created()));
+        assert!(tab.pending_work().is_empty(), "réponse reçue (dialogue fermé : notification)");
     }
 
     #[test]
