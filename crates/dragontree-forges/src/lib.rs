@@ -27,9 +27,11 @@ pub use pullrequest::{CreatedPullRequest, PullRequestDraft, create_pull_request,
 /// Vérifie un jeton et renvoie l'identité associée. `orgs_hint` : organisations saisies
 /// par l'utilisateur (Azure : indispensables pour un jeton limité à une organisation ou
 /// pour Azure DevOps Server), ajoutées aux organisations découvertes, sans doublon.
+///
+/// Sert aussi à revérifier un compte enregistré : un ancien compte saisi en `http://…` reste appelé en HTTPS, comme
+/// avant (voir [`verify_new`] pour un compte à ajouter).
 pub fn verify(kind: ForgeKind, host: &str, token: &str, orgs_hint: &[String]) -> Result<VerifiedUser, ForgeError> {
     let token = clean_token(token)?;
-    reject_plain_http(host)?;
     let host = model::normalize_host(host, kind);
     let mut user = match kind {
         ForgeKind::GitHub => github::verify(&host, token)?,
@@ -38,6 +40,13 @@ pub fn verify(kind: ForgeKind, host: &str, token: &str, orgs_hint: &[String]) ->
     };
     user.orgs = merge_orgs(user.orgs, orgs_hint);
     Ok(user)
+}
+
+/// Vérifie le jeton d'un compte à ajouter : comme [`verify`], après avoir refusé une adresse saisie en HTTP simple
+/// (voir `reject_plain_http`).
+pub fn verify_new(kind: ForgeKind, host: &str, token: &str, orgs_hint: &[String]) -> Result<VerifiedUser, ForgeError> {
+    reject_plain_http(host)?;
+    verify(kind, host, token, orgs_hint)
 }
 
 /// Dépôts visibles par le compte, du plus récemment actif au plus ancien, puis par nom.
@@ -52,8 +61,9 @@ pub fn list_repos(account: &Account, token: &str) -> Result<Vec<RemoteRepo>, For
     Ok(model::finalize_repos(repos))
 }
 
-/// Adresse de serveur saisie en `http://` : refusée avec une explication, plutôt qu'appelée en HTTPS (le schéma est
-/// retiré par `normalize_host`) avec une erreur TLS obscure. Les forges ne sont appelées qu'en HTTPS : le jeton ne
+/// Adresse de serveur saisie en `http://` pour un compte à ajouter : refusée avec une explication, plutôt qu'appelée
+/// en HTTPS (le schéma est retiré par `normalize_host`) avec une erreur TLS obscure. Un compte déjà enregistré ainsi
+/// n'est pas refusé : il reste appelé en HTTPS, comme avant. Les forges ne sont appelées qu'en HTTPS : le jeton ne
 /// circule jamais en clair, et les adresses de l'API, des pages web et de l'en-tête d'authentification de git sont
 /// toutes construites en HTTPS (limite documentée dans le README).
 fn reject_plain_http(host: &str) -> Result<(), ForgeError> {
@@ -113,14 +123,32 @@ mod tests {
         assert!(matches!(list_repos(&account, ""), Err(ForgeError::InvalidInput(_))));
     }
 
-    /// RV4d : une instance en HTTP simple est refusée avec une explication, sans requête (HTTPS seulement).
+    /// RV4d : une instance en HTTP simple est refusée avec une explication à l'ajout du compte, sans requête (HTTPS
+    /// seulement).
     #[test]
     fn a_plain_http_server_is_rejected_without_network() {
         for kind in [ForgeKind::GitLab, ForgeKind::GitHub, ForgeKind::AzureDevOps] {
-            match verify(kind, " HTTP://gitlab.contoso.test:8080/ ", "jeton", &["DefaultCollection".into()]) {
+            match verify_new(kind, " HTTP://gitlab.contoso.test:8080/ ", "jeton", &["DefaultCollection".into()]) {
                 Err(ForgeError::InvalidInput(msg)) => assert!(msg.contains("HTTPS"), "{msg}"),
                 other => panic!("{kind:?} : {other:?}"),
             }
+        }
+    }
+
+    /// Un compte déjà enregistré en `http://…` (revérifié par « Vérifier ») n'est pas refusé : il reste appelé en
+    /// HTTPS, comme avant. Serveur local qui ferme aussitôt : la poignée de main TLS échoue (erreur réseau).
+    #[test]
+    fn a_saved_plain_http_account_is_still_checked_over_https() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                drop(stream);
+            }
+        });
+        match verify(ForgeKind::GitLab, &format!("http://127.0.0.1:{port}"), "jeton", &[]) {
+            Err(ForgeError::Network(_)) => {}
+            other => panic!("appel HTTPS attendu (erreur réseau) : {other:?}"),
         }
     }
 }

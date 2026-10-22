@@ -263,6 +263,7 @@ des fichiers `tests/live*.rs`.
   sur plusieurs lignes ou un fichier qui n'est pas en UTF-8 ; un remote qui passe par un alias d'hôte SSH
   (`~/.ssh/config`) n'est jamais relié à sa pull request.
 - Forges en HTTP simple (GitLab, GitHub Enterprise ou Azure DevOps Server sans HTTPS) : refusées à l'ajout du compte,
-  car DragonTree ne joint les forges qu'en HTTPS (le jeton ne circule jamais en clair). Un dépôt dont le remote est en
-  `http://` garde les identifiants habituels de git : l'en-tête du compte ne vise que HTTPS.
+  car DragonTree ne joint les forges qu'en HTTPS (le jeton ne circule jamais en clair) ; un compte déjà enregistré
+  ainsi reste appelé en HTTPS. Un dépôt dont le remote est en `http://` garde les identifiants habituels de git :
+  l'en-tête du compte ne vise que HTTPS.
 - Dépôts SHA-256 non pris en charge.

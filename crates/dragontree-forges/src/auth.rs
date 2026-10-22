@@ -91,12 +91,16 @@ fn remote_origin(account: &Account, url: &str) -> Option<String> {
     })
 }
 
-/// Indique si l'URL d'un remote (HTTPS, SSH ou forme scp `git@hôte:chemin`) relève du compte.
+/// Indique si l'URL d'un remote (HTTPS, SSH ou forme scp `git@hôte:chemin`) relève du compte. Pour une URL web, le
+/// port compte aussi : un autre port du même hôte est un autre serveur (et ne doit pas recevoir le jeton).
 pub fn account_matches_url(account: &Account, url: &str) -> bool {
     let Some(remote) = parse_remote_url(url) else {
         return false;
     };
     let host = normalize_host(&account.host, account.kind);
+    if !remote.same_web_port(&host) {
+        return false;
+    }
     let host_name = strip_port(&host);
     match account.kind {
         ForgeKind::GitHub | ForgeKind::GitLab => {
@@ -144,13 +148,35 @@ fn azure_services_match(orgs: &[&str], remote: &RemoteUrl) -> bool {
 pub(crate) struct RemoteUrl {
     pub(crate) host: String,
     pub(crate) path: String,
+    /// URL web (HTTP ou HTTPS) : HTTPS ou non, et le port écrit dans l'URL. `None` pour SSH et `git://`, dont le port
+    /// n'a rien à voir avec celui de la forge.
+    pub(crate) web: Option<(bool, Option<u16>)>,
+}
+
+impl RemoteUrl {
+    /// Même port web que l'hôte normalisé d'un compte (`hôte[:port]`, HTTPS) : sans port des deux côtés, les ports par
+    /// défaut correspondent (une URL `http://` sans port compris) ; sinon les ports, explicites ou par défaut (443,
+    /// 80 pour `http://`), doivent être égaux. Toujours vrai pour SSH.
+    fn same_web_port(&self, account_host: &str) -> bool {
+        let Some((https, explicit)) = self.web else { return true };
+        let account_port = account_host.rsplit_once(':').and_then(|(_, port)| port.parse::<u16>().ok());
+        match (explicit, account_port) {
+            (None, None) => true,
+            (remote, account) => remote.unwrap_or(if https { 443 } else { 80 }) == account.unwrap_or(443),
+        }
+    }
 }
 
 pub(crate) fn parse_remote_url(url: &str) -> Option<RemoteUrl> {
     let url = url.trim();
+    let mut web_scheme = None;
     let (authority, path) = if let Some((scheme, rest)) = url.split_once("://") {
-        if !matches!(scheme.to_ascii_lowercase().as_str(), "https" | "http" | "ssh" | "git+ssh" | "ssh+git" | "git") {
+        let scheme = scheme.to_ascii_lowercase();
+        if !matches!(scheme.as_str(), "https" | "http" | "ssh" | "git+ssh" | "ssh+git" | "git") {
             return None;
+        }
+        if scheme.starts_with("http") {
+            web_scheme = Some(scheme == "https");
         }
         rest.split_once('/').unwrap_or((rest, ""))
     } else {
@@ -162,16 +188,23 @@ pub(crate) fn parse_remote_url(url: &str) -> Option<RemoteUrl> {
         (authority, path)
     };
     let host_port = authority.rsplit('@').next()?;
-    let host = match host_port.strip_prefix('[') {
-        Some(bracketed) => bracketed.split(']').next()?,
-        None => strip_port(host_port),
+    let (host, port) = match host_port.strip_prefix('[') {
+        Some(bracketed) => {
+            let (host, rest) = bracketed.split_once(']')?;
+            (host, rest.strip_prefix(':'))
+        }
+        None => (strip_port(host_port), host_port.split_once(':').map(|(_, port)| port)),
     };
     // Une seule lettre : lettre de lecteur Windows (C:\…), pas un hôte.
     let is_drive = host.len() == 1 && !url.contains("://");
     let valid = !host.is_empty()
         && !is_drive
         && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'));
-    valid.then(|| RemoteUrl { host: host.to_ascii_lowercase(), path: path.trim_start_matches('/').to_string() })
+    valid.then(|| RemoteUrl {
+        host: host.to_ascii_lowercase(),
+        path: path.trim_start_matches('/').to_string(),
+        web: web_scheme.map(|https| (https, port.and_then(|p| p.parse().ok()))),
+    })
 }
 
 fn strip_port(host: &str) -> &str {
@@ -359,6 +392,35 @@ mod tests {
     fn auth_env_empty_token_injects_nothing() {
         let acc = account(ForgeKind::GitHub, "github.com", "octocat", &[]);
         assert!(git_auth_env(&acc, "  ", &[]).is_empty());
+    }
+
+    /// Un autre port web du même hôte est un autre serveur : pas d'association, pas d'en-tête. Le port SSH ne compte pas.
+    #[test]
+    fn the_web_port_of_a_remote_must_be_the_one_of_the_account() {
+        let acc = account(ForgeKind::GitLab, "gitlab.contoso.test", "jsmith", &[]);
+        for url in [
+            "https://gitlab.contoso.test/g/p.git",
+            "https://gitlab.contoso.test:443/g/p.git",
+            "http://gitlab.contoso.test/g/p.git",
+            "ssh://git@gitlab.contoso.test:2222/g/p.git",
+            "git@gitlab.contoso.test:g/p.git",
+        ] {
+            assert!(account_matches_url(&acc, url), "{url}");
+        }
+        for url in ["https://gitlab.contoso.test:8443/g/p.git", "http://gitlab.contoso.test:8080/g/p.git"] {
+            assert!(!account_matches_url(&acc, url), "{url}");
+        }
+        let acc = account(ForgeKind::GitLab, "https://gitlab.contoso.test:8443/", "jsmith", &[]);
+        assert!(account_matches_url(&acc, "https://gitlab.contoso.test:8443/g/p.git"));
+        assert!(!account_matches_url(&acc, "https://gitlab.contoso.test/g/p.git"));
+        assert!(account_matches_url(&acc, "git@gitlab.contoso.test:g/p.git"));
+
+        // L'origine tirée d'un remote garde son port : un remote sur un autre port n'en donne aucune.
+        let acc = account(ForgeKind::AzureDevOps, "tfs.example.com", "DOMAINE\\camille", &["DefaultCollection"]);
+        let vars = git_auth_env(&acc, "azpat", &["https://tfs.example.com:8443/defaultcollection/Site/_git/Site"]);
+        assert_eq!(vars[0], ("GIT_CONFIG_COUNT".into(), "1".into()), "{vars:?}");
+        let vars = git_auth_env(&acc, "azpat", &["https://tfs.example.com/defaultcollection/Site/_git/Site"]);
+        assert_eq!(vars[0], ("GIT_CONFIG_COUNT".into(), "2".into()), "même port : origine du remote ajoutée");
     }
 
     #[test]

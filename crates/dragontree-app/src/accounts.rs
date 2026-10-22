@@ -185,7 +185,7 @@ impl AccountsWindow {
             Submitted { kind: form.kind, host: form.host.trim().to_string(), token: form.token.trim().to_string() };
         let orgs = form.org_list();
         shared.jobs.spawn("verify", move || {
-            let result = dragontree_forges::verify(sent.kind, &sent.host, &sent.token, &orgs);
+            let result = dragontree_forges::verify_new(sent.kind, &sent.host, &sent.token, &orgs);
             Some(AppEvent::Forge(ForgeEvent::Verified { req, sent, result }))
         });
     }
