@@ -228,7 +228,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | L1 | Dépôts SHA-256 non pris en charge (limite documentée : erreur explicite à l'ouverture et au clonage) | limite connue (README) | basse |
 | L2 | Éditeur de conflits limité aux fichiers UTF-8 (corrigé : fichiers Windows-1252 résolus sur leurs octets) | limite constatée dans le code | moyenne |
 | L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session (corrigé : fichier relu à chaque enregistrement puis fusionné, indicateur « Réglages non enregistrés ») | arbitrage de la revue (M9) | basse |
-| L4 | Échec d'authentification du fetch automatique signalé une seule fois | arbitrage de la revue (M2) | basse |
+| L4 | Échec d'authentification du fetch automatique signalé une seule fois (corrigé : indicateur dans l'onglet jusqu'au prochain fetch réussi) | arbitrage de la revue (M2) | basse |
 | L5 | Amend d'un commit déjà poussé avec « Pousser après » : pas de push | arbitrage de la revue (I7b) | basse |
 | L6 | Option « Espaces » active : diff des changements en lecture seule | arbitrage de la revue (M1) | basse |
 
@@ -795,11 +795,27 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** fichier verrouillé ou invalide au démarrage : une modification affiche l'avertissement et le fichier reste intact ; redevenu lisible, l'enregistrement suivant l'écrit en gardant ses autres valeurs.
 - **Priorité :** basse.
 
-#### L4 à L6 — Arbitrages de la revue au coût assumé
+#### L4 — Échec d'authentification du fetch automatique visible en permanence (corrigé)
+
+- **Contexte :** arbitrage de la revue (M2) au coût assumé : en arrière-plan, seule une authentification refusée est signalée, et une seule fois par série d'échecs ; la notification fermée, plus rien ne le montrait. Piste : un indicateur persistant dans l'onglet.
+- **État :** corrigé.
+  - Avant : `RepoTab` (`crates/dragontree-app/src/repo/mod.rs`) retenait seulement qu'un refus avait été notifié (`auth_warned`), remis à zéro au fetch automatique réussi suivant.
+  - Réalisé : `RepoTab::fetch_auth_error` garde l'erreur du dernier fetch refusé (`is_auth_error`), automatique ou lancé à la main, et l'efface au prochain fetch réussi, automatique ou non (opérations de type `OpKind::Fetch` ; un pull réussi ou un échec réseau ne la changent pas).
+    - Barre d'outils (`repo/toolbar.rs`) : avertissement « Authentification refusée » à côté du bouton Fetch ; infobulle avec l'erreur de git et la marche à suivre (compte associé, identifiants git) ; un clic relance le fetch.
+    - Barre d'onglets (`tabbar.rs`, `TabInfo::auth_failed`) : l'icône de l'onglet devient un avertissement, son infobulle ajoute l'erreur ; visible aussi pour un onglet en arrière-plan, dont le fetch automatique tourne.
+    - Notification : inchangée pour le fetch automatique, au premier refus d'une série seulement (« Fetch automatique : authentification refusée ») ; un fetch manuel refusé garde sa notification d'erreur habituelle.
+  - Textes traduits (`en.json`).
+- **Tests :**
+  - `a_fetch_authentication_failure_stays_shown_until_the_next_successful_fetch` (`crates/dragontree-app/src/repo/actions.rs`) : fins d'opérations simulées ; deux fetchs automatiques refusés : indicateur, une notification ; échec réseau et pull réussi : indicateur gardé ; fetch manuel réussi : effacé ; fetch manuel refusé puis automatique refusé : indicateur, pas de seconde notification ; fetch automatique réussi : effacé ; nouvelle série : nouvelle notification.
+  - Interface (`crates/dragontree-app/tests/ui_fetch_auth.rs`, `a_refused_automatic_fetch_shows_a_lasting_indicator_until_a_fetch_succeeds`) : serveur HTTP local qui répond 401 à tout ; dépôt sans assistant d'identifiants (`credential.helper` vide : le Gestionnaire d'identifiants de la configuration système n'est pas lancé, vérifié avec `GIT_TRACE`), sans invite (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`). Fetchs automatiques refusés plusieurs fois : indicateur et une seule notification ; infobulles de l'indicateur (avec l'erreur de git) et de l'onglet ; remote remplacé par un dépôt nu local : le fetch suivant réussit, indicateur et ligne de l'infobulle effacés. Vu rouge sans la correction : « délai dépassé en attendant : indicateur d'authentification refusée ».
+- **À faire :** un indicateur persistant dans l'onglet (fait).
+- **Critère de fin (atteint) :** un fetch automatique refusé (serveur local 401) affiche l'indicateur ; un fetch réussi l'efface.
+- **Priorité :** basse.
+
+#### L5 et L6 — Arbitrages de la revue au coût assumé
 
 Chacun de ces arbitrages a un coût annoncé. Ce sont des pistes d'amélioration, de priorité basse.
 
-- **L4. Échec d'authentification du fetch automatique :** il n'est signalé qu'une fois par série d'échecs (`crates/dragontree-app/src/repo/mod.rs:638-655`). Piste : un indicateur persistant dans l'onglet.
 - **L5. Amend d'un commit déjà poussé avec « Pousser après » :** rien n'est poussé, une notification s'affiche (`crates/dragontree-app/src/repo/actions.rs:224-243`). Piste : proposer explicitement un push forcé dans un dialogue de confirmation.
 - **L6. Option « Espaces » active :** le diff des changements passe en lecture seule (`crates/dragontree-app/src/repo/changes.rs:510-524`). Piste : recalculer le diff sans `-w` pour construire le patch, comme la revue le suggérait.
 

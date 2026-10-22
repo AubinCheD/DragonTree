@@ -2,7 +2,7 @@
 
 use dragontree_git::HeadState;
 use dragontree_i18n::tr;
-use egui::{RichText, Ui};
+use egui::{Align2, CornerRadius, FontId, RichText, Sense, Ui};
 
 use super::actions::{OpKind, StashOp};
 use super::{Dialog, RepoTab};
@@ -57,6 +57,7 @@ impl RepoTab {
             {
                 self.run_command(Command::Fetch, shared);
             }
+            self.fetch_auth_badge(ui, shared, p, fetch);
             // Ctrl+clic sur Pull ou Push : l'opération rapide, sans dialogue (Fetch n'en a pas).
             let ctrl = |ui: &Ui| ui.input(|i| i.modifiers.command);
             if toolbar_button(ui, icons::ARROW_LINE_DOWN, "Pull", pull, self.op_running(OpKind::Pull))
@@ -140,6 +141,26 @@ impl RepoTab {
                 self.account_chip(ui, shared, p);
             });
         });
+    }
+
+    /// Indicateur « Authentification refusée » à côté du bouton Fetch (L4) : le dernier fetch, automatique ou non, a été
+    /// refusé ; il reste jusqu'au prochain fetch réussi. L'infobulle donne l'erreur ; un clic relance le fetch.
+    fn fetch_auth_badge(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette, can_fetch: bool) {
+        let Some(error) = self.fetch_auth_error.clone() else { return };
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 46.0), Sense::click());
+        crate::widgets::a11y(&resp, tr!("Authentification refusée"), true);
+        if resp.hovered() {
+            ui.painter().rect_filled(rect, CornerRadius::same(6), p.hover);
+        }
+        let center = rect.center_top() + egui::vec2(0.0, 15.0);
+        ui.painter().text(center, Align2::CENTER_CENTER, icons::WARNING, FontId::proportional(18.0), p.removed_fg);
+        let tip = tr!(
+            "Authentification refusée au dernier fetch :\n{error}\n\nVérifiez le compte associé à ce dépôt (Comptes) ou vos identifiants git. L'indicateur disparaît au prochain fetch réussi ; clic : fetch maintenant.",
+            error
+        );
+        if resp.on_hover_text(tip).clicked() && can_fetch {
+            self.run_command(Command::Fetch, shared);
+        }
     }
 
     /// Compte associé au dépôt, s'il y en a un : son jeton authentifie fetch, pull et push ; un clic ouvre le choix

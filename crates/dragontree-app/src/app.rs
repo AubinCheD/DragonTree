@@ -1105,20 +1105,28 @@ impl DragonTreeApp {
                     title: tr!("Nouvel onglet").into(),
                     tooltip: tr!("Ouvrir, cloner ou créer un dépôt").into(),
                     busy: false,
+                    auth_failed: false,
                     is_repo: false,
                     color: None,
                 },
                 TabKind::Repo(r) => TabInfo {
                     id: t.id,
                     title: r.title(),
-                    // Chemin du dépôt, puis le compte qui authentifie fetch, pull et push s'il y en a un.
-                    tooltip: match r.account(&self.shared.settings) {
-                        Some(account) => {
-                            format!("{}\n{}", r.path.display(), tr!("Compte : {title}", title = account.title()))
+                    // Chemin du dépôt, puis le compte qui authentifie fetch, pull et push s'il y en a un, puis
+                    // l'authentification refusée au dernier fetch (L4).
+                    tooltip: {
+                        let mut tip = r.path.display().to_string();
+                        if let Some(account) = r.account(&self.shared.settings) {
+                            tip = format!("{tip}\n{}", tr!("Compte : {title}", title = account.title()));
                         }
-                        None => r.path.display().to_string(),
+                        if let Some(error) = &r.fetch_auth_error {
+                            let line = tr!("Authentification refusée au dernier fetch : {error}", error);
+                            tip = format!("{tip}\n{} {line}", crate::icons::WARNING);
+                        }
+                        tip
                     },
                     busy: r.is_busy(),
+                    auth_failed: r.fetch_auth_error.is_some(),
                     is_repo: true,
                     color: self.shared.settings.tab_color_of(&r.path),
                 },

@@ -915,4 +915,58 @@ mod tests {
         assert!(queues.writes.cancel_and_wait(Duration::from_secs(10)));
         assert!(queues.background.cancel_and_wait(Duration::from_secs(10)));
     }
+
+    /// L4 : un fetch refusé (automatique ou non) laisse l'indicateur de l'onglet jusqu'au prochain fetch réussi ; le
+    /// fetch automatique ne notifie que le premier refus d'une série.
+    #[test]
+    fn a_fetch_authentication_failure_stays_shown_until_the_next_successful_fetch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut shared, _events, mut tabs) = tabs_on_one_repo(dir.path(), &[1]);
+        let tab = &mut tabs[0];
+        let failed = |stderr: &str| GitError::Failed { cmd: "git fetch".into(), code: 128, stderr: stderr.into() };
+        let refused = || Err(failed("fatal: Authentication failed for 'https://forge.test/contoso/depot.git/'"));
+        // Fin d'une opération du type donné, sans git : comme l'application la reçoit de la file.
+        let finish = |tab: &mut RepoTab, shared: &mut Shared, kind, silent, result| {
+            tab.next_op_id += 1;
+            let id = tab.next_op_id;
+            let (title, cancel) = ("Fetch".to_string(), CancelToken::new());
+            tab.running.push(RunningOp {
+                id,
+                title: title.clone(),
+                kind,
+                progress: None,
+                cancel,
+                silent,
+                waiting: false,
+            });
+            tab.handle_event(RepoEvent::OpDone { id, title, result, refresh: Refresh::NONE }, shared);
+        };
+        let toasts = |shared: &Shared| shared.toasts.titles().len();
+
+        // Fetchs automatiques refusés : indicateur avec l'erreur, une seule notification pour la série.
+        finish(tab, &mut shared, OpKind::Fetch, true, refused());
+        finish(tab, &mut shared, OpKind::Fetch, true, refused());
+        assert!(tab.fetch_auth_error.as_deref().is_some_and(|e| e.contains("Authentication failed")));
+        assert_eq!(toasts(&shared), 1, "une notification par série");
+        // Un autre échec (réseau) ou un pull réussi ne l'effacent pas.
+        finish(tab, &mut shared, OpKind::Fetch, true, Err(failed("fatal: Could not resolve host: forge.test")));
+        finish(tab, &mut shared, OpKind::Pull, false, Ok(None));
+        assert!(tab.fetch_auth_error.is_some(), "seul un fetch réussi efface l'indicateur");
+        // Fetch manuel réussi : effacé.
+        finish(tab, &mut shared, OpKind::Fetch, false, Ok(None));
+        assert!(tab.fetch_auth_error.is_none());
+
+        // Fetch manuel refusé : sa notification d'erreur habituelle, et l'indicateur ; le fetch automatique refusé
+        // ensuite ne notifie pas (même série), celui qui réussit efface l'indicateur.
+        finish(tab, &mut shared, OpKind::Fetch, false, refused());
+        assert!(tab.fetch_auth_error.is_some());
+        assert_eq!(toasts(&shared), 2);
+        finish(tab, &mut shared, OpKind::Fetch, true, refused());
+        assert_eq!(toasts(&shared), 2, "même série");
+        finish(tab, &mut shared, OpKind::Fetch, true, Ok(None));
+        assert!(tab.fetch_auth_error.is_none(), "fetch automatique réussi");
+        // Nouvelle série : nouvelle notification.
+        finish(tab, &mut shared, OpKind::Fetch, true, refused());
+        assert_eq!(toasts(&shared), 3);
+    }
 }

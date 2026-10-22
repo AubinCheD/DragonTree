@@ -13,6 +13,9 @@ pub struct TabInfo {
     pub title: String,
     pub tooltip: String,
     pub busy: bool,
+    /// Authentification refusée au dernier fetch (L4) : l'icône de l'onglet devient un avertissement, l'infobulle
+    /// (`tooltip`) donne l'erreur.
+    pub auth_failed: bool,
     pub is_repo: bool,
     /// Couleur du liseré choisie pour ce dépôt.
     pub color: Option<TabColor>,
@@ -127,19 +130,17 @@ fn tab_widget(
         );
         ui.painter().rect_filled(stripe, CornerRadius::same(1), color.color(p));
     }
-    let icon = if tab.is_repo { icons::GIT_BRANCH } else { icons::HOUSE };
+    let (icon, color) = match (tab.is_repo, tab.auth_failed) {
+        (_, true) => (icons::WARNING, p.removed_fg),
+        (true, false) => (icons::GIT_BRANCH, if active { p.accent } else { p.weak }),
+        (false, false) => (icons::HOUSE, if active { p.accent } else { p.weak }),
+    };
     let icon_pos = egui::pos2(rect.left() + 14.0, rect.center().y + 2.0);
     if tab.busy {
         let r = Rect::from_center_size(icon_pos, egui::vec2(13.0, 13.0));
         egui::Spinner::new().size(13.0).color(p.accent).paint_at(ui, r);
     } else {
-        ui.painter().text(
-            icon_pos,
-            Align2::CENTER_CENTER,
-            icon,
-            FontId::proportional(14.0),
-            if active { p.accent } else { p.weak },
-        );
+        ui.painter().text(icon_pos, Align2::CENTER_CENTER, icon, FontId::proportional(14.0), color);
     }
 
     let text_rect =

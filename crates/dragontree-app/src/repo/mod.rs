@@ -490,8 +490,10 @@ pub struct RepoTab {
     last_fetch: Instant,
     next_op_id: u64,
     quick_dirty: bool,
-    /// Échec d'authentification du fetch automatique déjà signalé (remis à zéro au succès).
-    auth_warned: bool,
+    /// Erreur d'authentification du dernier fetch, automatique ou non (L4) : indicateur permanent dans l'onglet (barre
+    /// d'outils, barre d'onglets), effacé au prochain fetch réussi. Le fetch automatique ne notifie que le premier échec
+    /// d'une série.
+    pub(crate) fetch_auth_error: Option<String>,
     /// Dossier à ouvrir dans un onglet quand l'opération (numéro) réussit : un worktree qui vient d'être créé.
     open_after_op: Option<(u64, PathBuf)>,
     /// Révision à fusionner (dialogue de fusion) quand le checkout (numéro) réussit : dépôt d'une branche sur une autre.
@@ -546,7 +548,7 @@ impl RepoTab {
             last_fetch: Instant::now(),
             next_op_id: 0,
             quick_dirty: false,
-            auth_warned: false,
+            fetch_auth_error: None,
             open_after_op: None,
             merge_after_op: None,
             branch_drop: None,
@@ -1013,14 +1015,29 @@ impl RepoTab {
                 }
             }
             RepoEvent::OpDone { id, title, result, refresh } => {
-                let silent = self.running.iter().find(|o| o.id == id).is_some_and(|o| o.silent);
+                let (silent, kind) = self
+                    .running
+                    .iter()
+                    .find(|o| o.id == id)
+                    .map_or((false, actions::OpKind::Other), |o| (o.silent, o.kind));
                 self.running.retain(|o| o.id != id);
                 let succeeded = result.is_ok();
+                // Authentification du fetch (L4), automatique ou non : l'indicateur de l'onglet reste jusqu'au prochain
+                // fetch réussi.
+                let mut first_auth_failure = false;
+                if kind == actions::OpKind::Fetch {
+                    match &result {
+                        Ok(_) => self.fetch_auth_error = None,
+                        Err(e) if is_auth_error(e) => {
+                            first_auth_failure = self.fetch_auth_error.is_none();
+                            self.fetch_auth_error = Some(e.to_string());
+                        }
+                        Err(_) => {}
+                    }
+                }
                 match result {
                     Ok(msg) => {
-                        if silent {
-                            self.auth_warned = false;
-                        } else if let Some(msg) = msg {
+                        if !silent && let Some(msg) = msg {
                             shared.toast(Toast::success(msg));
                         }
                     }
@@ -1028,11 +1045,11 @@ impl RepoTab {
                     Err(GitError::Cancelled) if silent => {}
                     Err(GitError::Cancelled) => shared.toast(Toast::info(tr!("{title} : annulé", title))),
                     Err(e) if silent => {
-                        // En arrière-plan, seules les erreurs d'authentification sont signalées
-                        // (une fois) : un jeton expiré ne doit pas passer inaperçu.
+                        // En arrière-plan, seules les erreurs d'authentification sont signalées, par l'indicateur de
+                        // l'onglet et une notification au premier échec de la série : un jeton expiré ne doit pas
+                        // passer inaperçu.
                         if is_auth_error(&e) {
-                            if !self.auth_warned {
-                                self.auth_warned = true;
+                            if first_auth_failure {
                                 shared.toast(Toast::error(
                                     tr!("{title} automatique : authentification refusée", title),
                                     tr!(
