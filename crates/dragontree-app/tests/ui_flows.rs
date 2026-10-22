@@ -274,6 +274,64 @@ fn resolve_conflict_in_editor_then_commit_merge() {
     assert_eq!(git(&repo, &["log", "-1", "--format=%s"]).trim(), "Merge branch 'feature/reglages'");
 }
 
+/// Fichier Windows-1252 (é = E9, € = 80, œ = 9C, ’ = 92) avec ces deux lignes variables, séparées par assez de lignes
+/// communes pour que git en fasse deux conflits.
+fn cp1252_form(title: &[u8], price: &[u8]) -> Vec<u8> {
+    [
+        b"// Fen\xeatre principale\r\n".as_slice(),
+        title,
+        b"// L\x92\x9cuvre compl\xe8te\n// d\xe9but\n// suite\n// encore\n// fin du milieu\n",
+        price,
+        b"// Fin du fichier \xe0 garder\n",
+    ]
+    .concat()
+}
+
+/// Dépôt en fusion arrêtée sur deux conflits dans `form.cs`, fichier Windows-1252 (non UTF-8).
+fn cp1252_conflicted_repo(base: &Path) -> PathBuf {
+    let dir = base.join("ansi");
+    init_repo(&dir);
+    let commit = |content: Vec<u8>, msg: &str| {
+        std::fs::write(dir.join("form.cs"), content).unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", msg]);
+    };
+    commit(cp1252_form(b"titre = \"R\xe9glages\"\n", b"prix = \"10 \x80\"\n"), "base");
+    git(&dir, &["checkout", "-q", "-b", "autre"]);
+    commit(cp1252_form(b"titre = \"Pr\xe9f\xe9rences\"\n", b"prix = \"12 \x80\"\n"), "leur version");
+    git(&dir, &["checkout", "-q", "main"]);
+    commit(cp1252_form(b"titre = \"Param\xe8tres\"\n", b"prix = \"11 \x80\"\n"), "notre version");
+    assert!(try_git(&dir, &["merge", "autre"]).is_none(), "le merge doit être en conflit");
+    dir
+}
+
+/// L2 : l'éditeur de conflits ouvre un fichier Windows-1252 (texte décodé), le résout région par région (notre
+/// version pour la première, la leur pour la seconde) et écrit les octets d'origine, hors conflits compris.
+#[test]
+fn a_cp1252_conflict_is_resolved_region_by_region_in_the_editor() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = cp1252_conflicted_repo(tmp.path());
+    let mut h = harness(StartOptions { open: vec![repo.clone()], view: Some("changes".into()), ..start(tmp.path()) });
+
+    click_label_containing(&mut h, "Ouvrir l'éditeur de conflits");
+    // Les lignes des côtés sont décodées (dans leur région, et dans l'aperçu tant qu'elle n'est pas résolue).
+    wait_until(&mut h, "deux conflits décodés", |h| {
+        h.query_all_by_label("Notre version").count() == 2 && h.query_all_by_label("prix = \"11 €\"").next().is_some()
+    });
+    assert!(h.query_all_by_label("titre = \"Préférences\"").next().is_some(), "leur côté décodé");
+    assert!(h.query_by_label_contains("Fichier en Windows-1252").is_some(), "encodage signalé");
+    h.query_all_by_label("Notre version").next().unwrap().click();
+    h.run_steps(3);
+    h.query_all_by_label("Leur version").nth(1).unwrap().click();
+    h.run_steps(3);
+    click_label_containing(&mut h, "Enregistrer et marquer résolu");
+    wait_git(&mut h, "conflit résolu et indexé", || {
+        try_git(&repo, &["diff", "--name-only", "--diff-filter=U"]).is_some_and(|s| s.trim().is_empty())
+    });
+    let expected = cp1252_form(b"titre = \"Param\xe8tres\"\n", b"prix = \"12 \x80\"\n");
+    assert_eq!(std::fs::read(repo.join("form.cs")).unwrap(), expected, "octets d'origine, sans réencodage");
+}
+
 #[test]
 fn interactive_rebase_reorders_commits() {
     let tmp = tempfile::tempdir().unwrap();

@@ -226,7 +226,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | P3 | Stabilité de `ui_network` vérifiée sur 3 passages seulement (fait : 20 passages sur 20) | correction des tests instables | basse |
 | P4 | `--help` en build release depuis une console Windows (corrigé ; l'invite revient avant le texte, limite documentée) | relevé en vérifiant le code | basse |
 | L1 | Dépôts SHA-256 non pris en charge (limite documentée : erreur explicite à l'ouverture et au clonage) | limite connue (README) | basse |
-| L2 | Éditeur de conflits limité aux fichiers UTF-8 | limite constatée dans le code | moyenne |
+| L2 | Éditeur de conflits limité aux fichiers UTF-8 (corrigé : fichiers Windows-1252 résolus sur leurs octets) | limite constatée dans le code | moyenne |
 | L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session | arbitrage de la revue (M9) | basse |
 | L4 | Échec d'authentification du fetch automatique signalé une seule fois | arbitrage de la revue (M2) | basse |
 | L5 | Amend d'un commit déjà poussé avec « Pousser après » : pas de push | arbitrage de la revue (I7b) | basse |
@@ -742,12 +742,21 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** test d'intégration avec `git init --object-format=sha256` : message clair, sans panique.
 - **Priorité :** basse.
 
-#### L2 — Éditeur de conflits limité aux fichiers UTF-8
+#### L2 — Éditeur de conflits limité aux fichiers UTF-8 (corrigé)
 
 - **Contexte :** l'indexation partielle a été corrigée pour les fichiers Windows-1252 (point critique C1), fréquents dans le vieux code .NET français. L'éditeur de conflits, lui, refuse ces fichiers.
-- **État :** `crates/dragontree-app/src/repo/conflicts.rs:24-36` renvoie vers « notre / leur version » ou vers l'outil externe.
-- **À faire :** travailler sur les octets, décoder en Windows-1252 pour l'affichage (`decode_cp1252`, `crates/dragontree-git/src/diff.rs:30`) et réécrire les octets d'origine.
-- **Critère de fin :** test d'intégration : un conflit dans un fichier Latin-1 est résolu région par région, et les octets hors conflit sont préservés.
+- **État :** corrigé.
+  - Avant : `open_conflict_editor` (`crates/dragontree-app/src/repo/conflicts.rs`) lisait le fichier en `String` ; un fichier qui n'était pas de l'UTF-8 donnait « Fichier binaire ou non UTF-8 : utilisez « notre / leur version » ou un outil externe. » et aucune région.
+  - Réalisé, moteur (`crates/dragontree-git/src/conflict.rs`) : marqueurs reconnus sur les octets (ils sont en ASCII) ; `resolve_bytes` et `resolve_partial_bytes` recopient octet pour octet chaque morceau gardé (lignes hors conflit, côtés choisis, région sans choix), fins de ligne comprises ; `decode_conflict_text` décode pour l'affichage ligne à ligne, en UTF-8 quand la ligne en est, sinon en Windows-1252 (`decode_cp1252`, un octet par caractère) : lignes et marqueurs du texte décodé sont ceux des octets, donc `parse_conflicts` y trouve les mêmes régions. `resolve` et `resolve_partial` (texte) passent par la version sur les octets.
+  - Réalisé, interface : l'éditeur garde les octets du fichier, montre les régions et l'aperçu décodés, et enregistre `resolve_bytes` : un fichier Windows-1252 le reste, sans réencodage ni perte. Une ligne le signale : « Fichier en Windows-1252 : affiché décodé, enregistré avec ses octets d'origine. » Un fichier qui contient un octet nul (binaire, UTF-16) reste refusé : « Fichier binaire : utilisez « notre / leur version » ou un outil externe. »
+  - Texte saisi à la main : l'éditeur ne permet que de choisir des côtés, aucune saisie libre ; rien n'est donc réencodé. Décision pour une saisie future, notée dans le module : encoder en Windows-1252 et refuser explicitement un caractère qui n'y existe pas, jamais de perte silencieuse.
+  - Encodages : tout fichier sans octet nul se résout sans perte, puisque seuls des octets d'origine sont écrits ; seul l'affichage suppose Windows-1252 (Latin-1 s'affiche pareil, hors 0x80 à 0x9F).
+- **Tests :**
+  - `crates/dragontree-git/tests/conflict_encoding.rs` : vraie fusion en conflit sur `form.cs` en Windows-1252 (é, ê, è, à, €, œ, ’, une ligne en CRLF), deux conflits. `a_cp1252_conflict_is_resolved_region_by_region_keeping_the_original_bytes` : texte et régions décodés ; première région seule choisie, la seconde garde ses marqueurs ; notre côté puis le leur, et les deux côtés dans les deux ordres, donnent exactement les octets attendus ; le fichier écrit se valide et `git show HEAD:form.cs` rend ces octets. `choosing_one_side_everywhere_gives_back_that_branch_file_byte_for_byte`.
+  - `cp1252_bytes_are_decoded_for_display_and_copied_back_unchanged` (`conflict.rs` : CRLF, dernière ligne sans `\n`, libellé accentué, ligne UTF-8 dans un fichier qui ne l'est pas) ; `a_cp1252_file_is_shown_decoded` (`conflicts.rs`).
+  - Interface : `a_cp1252_conflict_is_resolved_region_by_region_in_the_editor` (`crates/dragontree-app/tests/ui_flows.rs`) : éditeur ouvert sur le fichier, côtés décodés et encodage signalé, « Notre version » pour le premier conflit, « Leur version » pour le second, « Enregistrer et marquer résolu » : fichier indexé, octets exactement ceux attendus. Vu rouge avant : délai dépassé, l'éditeur affichait le refus. `ui_flows` passé 5 fois de suite.
+- **À faire :** travailler sur les octets, décoder en Windows-1252 pour l'affichage (`decode_cp1252`, `crates/dragontree-git/src/diff.rs`) et réécrire les octets d'origine (fait).
+- **Critère de fin (atteint) :** test d'intégration : un conflit dans un fichier Latin-1 est résolu région par région, et les octets hors conflit sont préservés.
 - **Priorité :** moyenne.
 
 #### L3 à L6 — Arbitrages de la revue au coût assumé

@@ -1,6 +1,14 @@
 //! Éditeur de conflits : choix de « notre » version, de « leur » version ou des deux, par région.
+//!
+//! Sur les octets du fichier (L2) : le texte affiché est décodé ligne à ligne (UTF-8, sinon Windows-1252, l'« ANSI »
+//! du vieux code .NET français), et l'enregistrement écrit les octets d'origine de chaque morceau gardé (hors conflit,
+//! côtés choisis) : rien n'est réencodé, rien n'est perdu. L'éditeur ne permet pas de saisir du texte, seulement de
+//! choisir des côtés : aucun texte saisi n'aurait à être réencodé (s'il le permettait un jour, encoder en
+//! Windows-1252 et refuser explicitement un caractère qui n'y existe pas, jamais de perte silencieuse).
 
-use dragontree_git::conflict::{ConflictRegion, Resolution, parse_conflicts, resolve, resolve_partial};
+use dragontree_git::conflict::{
+    ConflictRegion, Resolution, decode_conflict_text, parse_conflicts, resolve_bytes, resolve_partial,
+};
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText};
 
@@ -11,7 +19,12 @@ use crate::theme::Palette;
 
 pub struct ConflictEditor {
     path: String,
+    /// Octets du fichier, recopiés à l'enregistrement.
+    bytes: Vec<u8>,
+    /// Texte affiché (`decode_conflict_text`) : mêmes lignes et mêmes marqueurs que `bytes`.
     text: String,
+    /// Le fichier n'est pas de l'UTF-8 : des lignes sont décodées en Windows-1252.
+    cp1252: bool,
     regions: Vec<ConflictRegion>,
     choices: Vec<Option<Resolution>>,
     error: Option<String>,
@@ -23,7 +36,9 @@ pub struct ConflictEditor {
 }
 
 impl ConflictEditor {
-    fn new(path: String, text: String, error: Option<String>) -> ConflictEditor {
+    fn new(path: String, bytes: Vec<u8>, error: Option<String>) -> ConflictEditor {
+        let text = decode_conflict_text(&bytes);
+        let cp1252 = std::str::from_utf8(&bytes).is_err();
         let regions = parse_conflicts(&text);
         let error = error.or_else(|| {
             regions.is_empty().then(|| tr!("Aucun marqueur de conflit trouvé dans le fichier.").to_string())
@@ -31,7 +46,9 @@ impl ConflictEditor {
         let choices = vec![None; regions.len()];
         let mut ed = ConflictEditor {
             path,
+            bytes,
             text,
+            cp1252,
             regions,
             choices,
             error,
@@ -43,7 +60,8 @@ impl ConflictEditor {
         ed
     }
 
-    /// Texte du fichier tel qu'il sera enregistré avec les choix actuels ; une région sans choix garde ses marqueurs.
+    /// Texte du fichier tel qu'il sera enregistré avec les choix actuels (décodé comme `text`) ; une région sans choix
+    /// garde ses marqueurs.
     fn result_preview(&self) -> String {
         resolve_partial(&self.text, &self.choices)
     }
@@ -75,20 +93,16 @@ impl RepoTab {
     pub(super) fn open_conflict_editor(&mut self, path: String) {
         let Some(repo) = &self.repo else { return };
         let full = repo.workdir.join(&path);
-        let (text, error) = match std::fs::read(&full) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(t) => (t, None),
-                Err(_) => (
-                    String::new(),
-                    Some(
-                        tr!("Fichier binaire ou non UTF-8 : utilisez « notre / leur version » ou un outil externe.")
-                            .to_string(),
-                    ),
-                ),
-            },
-            Err(e) => (String::new(), Some(e.to_string())),
+        // Un octet nul : fichier binaire (ou UTF-16), dont les marqueurs ne se lisent pas ligne à ligne.
+        let (bytes, error) = match std::fs::read(&full) {
+            Ok(bytes) if bytes.contains(&0) => (
+                Vec::new(),
+                Some(tr!("Fichier binaire : utilisez « notre / leur version » ou un outil externe.").to_string()),
+            ),
+            Ok(bytes) => (bytes, None),
+            Err(e) => (Vec::new(), Some(e.to_string())),
         };
-        self.conflict_editor = Some(ConflictEditor::new(path, text, error));
+        self.conflict_editor = Some(ConflictEditor::new(path, bytes, error));
     }
 
     pub(super) fn conflict_window(&mut self, ctx: &egui::Context, shared: &mut Shared, p: &Palette) {
@@ -139,6 +153,15 @@ impl RepoTab {
                         }
                     });
                 });
+                if ed.cp1252 {
+                    ui.label(
+                        RichText::new(tr!(
+                            "Fichier en Windows-1252 : affiché décodé, enregistré avec ses octets d'origine."
+                        ))
+                        .color(p.weak)
+                        .size(11.5),
+                    );
+                }
                 ui.separator();
                 // Aperçu du résultat, sous les régions : à jour avec les choix de cette image (un choix fait plus bas
                 // dans l'image est pris en compte à la suivante).
@@ -253,7 +276,8 @@ impl RepoTab {
         }
         if save && let Some(ed) = self.conflict_editor.take() {
             let choices: Vec<Resolution> = ed.choices.iter().map(|c| c.unwrap_or(Resolution::Ours)).collect();
-            let resolved = resolve(&ed.text, &choices);
+            // Octets d'origine (voir le module) : un fichier Windows-1252 le reste.
+            let resolved = resolve_bytes(&ed.bytes, &choices);
             let path = ed.path.clone();
             self.run_simple(shared, tr!("Résolution du conflit"), Refresh::STATUS, move |r| {
                 std::fs::write(r.workdir.join(&path), resolved)?;
@@ -316,5 +340,21 @@ mod tests {
         assert_eq!(ed.preview, TEXT, "recalculé seulement par refresh_preview");
         ed.refresh_preview();
         assert_eq!(ed.preview, "début\nleur ligne\nfin\n");
+    }
+
+    /// L2 : un fichier Windows-1252 est affiché décodé, région et aperçu compris ; un fichier UTF-8 ne l'est pas.
+    #[test]
+    fn a_cp1252_file_is_shown_decoded() {
+        let bytes = b"d\xe9but\n<<<<<<< HEAD\n10 \x80\n=======\n12 \x80\n>>>>>>> autre\nfin\n".to_vec();
+        let mut ed = ConflictEditor::new("f.txt".into(), bytes, None);
+        assert!(ed.cp1252 && ed.error.is_none());
+        assert_eq!(
+            (ed.regions[0].ours.as_slice(), ed.regions[0].theirs.as_slice()),
+            (&["10 €".to_string()][..], &["12 €".to_string()][..])
+        );
+        ed.choices[0] = Some(Resolution::Theirs);
+        ed.refresh_preview();
+        assert_eq!(ed.preview, "début\n12 €\nfin\n");
+        assert!(!editor_with(None).cp1252);
     }
 }
