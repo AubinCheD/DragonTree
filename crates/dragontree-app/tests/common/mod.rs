@@ -7,6 +7,8 @@
 
 #![allow(dead_code)]
 
+#[path = "../../../dragontree-git/tests/common/git_version.rs"]
+pub mod git_version;
 #[path = "../../../dragontree-git/tests/common/global_config.rs"]
 mod global_config;
 

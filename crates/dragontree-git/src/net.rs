@@ -193,7 +193,9 @@ impl Repo {
 
 /// Clone `url` dans `dest` (dont le dossier parent est créé si besoin). Le clone d'un dépôt SHA-256 se termine, puis
 /// est signalé par `GitError::UnsupportedObjectFormat` (L1) : `dest` reste sur le disque, à l'appelant de le garder
-/// ou non (l'interface supprime le dossier qu'elle a créé, comme après un clonage échoué).
+/// ou non (l'interface supprime le dossier qu'elle a créé, comme après un clonage échoué). Seul un format non pris en
+/// charge fait échouer un clonage réussi : tout autre échec de cette vérification (dossier d'un autre propriétaire…)
+/// laisse le clone en place, et son ouverture le signale.
 pub fn clone_repo(
     git: &Git,
     url: &str,
@@ -214,7 +216,12 @@ pub fn clone_repo(
         cmd = cmd.arg("--recurse-submodules");
     }
     run_with_progress(cmd.arg("--").arg(url).arg(dest), on)?;
-    crate::repo::check_object_format(git, dest)
+    // Format du clone terminé (L1), dans l'environnement du clonage. Un autre échec de la vérification est laissé à
+    // l'ouverture du dépôt, qui le signale avec sa suite (« Faire confiance à ce dépôt » pour `safe.directory`).
+    match crate::repo::check_object_format(git.cmd(dest).envs(&n.env), dest) {
+        Err(e @ GitError::UnsupportedObjectFormat { .. }) => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// Crée un dépôt vide dans `path` (créé si besoin).

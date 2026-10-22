@@ -7,21 +7,10 @@ mod common;
 use common::TestRepo;
 use dragontree_git::{CancelToken, GitError, LogOptions, NetOptions, Oid, Repo, clone_repo};
 
-/// Le git installé sait créer un dépôt SHA-256 (git 2.29 et suivants) ; sinon le test s'arrête en le disant.
-fn sha256_supported(t: &TestRepo) -> bool {
-    let version = t.git.version().unwrap();
-    let mut numbers = version.trim_start_matches("git version ").split('.').map(|n| n.parse::<u32>().unwrap_or(0));
-    let ok = (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0)) >= (2, 29);
-    if !ok {
-        eprintln!("{version} ne sait pas créer de dépôt SHA-256 (git 2.29 et suivants) : test ignoré");
-    }
-    ok
-}
-
-/// Dépôt SHA-256 avec un commit sur `main`, ou `None` si le git installé ne sait pas en créer.
+/// Dépôt SHA-256 avec un commit sur `main`, ou `None` si le git installé ne sait pas en créer (message).
 fn sha256_repo() -> Option<TestRepo> {
     let t = TestRepo { dir: tempfile::tempdir().unwrap(), git: common::git() };
-    if !sha256_supported(&t) {
+    if !common::git_version::sha256_supported(&t.git) {
         return None;
     }
     t.run(&["init", "-q", "-b", "main", "--object-format=sha256"]);
@@ -62,6 +51,30 @@ fn cloning_a_sha256_repository_gives_the_same_clear_error() {
     let err = clone_repo(&source.git, &source.url(), &dest, None, false, &NetOptions::default(), &mut |_| {})
         .expect_err("clonage d'un dépôt SHA-256 refusé");
     assert_unsupported(err, &dest);
+    assert!(dest.join(".git").exists(), "le moteur laisse le clone sur le disque (l'appelant décide)");
+}
+
+/// Revue de L1 : la vérification du format après le clonage ne fait jamais échouer un clonage réussi pour une autre
+/// raison. Cas principal : dossier d'un autre propriétaire (partage réseau, disque FAT ou exFAT, dossier d'un autre
+/// compte), simulé par `GIT_TEST_ASSUME_DIFFERENT_OWNER` dans l'environnement du clonage (pas celui du processus).
+/// Le clone reste en place ; c'est son ouverture qui signale le propriétaire, et l'onglet propose alors « Faire
+/// confiance à ce dépôt ».
+#[test]
+fn a_clone_in_a_folder_of_another_owner_is_kept() {
+    let source = TestRepo::new();
+    source.write("a.txt", "a\n");
+    source.commit_all("Premier commit");
+    let work = tempfile::tempdir().unwrap();
+    let dest = work.path().join("copie");
+    let other_owner = [("GIT_TEST_ASSUME_DIFFERENT_OWNER".to_string(), "1".to_string())];
+    let net = NetOptions { env: other_owner.to_vec(), ..NetOptions::default() };
+
+    let cloned = clone_repo(&source.git, source.path().to_str().unwrap(), &dest, None, false, &net, &mut |_| {});
+    assert_eq!(cloned, Ok(()), "clonage réussi, gardé");
+    assert!(dest.join("a.txt").exists() && dest.join(".git").exists());
+    // L'ouverture, elle, voit le propriétaire (même environnement) : erreur qui propose la confiance.
+    let opened = source.git.cmd(&dest).envs(&other_owner).args(["rev-parse", "--show-toplevel"]).run();
+    assert!(matches!(opened, Err(GitError::DubiousOwnership { .. })), "{opened:?}");
 }
 
 /// Les identifiants de 64 caractères ne sont jamais lus comme des identifiants SHA-1 : `Oid::from_hex` les refuse,

@@ -534,10 +534,7 @@ fn closing_the_clone_window_cleans_up_the_cancelled_clone() {
 
 /// Dépôt SHA-256 avec un commit, ou `None` (message) si le git installé ne sait pas en créer (git 2.29 et suivants).
 fn sha256_repo(base: &Path) -> Option<PathBuf> {
-    let version = test_git().version().unwrap();
-    let mut numbers = version.trim_start_matches("git version ").split('.').map(|n| n.parse::<u32>().unwrap_or(0));
-    if (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0)) < (2, 29) {
-        eprintln!("{version} ne sait pas créer de dépôt SHA-256 (git 2.29 et suivants) : test ignoré");
+    if !git_version::sha256_supported(&test_git()) {
         return None;
     }
     let dir = base.join("sha256");
@@ -565,6 +562,10 @@ fn a_sha256_repository_is_refused_with_an_explicit_error_at_open_and_clone() {
 
     let mut h = harness(StartOptions { open: vec![repo.clone()], ..start(tmp.path()) });
     wait_until(&mut h, "erreur d'ouverture explicite", |h| h.query_by_label_contains(explicit).is_some());
+    assert!(
+        h.query_by_label_contains("Utilisez git en ligne de commande pour ce dépôt").is_some(),
+        "la page d'erreur renvoie vers git en ligne de commande"
+    );
     drop(h);
 
     let mut h = harness(StartOptions { window: Some("clone".into()), ..start(tmp.path()) });
@@ -575,7 +576,11 @@ fn a_sha256_repository_is_refused_with_an_explicit_error_at_open_and_clone() {
     url.type_text(&format!("file:///{}", repo.display().to_string().replace('\\', "/")));
     h.run_steps(3);
     h.get_by_label(&format!("{} Cloner", dragontree_app::icons::DOWNLOAD_SIMPLE)).click();
-    wait_until(&mut h, "erreur de clonage explicite", |h| h.query_by_label_contains(explicit).is_some());
+    // Le message nomme le dossier du clone : il vient de la vérification faite sur le clone terminé, que git a donc
+    // créé là. La fin du clonage n'arrive qu'après son nettoyage : le dossier n'existe plus.
     let dest = clones.join("sha256");
-    wait_git(&mut h, "dossier du clone supprimé", || !dest.exists());
+    let from_clone = format!("Le dépôt {} {explicit}", dest.display());
+    wait_until(&mut h, "erreur de clonage explicite", |h| h.query_by_label_contains(&from_clone).is_some());
+    assert!(!dest.exists(), "dossier du clone refusé supprimé");
+    assert!(clones.exists(), "dossier parent gardé");
 }

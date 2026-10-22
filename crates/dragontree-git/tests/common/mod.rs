@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod git_version;
 mod global_config;
 
 use std::path::{Path, PathBuf};

@@ -41,9 +41,12 @@ pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /// l'ouverture et au clonage (L1).
 const SUPPORTED_OBJECT_FORMAT: &str = "sha1";
 
-/// Erreur explicite si le dépôt de `dir` n'utilise pas des identifiants SHA-1 (`git rev-parse --show-object-format`).
-pub(crate) fn check_object_format(git: &Git, dir: &Path) -> Result<(), GitError> {
-    let out = git.cmd(dir).read_only().args(["rev-parse", "--show-object-format"]).run()?;
+/// Erreur explicite si le dépôt de travail `dir` n'utilise pas des identifiants SHA-1 (`git rev-parse
+/// --show-object-format`) ; `cmd` : commande git lancée dans `dir`, à compléter (environnement de l'appelant). Son
+/// dossier git est désigné explicitement (`--git-dir=.git`) : sans recherche du dépôt, git ne refuse pas un dossier
+/// d'un autre propriétaire (`safe.directory`).
+pub(crate) fn check_object_format(cmd: GitCommand, dir: &Path) -> Result<(), GitError> {
+    let out = cmd.read_only().args(["--git-dir=.git", "rev-parse", "--show-object-format"]).run()?;
     match out.stdout_str().trim() {
         SUPPORTED_OBJECT_FORMAT => Ok(()),
         format => {
