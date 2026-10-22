@@ -140,6 +140,7 @@ impl RepoTab {
         self.changes.multi = [(side, path.clone())].into();
         if side == Side::Conflict {
             self.changes.diff = None;
+            self.changes.diff_full = None;
             self.changes.diff_key = None;
         } else {
             self.load_work_diff(shared, side, path, false);
@@ -685,21 +686,22 @@ impl RepoTab {
         }
         let mode = if side == Side::Staged { DiffMode::Staged } else { DiffMode::Unstaged };
         let renamed_staged = side == Side::Staged && diff.old_path.is_some() && diff.old_path != diff.new_path;
-        // Un diff calculé sans les espaces (-w) ne correspond pas au fichier : on ne peut pas en
-        // tirer un patch fiable pour indexer ou annuler des lignes.
-        let ignore_ws = shared.settings.ignore_whitespace;
-        if ignore_ws {
+        // Diff sans les espaces (-w) : les patchs sont construits sur le diff complet lu avec lui (L6, voir
+        // `build_patch_ignoring_whitespace`) ; la règle de correspondance est rappelée au-dessus du diff.
+        if self.changes.diff_full.is_some() && !renamed_staged {
             ui.label(
                 RichText::new(format!(
                     "{} {}",
                     icons::INFO,
-                    tr!("Lecture seule : désactivez « Espaces » (ignorer les espaces) pour indexer ou annuler des lignes.")
+                    tr!(
+                        "Espaces ignorés à l'affichage : un hunk indexé, désindexé ou annulé emporte aussi ses changements d'espaces ; une sélection de lignes, non."
+                    )
                 ))
                 .color(p.weak)
                 .size(12.0),
             );
         }
-        let mode = if renamed_staged || ignore_ws { DiffMode::ReadOnly } else { mode };
+        let mode = if renamed_staged { DiffMode::ReadOnly } else { mode };
         if self.changes.highlighter.is_dark() != p.dark {
             self.changes.highlighter = crate::highlight::Highlighter::new(p.dark);
         }

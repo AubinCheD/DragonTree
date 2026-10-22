@@ -230,7 +230,7 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 | L3 | Réglages illisibles au démarrage : rien n'est enregistré de la session (corrigé : fichier relu à chaque enregistrement puis fusionné, indicateur « Réglages non enregistrés ») | arbitrage de la revue (M9) | basse |
 | L4 | Échec d'authentification du fetch automatique signalé une seule fois (corrigé : indicateur dans l'onglet jusqu'au prochain fetch réussi) | arbitrage de la revue (M2) | basse |
 | L5 | Amend d'un commit déjà poussé avec « Pousser après » : pas de push (corrigé : push forcé proposé, protégé par `--force-with-lease`) | arbitrage de la revue (I7b) | basse |
-| L6 | Option « Espaces » active : diff des changements en lecture seule | arbitrage de la revue (M1) | basse |
+| L6 | Option « Espaces » active : diff des changements en lecture seule (corrigé : patch construit sur le diff complet, hunk entier avec ses changements d'espaces) | arbitrage de la revue (M1) | basse |
 
 ## Détail des points restants
 
@@ -854,10 +854,34 @@ Synthèse au 2026-10-20. Chaque point est détaillé plus bas, sous son identifi
 - **Critère de fin (atteint) :** amend d'un commit poussé avec « Pousser après » : dialogue ; confirmé, le remote reçoit le commit modifié ; annulé, rien n'est poussé ; remote qui a bougé entre-temps : push refusé et signalé, sans perte.
 - **Priorité :** basse.
 
-#### L6 — Option « Espaces » active : diff des changements en lecture seule
+#### L6 — Indexation partielle avec l'option « Espaces » (corrigé)
 
-- **Contexte :** arbitrage de la revue (M1) au coût assumé.
-- **État :** le diff des changements passe en lecture seule (`crates/dragontree-app/src/repo/changes.rs`, `change_detail`). Piste : recalculer le diff sans `-w` pour construire le patch, comme la revue le suggérait.
+- **Contexte :** arbitrage de la revue (M1) au coût assumé : un diff calculé sans les espaces (`-w`) ne correspond pas au fichier (ses lignes de contexte viennent de la nouvelle version), on ne peut pas en tirer un patch. Piste : recalculer le diff sans `-w` pour construire le patch, comme la revue le suggérait.
+- **État :** corrigé.
+  - Avant : avec « Espaces », le diff des changements passait en lecture seule (`change_detail`, `crates/dragontree-app/src/repo/changes.rs`) : « Lecture seule : désactivez « Espaces »… », ni boutons de hunk ni sélection de lignes.
+  - Réalisé, moteur (`crates/dragontree-git/src/patch.rs`, `build_patch_ignoring_whitespace`) : la sélection faite dans le diff affiché (`-w`) est reportée sur le diff complet (sans `-w`) du même fichier, puis passe par `build_patch` comme avant.
+    - Le patch est construit sur les lignes du diff complet (octets exacts, `\r` et fin de fichier sans saut de ligne compris), dans l'ordre du hunk affiché : chaque ligne de contexte affichée dont les deux versions diffèrent (par des espaces seulement, puisque `-w` les a égalées) y devient une suppression suivie d'un ajout. Une ligne choisie va donc à la place où elle est affichée, même là où le diff complet range les lignes autrement (bloc réindenté sous un `if` : le diff complet supprime puis ajoute tout le bloc, le diff affiché ne montre que les lignes ajoutées autour).
+    - Règle de correspondance, hunk entier (« Indexer le hunk », « Désindexer le hunk », « Annuler le hunk ») : toutes les modifications du hunk affiché, y compris les changements d'espaces de ses lignes de contexte, c'est-à-dire des lignes des deux versions qu'il couvre ; jamais ceux d'en dehors des hunks affichés.
+    - Règle de correspondance, lignes choisies : ces lignes seulement, à leur place ; les changements d'espaces des lignes de contexte ne sont pas pris (ces lignes gardent leur version de départ). Rien d'autre que ce qui est choisi n'est donc indexé, hormis, pour un hunk entier, les changements d'espaces de ses propres lignes.
+    - Refus (`GitError::Refused`, rien n'est appliqué, message explicite) plutôt qu'un patch douteux : ligne de contexte affichée dont une version ne se retrouve pas dans le diff complet (les deux diffs n'alignent pas les lignes de la même façon : « désactivez « Espaces » pour choisir ces lignes ») ; ligne dont le texte diffère d'un diff à l'autre, ou deux versions qui diffèrent autrement que par des espaces (fichier modifié entre les deux lectures : « recommencez une fois le diff rechargé ») ; diff complet tronqué ou binaire.
+    - En-tête : simple modification (comme une sélection partielle), sauf création ou suppression de fichier ; un changement de mode, non affiché, n'est pas indexé par ce chemin.
+  - Réalisé, interface :
+    - avec « Espaces », le diff complet est lu dans la même tâche que le diff affiché (`load_work_diff`, `ChangesState::diff_full`) : les deux décrivent le même état du fichier, et l'on indexe ce qui a été vu ; un fichier non suivi garde son chemin (`git add -N`, diff relu sans `-w` : toutes ses lignes sont ajoutées) ;
+    - `op_patch` passe par `build_patch_ignoring_whitespace` quand le diff affiché a un diff complet ; indexer, désindexer et annuler suivent la même règle ;
+    - au-dessus du diff, la règle est rappelée : « Espaces ignorés à l'affichage : un hunk indexé, désindexé ou annulé emporte aussi ses changements d'espaces ; une sélection de lignes, non. » ; le dialogue « Annuler des lignes » d'un hunk entier ajoute « Ses changements d'espaces, masqués par « Espaces », seront aussi annulés. » ;
+    - textes traduits (`en.json`), texte de lecture seule retiré.
+- **Tests :**
+  - `crates/dragontree-git/src/patch.rs` : `whitespace_patch_keeps_the_shown_order_with_the_full_diff_bytes` (CRLF perdu sur une ligne de contexte : paire `-b\r` / `+b` dans le hunk entier, ligne gardée en CRLF pour une sélection de lignes, contexte sélectionné sans effet, sens inverse) ; `whitespace_patch_refuses_a_context_line_the_full_diff_aligns_elsewhere` ; `whitespace_patch_refuses_lines_that_differ_between_the_two_diffs` (texte différent, versions qui diffèrent au-delà des espaces, diff complet tronqué).
+  - `crates/dragontree-git/tests/whitespace_patch.rs` (vrais diffs de git, index et copie de travail comparés octet pour octet, fichiers en CRLF) :
+    - `a_whole_hunk_takes_the_whitespace_changes_inside_it_and_only_those` : ligne changée, ligne passée de CRLF à LF et ligne réindentée dans le hunk, changements d'espaces hors du hunk (un seul hunk affiché, deux dans le diff complet) : l'index reçoit ceux du hunk seulement ;
+    - `selected_lines_take_only_those_lines` : lignes `-`/`+` choisies, puis l'ajout seul ;
+    - `a_selected_line_goes_where_it_is_shown_even_when_the_full_diff_orders_lines_otherwise` : bloc entouré d'un `if` ;
+    - `a_newline_added_at_the_end_of_the_file_follows_the_whole_hunk_only` : saut de ligne final que `-w` ne voit pas ;
+    - `unstaging_and_discarding_a_whole_hunk_follow_the_same_rule`.
+    - Vus rouges en traitant les contextes affichés comme des contextes (sans les paires d'espaces) : 4 tests sur 5 en échec.
+  - Interface (`crates/dragontree-app/tests/ui_flows.rs`, `a_hunk_is_staged_with_whitespace_ignored`, à la place de `ignore_whitespace_makes_the_diff_read_only`) : « Espaces » actif, fichier en CRLF ; un seul « Indexer le hunk », règle rappelée ; après le clic, l'index est octet pour octet l'ancienne version avec la ligne changée et les changements d'espaces du hunk, sans ceux d'en dehors ; copie de travail intacte. Vu rouge avant : « délai dépassé en attendant : bouton « Indexer le hunk » ».
+- **À faire :** construire le patch sur le diff complet (fait).
+- **Critère de fin (atteint) :** avec « Espaces », un hunk ou des lignes s'indexent, se désindexent et s'annulent ; l'index reçoit exactement la sélection, plus, pour un hunk entier, les changements d'espaces de ses lignes ; une correspondance ambiguë est refusée avec un message.
 - **Priorité :** basse.
 
 ## Branche `options-fork` (2026-10-20)

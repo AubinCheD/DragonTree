@@ -558,6 +558,13 @@ impl RepoTab {
                     )
                 };
                 warn(ui, &text);
+                // Diff sans les espaces (L6) : un hunk entier emporte aussi les changements d'espaces de ses lignes.
+                if self.changes.diff_full.is_some() && selection.iter().any(|s| s.lines.is_none()) {
+                    ui.label(
+                        RichText::new(tr!("Ses changements d'espaces, masqués par « Espaces », seront aussi annulés."))
+                            .color(p.weak),
+                    );
+                }
                 true
             }
             Dialog::AddRemote { name, url } => {

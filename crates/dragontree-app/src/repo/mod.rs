@@ -49,9 +49,9 @@ use std::time::{Duration, Instant};
 
 use dragontree_git::graph::{GraphBuilder, GraphLayout};
 use dragontree_git::{
-    BisectState, CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, GitError, GitFlowConfig,
-    HeadState, LogOptions, LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry, StatusSnapshot,
-    Submodule, Worktree,
+    BisectState, CancelToken, CollapsedLog, Commit, CommitInfo, DiffOptions, FileChange, FileDiff, GitError,
+    GitFlowConfig, HeadState, LogOptions, LogScope, Oid, OpState, Progress, RefsSnapshot, Remote, Repo, StashEntry,
+    StatusSnapshot, Submodule, Worktree,
 };
 use dragontree_i18n::{tr, trn};
 use egui::{Frame, RichText, Ui};
@@ -249,6 +249,9 @@ pub struct ChangesState {
     /// Point de départ d'une sélection Maj+clic (fichier, pas position : la liste change).
     pub anchor: Option<(Side, String)>,
     pub diff: Option<LoadedDiff>,
+    /// Diff complet (sans `-w`) du fichier affiché, lu avec lui quand il ignore les espaces (option « Espaces ») : les
+    /// patchs des hunks et des lignes choisis y sont construits (L6, voir `build_patch_ignoring_whitespace`).
+    pub diff_full: Option<Arc<FileDiff>>,
     pub diff_key: Option<(Side, String)>,
     pub diff_loading: bool,
     pub diff_state: DiffViewState,
@@ -371,7 +374,8 @@ pub enum RepoEvent {
     /// Détails d'un commit ; pour un stash, le commit de ses fichiers non suivis et l'indice du premier d'entre eux.
     Details(u64, Oid, Result<DetailsData, GitError>),
     CommitDiff(u64, Result<LoadedDiff, GitError>),
-    WorkDiff(u64, (Side, String), Result<LoadedDiff, GitError>),
+    /// Diff d'un fichier des changements, et son diff complet quand il ignore les espaces (voir `ChangesState::diff_full`).
+    WorkDiff(u64, (Side, String), Result<(LoadedDiff, Option<Arc<FileDiff>>), GitError>),
     /// Patch lu et vérifié, prêt pour le dialogue d'application.
     PatchPreview(u64, Result<Box<patches::PatchPreview>, GitError>),
     /// Texte d'un patch lu pour le presse-papiers.
@@ -839,7 +843,18 @@ impl RepoTab {
         self.gens.work_diff += 1;
         let (g, id, o) = (self.gens.work_diff, self.id, Self::diff_options(shared));
         shared.jobs.spawn("work-diff", move || {
-            let res = repo.diff_worktree_file(&path, side == Side::Staged, untracked, &o).map(LoadedDiff::new);
+            let staged = side == Side::Staged;
+            let res = repo.diff_worktree_file(&path, staged, untracked, &o).and_then(|shown| {
+                // Diff sans les espaces (L6) : le diff complet du même fichier, lu dans la foulée, sert aux patchs. Un
+                // fichier non suivi n'en a pas besoin (toutes ses lignes sont ajoutées ; `op_patch` le relit sans `-w`).
+                let full = if o.ignore_whitespace && !untracked && !shown.hunks.is_empty() {
+                    let full_options = DiffOptions { ignore_whitespace: false, ..o };
+                    Some(Arc::new(repo.diff_worktree_file(&path, staged, false, &full_options)?))
+                } else {
+                    None
+                };
+                Ok((LoadedDiff::new(shown), full))
+            });
             Some(AppEvent::Repo(id, RepoEvent::WorkDiff(g, (side, path), res)))
         });
     }
@@ -1004,13 +1019,15 @@ impl RepoTab {
             RepoEvent::WorkDiff(g, key, res) if g == self.gens.work_diff => {
                 self.changes.diff_loading = false;
                 match res {
-                    Ok(d) => {
+                    Ok((d, full)) => {
                         self.changes.diff = Some(d);
+                        self.changes.diff_full = full;
                         self.changes.diff_key = Some(key);
                         self.changes.diff_state.prune_selection(self.changes.diff.as_deref());
                     }
                     Err(e) => {
                         self.changes.diff = None;
+                        self.changes.diff_full = None;
                         shared.toast(Toast::error(tr!("Diff impossible"), e.to_string()));
                     }
                 }
@@ -1194,6 +1211,7 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
                 } else {
                     self.changes.selected = None;
                     self.changes.diff = None;
+                    self.changes.diff_full = None;
                     self.changes.diff_key = None;
                 }
             }

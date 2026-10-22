@@ -79,7 +79,8 @@ Manager, clés SSH), hooks, signatures et configuration s'appliquent tels quels.
 - **Outils externes** (Réglages) : diff et merge configurables, avec préréglages VS Code, WinMerge, Beyond Compare,
   KDiff3 et P4Merge. **Identité git globale** (nom, e-mail) dans Configuration. **Clés SSH** (Fichier) : générer,
   choisir, gérer plusieurs clés.
-- **Affichage du diff** : police, taille, largeur de tabulation, espaces visibles ou ignorés.
+- **Affichage du diff** : police, taille, largeur de tabulation, espaces visibles ou ignorés (espaces ignorés :
+  l'indexation par hunk ou par ligne reste possible ; un hunk entier emporte les changements d'espaces de ses lignes).
 - **IA Claude Code** (facultatif, désactivée par défaut) : message de commit et revue de la branche courante.
   DragonTree lance la CLI `claude` en mode non interactif, sans aucun outil (`--tools ""`) : la consigne passe par stdin
   et la réponse revient sur stdout ; l'IA n'exécute ni ne modifie rien.

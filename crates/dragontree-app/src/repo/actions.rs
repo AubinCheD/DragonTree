@@ -4,7 +4,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use dragontree_git::{
-    DiffOptions, GitError, HunkSelection, MergeMode, NetOptions, Oid, PatchMode, Progress, Repo, ResetMode, build_patch,
+    DiffOptions, GitError, HunkSelection, MergeMode, NetOptions, Oid, PatchMode, Progress, Repo, ResetMode,
+    build_patch, build_patch_ignoring_whitespace,
 };
 use dragontree_i18n::{tr, trn};
 
@@ -336,10 +337,13 @@ impl RepoTab {
         });
     }
 
-    /// Indexe, désindexe ou annule des hunks/lignes du diff affiché dans les changements.
+    /// Indexe, désindexe ou annule des hunks/lignes du diff affiché dans les changements. Diff affiché sans les espaces
+    /// (option « Espaces ») : patch construit sur le diff complet lu avec lui (L6, `build_patch_ignoring_whitespace`),
+    /// ou refusé avec un message si la sélection ne s'y reporte pas sans ambiguïté.
     pub(crate) fn op_patch(&mut self, shared: &Shared, mode: PatchMode, sel: Vec<HunkSelection>) {
         let Some(diff) = self.changes.diff.clone() else { return };
         let Some((side, path)) = self.changes.diff_key.clone() else { return };
+        let full = self.changes.diff_full.clone();
         let untracked = diff.is_new
             && side == Side::Unstaged
             && self
@@ -354,21 +358,23 @@ impl RepoTab {
             PatchMode::Discard => tr!("Annulation"),
         };
         self.run_simple(shared, title, Refresh::STATUS, move |r| {
-            let added;
-            let diff: &dragontree_git::FileDiff = if untracked {
-                // Fichier non suivi : `git add -N` puis diff ordinaire (mêmes lignes, même ordre).
+            let patch = if untracked {
+                // Fichier non suivi : `git add -N` puis diff ordinaire, sans `-w` (mêmes lignes, même ordre : elles
+                // sont toutes ajoutées).
                 r.intent_to_add(&path)?;
-                added = r.diff_worktree_file(
+                let added = r.diff_worktree_file(
                     &path,
                     false,
                     false,
                     &DiffOptions { context: o.context, ignore_whitespace: false },
                 )?;
-                &added
+                build_patch(&added, &sel, mode.is_reverse())
+            } else if let Some(full) = &full {
+                build_patch_ignoring_whitespace(&diff, full, &sel, mode.is_reverse())?
             } else {
-                &diff
+                build_patch(&diff, &sel, mode.is_reverse())
             };
-            let Some(patch) = build_patch(diff, &sel, mode.is_reverse()) else { return Ok(None) };
+            let Some(patch) = patch else { return Ok(None) };
             r.apply_patch(&patch, mode)?;
             Ok(None)
         });

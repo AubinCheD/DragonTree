@@ -119,17 +119,60 @@ fn shift_click_after_the_list_shrinks_does_not_crash() {
     assert!(h.query_by_label("src/calc.rs").is_some());
 }
 
+/// Option « Espaces » (L6) : le diff affiché ignore les espaces ; « Indexer le hunk » indexe le hunk avec les
+/// changements d'espaces de ses lignes (ligne passée de CRLF à LF, ligne réindentée), pas ceux d'en dehors. Index
+/// vérifié octet pour octet ; copie de travail intacte.
 #[test]
-fn ignore_whitespace_makes_the_diff_read_only() {
+fn a_hunk_is_staged_with_whitespace_ignored() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = demo_repo(tmp.path());
+    let repo = tmp.path().join("depot");
+    init_repo(&repo);
+    let old = [
+        "class Form",
+        "{",
+        "    void Load()",
+        "    {",
+        "        x = 1;",
+        "        y = 2;",
+        "    }",
+        "",
+        "    // un",
+        "    // deux",
+        "    // trois",
+        "    // quatre",
+        "    void Save()",
+        "    {",
+        "        z = 3;",
+        "    }",
+        "}",
+    ];
+    // Lignes en CRLF, sauf les remplacements `(numéro, ligne complète)`.
+    let form = |changes: &[(usize, &str)]| -> Vec<u8> {
+        let line =
+            |i: usize, l: &str| changes.iter().find(|(n, _)| *n == i + 1).map_or(format!("{l}\r\n"), |c| c.1.into());
+        old.iter().enumerate().flat_map(|(i, l)| line(i, l).into_bytes()).collect()
+    };
+    std::fs::write(repo.join("form.cs"), form(&[])).unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "init"]);
+    let inside = [(4, "    {\n"), (5, "        x = 10;\r\n"), (6, "\t\ty = 2;\r\n")];
+    let outside = [(15, "\tz = 3;\r\n"), (16, "    }  \r\n")];
+    let worktree = form(&[inside.as_slice(), outside.as_slice()].concat());
+    std::fs::write(repo.join("form.cs"), &worktree).unwrap();
+
     let profile = tmp.path().join("profil");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), r#"{"ignore_whitespace": true}"#).unwrap();
     let mut h = harness(StartOptions { open: vec![repo.clone()], view: Some("changes".into()), ..start(tmp.path()) });
 
-    wait_until(&mut h, "note de lecture seule", |h| h.query_by_label_contains("Lecture seule").is_some());
-    assert!(h.query_by_label_contains("Indexer le hunk").is_none(), "pas d'indexation partielle depuis un diff -w");
+    wait_until(&mut h, "bouton « Indexer le hunk »", |h| h.query_by_label_contains("Indexer le hunk").is_some());
+    assert_eq!(h.query_all_by_label_contains("Indexer le hunk").count(), 1, "un seul hunk sans les espaces");
+    assert!(h.query_by_label_contains("Espaces ignorés à l'affichage").is_some(), "règle rappelée");
+    h.get_by_label_contains("Indexer le hunk").click();
+    let index = || test_git().cmd(&repo).args(["cat-file", "blob", ":form.cs"]).run().ok().map(|o| o.stdout);
+    wait_git(&mut h, "hunk indexé", || index().is_some_and(|b| b != form(&[])));
+    assert_eq!(index().unwrap(), form(&inside), "changements d'espaces du hunk seulement");
+    assert_eq!(std::fs::read(repo.join("form.cs")).unwrap(), worktree, "copie de travail intacte");
 }
 
 #[test]
