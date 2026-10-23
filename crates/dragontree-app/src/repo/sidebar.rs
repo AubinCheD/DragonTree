@@ -94,6 +94,21 @@ enum Leaf<'a> {
 }
 
 impl RepoTab {
+    /// « Dernier fetch : il y a 5 min » (date de `FETCH_HEAD`), ou « Jamais fetché ».
+    fn last_fetch_text(&self) -> String {
+        let when =
+            self.repo.as_ref().and_then(|r| std::fs::metadata(r.common_dir.join("FETCH_HEAD")).ok()?.modified().ok());
+        let secs = |t: std::time::SystemTime| {
+            t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+        };
+        match when {
+            Some(t) => {
+                tr!("Dernier fetch : {when}", when = widgets::format_time(secs(t), secs(std::time::SystemTime::now())))
+            }
+            None => tr!("Jamais fetché").into(),
+        }
+    }
+
     pub(super) fn sidebar_ui(&mut self, ui: &mut Ui, shared: &mut Shared, p: &Palette) {
         let changes = self
             .status
@@ -170,12 +185,30 @@ impl RepoTab {
                     let state = visibility(shared.settings.hidden_refs_of(&self.path), &pattern);
                     let tools = self.tools(Some(state), &pattern);
                     let resp = folder_row(ui, &key, &remote, icons::CLOUD, branches.len(), open, 0, tools, p);
+                    // Ses branches sont celles du dernier fetch : l'infobulle dit de quand.
+                    let resp = resp.on_hover_ui(|ui| {
+                        ui.label(self.last_fetch_text());
+                    });
                     if resp.clicked() {
                         toggle(&mut self.sidebar.open_folders, &key);
                     }
                     self.row_tools(ui, shared, &resp, &remote, Some((&pattern, state)), &pattern, p);
                     let remote_name = remote.clone();
+                    let folders = folder_keys(&format!("rem:{remote}"), branches.iter().map(|b| b.name.as_str()));
                     resp.context_menu(|ui| {
+                        // Des centaines de branches rangées dans des dizaines de dossiers (Azure DevOps) : d'un coup.
+                        if ui.button(format!("{} {}", icons::CARET_DOWN, tr!("Tout déplier"))).clicked() {
+                            self.sidebar.open_folders.remove(&key);
+                            self.sidebar.open_folders.extend(folders.iter().cloned());
+                            ui.close();
+                        }
+                        if ui.button(format!("{} {}", icons::CARET_RIGHT, tr!("Tout replier"))).clicked() {
+                            for f in &folders {
+                                self.sidebar.open_folders.remove(f);
+                            }
+                            ui.close();
+                        }
+                        ui.separator();
                         if ui.button(format!("{} Fetch {remote_name}", icons::CLOUD_ARROW_DOWN)).clicked() {
                             self.op_fetch(shared, Some(remote_name.clone()), true, false);
                             ui.close();
@@ -427,7 +460,20 @@ impl RepoTab {
                     toggle(&mut self.sidebar.open_folders, &key);
                 }
                 self.row_tools(ui, shared, &resp, &full, hide, &pattern, p);
+                let mut subtree = Vec::new();
+                subtree_keys(prefix, &full, child, &mut subtree);
                 resp.context_menu(|ui| {
+                    if ui.button(format!("{} {}", icons::CARET_DOWN, tr!("Tout déplier"))).clicked() {
+                        self.sidebar.open_folders.extend(subtree.iter().cloned());
+                        ui.close();
+                    }
+                    if ui.button(format!("{} {}", icons::CARET_RIGHT, tr!("Tout replier"))).clicked() {
+                        for k in &subtree {
+                            self.sidebar.open_folders.remove(k);
+                        }
+                        ui.close();
+                    }
+                    ui.separator();
                     if hide.is_some() {
                         self.hide_menu_entry(ui, shared, &pattern);
                     }
@@ -1038,6 +1084,29 @@ impl RepoTab {
             ui.close();
         }
         self.custom_commands_menu(ui, shared, Clicked::Commit(oid));
+    }
+}
+
+/// Les clés des dossiers de l'arbre `prefix` (`rem:origin`…) que forment ces noms de branches (`feature/ada/x` :
+/// `feature`, `feature/ada`).
+fn folder_keys<'a>(prefix: &str, names: impl Iterator<Item = &'a str>) -> HashSet<String> {
+    let mut keys = HashSet::new();
+    for name in names {
+        let parts: Vec<&str> = name.split('/').collect();
+        for i in 1..parts.len() {
+            keys.insert(format!("{prefix}:{}", parts[..i].join("/")));
+        }
+    }
+    keys
+}
+
+/// Les clés du dossier `path` et de ses sous-dossiers.
+fn subtree_keys(prefix: &str, path: &str, node: &Node<Leaf>, out: &mut Vec<String>) {
+    out.push(format!("{prefix}:{path}"));
+    for (name, child) in &node.children {
+        if !child.children.is_empty() {
+            subtree_keys(prefix, &format!("{path}/{name}"), child, out);
+        }
     }
 }
 

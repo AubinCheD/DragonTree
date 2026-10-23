@@ -1404,5 +1404,9 @@
   "Ajouter un dépôt…": "Add a repository…",
   "Cloner un dépôt distant…": "Clone a remote repository…",
   "Compte": "Account",
-  "Aucun : identifiants de git": "None: git credentials"
+  "Aucun : identifiants de git": "None: git credentials",
+  "Tout déplier": "Expand all",
+  "Tout replier": "Collapse all",
+  "Dernier fetch : {when}": "Last fetch: {when}",
+  "Jamais fetché": "Never fetched"
 }
