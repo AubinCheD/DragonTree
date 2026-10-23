@@ -523,7 +523,10 @@ pub struct RepoTab {
     watcher: Option<watcher::RepoWatcher>,
     pending_refresh: Option<(Instant, Refresh)>,
     stale: Refresh,
-    last_fetch: Instant,
+    /// Dernier fetch du dépôt ; `None` : jamais (ou avant le démarrage de Windows), le fetch automatique est dû. À
+    /// l'ouverture, lu dans la date de `FETCH_HEAD` : un dépôt fetché il y a longtemps l'est tout de suite, ses
+    /// branches distantes ne restent pas périmées jusqu'à l'échéance.
+    last_fetch: Option<Instant>,
     next_op_id: u64,
     quick_dirty: bool,
     /// Erreur d'authentification du dernier fetch, automatique ou non (L4) : indicateur permanent dans l'onglet (barre
@@ -585,7 +588,7 @@ impl RepoTab {
             watcher: None,
             pending_refresh: None,
             stale: Refresh::NONE,
-            last_fetch: Instant::now(),
+            last_fetch: None,
             next_op_id: 0,
             quick_dirty: false,
             fetch_auth_error: None,
@@ -943,6 +946,7 @@ impl RepoTab {
                     shared.jobs.sender(),
                     shared.settings.scan_skip_dirs.clone(),
                 );
+                self.last_fetch = last_fetch_of(&repo.common_dir);
                 self.repo = Some(repo);
                 self.refresh(shared, Refresh::ALL);
                 self.load_commit_template(shared);
@@ -1326,16 +1330,16 @@ Renseignez votre nom et votre e-mail : l'identité globale de git s'applique aux
             && !self.remotes.is_empty()
             && let Some(queues) = self.queues(shared)
         {
-            if self.last_fetch.elapsed() >= every {
-                self.last_fetch = Instant::now();
+            if self.last_fetch.is_none_or(|t| t.elapsed() >= every) {
+                self.last_fetch = Some(Instant::now());
                 // Sur sa propre file, le fetch automatique ne fait pas attendre les écritures. Il passe son tour (jusqu'à
                 // l'échéance suivante) si un autre onglet du dépôt fetche déjà, ou si une opération réseau visible
                 // attend ou tourne : elle met à jour les mêmes refs.
                 if queues.background.is_idle() && !shared.queues.network_busy(queues.group()) {
                     self.op_fetch(shared, None, true, true);
                 }
-            } else {
-                shared.ctx.request_repaint_after(every - self.last_fetch.elapsed());
+            } else if let Some(t) = self.last_fetch {
+                shared.ctx.request_repaint_after(every.saturating_sub(t.elapsed()));
             }
         }
     }
@@ -1587,6 +1591,13 @@ pub fn split_message(msg: &str) -> (String, String) {
         Some((subject, rest)) => (subject.trim_end().to_string(), rest.trim_start_matches(['\n', '\r']).to_string()),
         None => (msg.to_string(), String::new()),
     }
+}
+
+/// L'instant du dernier fetch d'un dépôt (date de `FETCH_HEAD` dans son dossier commun) ; `None` : jamais, date
+/// illisible ou dans le futur, ou antérieure au démarrage de Windows.
+fn last_fetch_of(common_dir: &std::path::Path) -> Option<Instant> {
+    let age = std::fs::metadata(common_dir.join("FETCH_HEAD")).and_then(|m| m.modified()).ok()?.elapsed().ok()?;
+    Instant::now().checked_sub(age)
 }
 
 #[cfg(test)]

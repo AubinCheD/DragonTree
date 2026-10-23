@@ -77,11 +77,13 @@ pub fn staged(repo: &Path) -> Option<Vec<String>> {
 }
 
 /// Dépôt `depot` avec un commit (`a.txt`) et un remote `origin` servi par `server` (muet : un fetch y reste bloqué).
+/// Il vient d'être fetché (`FETCH_HEAD`) : le fetch automatique attend son échéance, sauf `auto_fetch_every` nul.
 pub fn repo_with_silent_remote(base: &Path, server: &SilentServer) -> PathBuf {
     let dir = base.join("depot");
     init_repo(&dir);
     commit_file(&dir, "a.txt", "1\n", "Premier commit");
     git(&dir, &["remote", "add", "origin", &format!("http://127.0.0.1:{}/depot.git", server.port)]);
+    std::fs::write(dir.join(".git").join("FETCH_HEAD"), "").unwrap();
     dir
 }
 
