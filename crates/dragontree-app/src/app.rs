@@ -507,6 +507,15 @@ impl DragonTreeApp {
         self.instance = Some(instance);
     }
 
+    /// Dossier du dépôt de l'onglet actif (`None` : onglet d'accueil), pour un hôte qui partage le
+    /// dépôt courant avec ses autres modules.
+    pub fn active_repo_dir(&self) -> Option<&std::path::Path> {
+        match self.tabs.get(self.active).map(|t| &t.kind) {
+            Some(TabKind::Repo(r)) => Some(r.path.as_path()),
+            _ => None,
+        }
+    }
+
     /// Thème et langue imposés par un hôte qui embarque DragonTree (la suite), comme `--theme` et
     /// `--lang` : ils remplacent les réglages pour la session sans y être écrits (voir
     /// `Shared::theme_override`). `None` : les réglages.
