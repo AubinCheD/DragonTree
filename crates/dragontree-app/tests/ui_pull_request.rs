@@ -41,8 +41,9 @@ fn seed(base: &Path, with_account: bool) {
     } else {
         vec![]
     };
-    let settings = Settings { auto_fetch_minutes: 0, accounts, ..Settings::default() };
+    let settings = Settings { auto_fetch_minutes: 0, ..Settings::default() };
     settings.save_to(&base.join("profil").join("settings.json")).unwrap();
+    seed_accounts(base, &accounts);
 }
 
 fn open(base: &Path, repo: &Path) -> H {

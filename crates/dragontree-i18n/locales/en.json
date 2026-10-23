@@ -1395,5 +1395,10 @@
   "… et {n} autre": "… and {n} more",
   "… et {n} autres": "… and {n} more",
   "… {n} autre": "… {n} more",
-  "… {n} autres": "… {n} more"
+  "… {n} autres": "… {n} more",
+  "Compte mis à jour : {account} — jeton remplacé pour toute la suite": "Account updated: {account} — token replaced for the whole suite",
+  "Compte non mis à jour": "Account not updated",
+  "Compte non supprimé": "Account not removed",
+  "Comptes de la suite illisibles": "The suite accounts cannot be read",
+  "Comptes non repris par la suite": "Accounts not taken over by the suite"
 }

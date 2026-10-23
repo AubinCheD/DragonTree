@@ -37,6 +37,16 @@ pub fn try_git(dir: &Path, args: &[&str]) -> Option<String> {
     test_git().cmd(dir).args(args).run().ok().map(|o| o.stdout_str())
 }
 
+/// Comptes de la suite du profil de test (`<base>/profil/accounts.json`, voir `suite_accounts::accounts_dir`), sans
+/// jeton : DragonTree les lit là, et non dans ses réglages.
+pub fn seed_accounts(base: &Path, accounts: &[dragontree_forges::Account]) {
+    let store =
+        suite_accounts::Store::new(&base.join("profil"), std::sync::Arc::new(suite_accounts::MemoryVault::default()));
+    for a in accounts {
+        store.adopt(a.into(), None).unwrap();
+    }
+}
+
 pub fn init_repo(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     git(dir, &["init", "-q", "-b", "main"]);

@@ -243,8 +243,13 @@ Fenêtre **Comptes** (page d'accueil, réglages ou Ctrl+P) : choisissez le servi
 Pour Azure DevOps, si le jeton est limité à une organisation, indiquez-la dans le champ « Organisation(s) »
 (DragonTree propose celles trouvées dans les remotes de vos dépôts).
 
-Sécurité : les jetons sont stockés dans le **Gestionnaire d'identifiants Windows** (service « DragonTree »), jamais
-dans les réglages ni dans les URL. Pour un clone fait depuis un compte, puis pour les fetch/pull/push de ce
+Les comptes sont **communs à toute la suite EyrieSuite** : ceux ajoutés ici valent aussi dans Eyrie et Owlery, et
+réciproquement (liste dans `%APPDATA%\EyrieSuite\accounts.json`, voir `../SuperApp/docs/comptes.md`). Au premier
+lancement, les comptes d'avant la suite y sont repris, avec leurs dépôts associés. Dans Eyrie, « Comptes… » ouvre la
+page Comptes d'Eyrie.
+
+Sécurité : les jetons sont stockés dans le **Gestionnaire d'identifiants Windows** (service « EyrieSuite » ; l'ancien
+service « DragonTree » est encore relu), jamais dans les réglages ni dans les URL. Pour un clone fait depuis un compte, puis pour les fetch/pull/push de ce
 dépôt, DragonTree transmet l'authentification à git par variables d'environnement (`http.<origine>.extraHeader`) :
 rien n'est écrit dans `.git/config`. Les autres dépôts utilisent votre configuration git habituelle, sauf si vous leur
 associez un compte : **Dépôt › Utiliser le compte…** (ou les réglages du dépôt) propose d'abord les comptes qui

@@ -12,6 +12,7 @@ use egui::{RichText, Ui};
 
 use crate::app::{AppEvent, Shared};
 use crate::icons;
+use crate::settings::Settings;
 use crate::theme::Palette;
 use crate::toasts::Toast;
 
@@ -113,18 +114,18 @@ impl AccountsWindow {
     pub fn handle(&mut self, ev: ForgeEvent, shared: &mut Shared) {
         match ev {
             ForgeEvent::Verified { req, sent, result } => {
-                self.on_verified(req, sent, result, shared, secrets::store_token);
+                self.on_verified(req, sent, result, shared, Shared::add_account);
             }
             ForgeEvent::Rechecked { account_id, result } => {
                 let status = match result {
                     Ok(user) => {
-                        if let Some(acc) = shared.settings.accounts.iter_mut().find(|a| a.id == account_id) {
+                        if let Some(mut acc) = shared.settings.accounts.iter().find(|a| a.id == account_id).cloned() {
                             acc.display_name = user.display_name;
                             if !user.orgs.is_empty() {
                                 acc.orgs = user.orgs;
                             }
                             acc.avatar_url = user.avatar_url;
-                            shared.settings_dirty = true;
+                            shared.update_account(&acc);
                         }
                         AccountStatus::Ok
                     }
@@ -136,14 +137,14 @@ impl AccountsWindow {
     }
 
     /// Réponse de la vérification : le compte est créé avec les valeurs envoyées (`sent`), jamais avec le formulaire
-    /// relu ; `store` enregistre le jeton (le Gestionnaire d'identifiants hors des tests).
+    /// relu ; `add` le range avec son jeton (dans les comptes de toute la suite : `Shared::add_account`).
     fn on_verified(
         &mut self,
         req: u64,
         sent: Submitted,
         result: Result<VerifiedUser, ForgeError>,
         shared: &mut Shared,
-        store: impl FnOnce(&str, &str) -> Result<(), ForgeError>,
+        add: impl FnOnce(&mut Shared, Account, &str) -> Result<Account, ForgeError>,
     ) {
         let Some(form) = &mut self.form else { return };
         if form.verifying != Some(req) {
@@ -161,14 +162,24 @@ impl AccountsWindow {
                     orgs: user.orgs.clone(),
                     avatar_url: user.avatar_url.clone(),
                 };
-                if let Err(e) = store(&account.id, &sent.token) {
-                    form.error = Some(tr!("Impossible d'enregistrer le jeton : {e}", e));
-                    return;
+                let new_id = account.id.clone();
+                let account = match add(shared, account, &sent.token) {
+                    Ok(account) => account,
+                    Err(e) => {
+                        form.error = Some(tr!("Impossible d'enregistrer le jeton : {e}", e));
+                        return;
+                    }
+                };
+                // Une connexion déjà connue de la suite garde son identifiant : son jeton est remplacé partout.
+                if account.id == new_id {
+                    shared.toast(Toast::success(tr!("Compte ajouté : {account}", account = account.title())));
+                } else {
+                    shared.toast(Toast::success(tr!(
+                        "Compte mis à jour : {account} — jeton remplacé pour toute la suite",
+                        account = account.title()
+                    )));
                 }
-                shared.toast(Toast::success(tr!("Compte ajouté : {account}", account = account.title())));
                 self.status.insert(account.id.clone(), AccountStatus::Ok);
-                shared.settings.accounts.push(account);
-                shared.save_settings();
                 self.form = None;
             }
             Err(e) => form.error = Some(explain_error(&e, sent.kind)),
@@ -257,10 +268,7 @@ impl AccountsWindow {
                     });
                 }
                 if let Some(id) = remove {
-                    let _ = secrets::delete_token(&id);
-                    shared.settings.accounts.retain(|a| a.id != id);
-                    shared.settings.repo_accounts.retain(|_, v| *v != id);
-                    shared.save_settings();
+                    shared.remove_account(&id);
                     self.status.remove(&id);
                 }
 
@@ -344,6 +352,45 @@ impl AccountsWindow {
     }
 }
 
+/// Reprise des comptes d'un DragonTree d'avant la suite (`Settings::legacy_accounts`) : chacun passe dans les comptes
+/// communs avec le jeton de l'ancien coffre (`legacy`) ; une connexion déjà connue de la suite garde son identifiant
+/// (les dépôts associés le suivent) et prend le jeton de DragonTree, qui sait pousser, s'il diffère. Les anciens comptes
+/// ne quittent les réglages que si tous ont été repris : un échec les garde pour le lancement suivant. Vrai si des
+/// comptes ont été repris.
+pub fn migrate_accounts(
+    settings: &mut Settings,
+    store: &suite_accounts::Store,
+    legacy: impl Fn(&str) -> Option<String>,
+) -> Result<bool, String> {
+    if settings.legacy_accounts.is_empty() {
+        return Ok(false);
+    }
+    let mut renamed = std::collections::BTreeMap::new();
+    let mut take_over = |a: &Account| -> Result<(), String> {
+        let token = legacy(&a.id).filter(|t| !t.trim().is_empty());
+        let id = store.adopt(a.into(), token.clone())?;
+        if let Some(token) = token
+            && store.token(&id)?.as_deref() != Some(token.trim())
+        {
+            store.set_token(&id, &token)?;
+        }
+        if id != a.id {
+            renamed.insert(a.id.clone(), id);
+        }
+        Ok(())
+    };
+    let result = settings.legacy_accounts.iter().try_for_each(&mut take_over);
+    // Les dépôts suivent les comptes déjà repris, même si un suivant a échoué.
+    for id in settings.repo_accounts.values_mut() {
+        if let Some(new) = renamed.get(id) {
+            *id = new.clone();
+        }
+    }
+    result?;
+    settings.legacy_accounts.clear();
+    Ok(true)
+}
+
 fn explain_error(e: &ForgeError, kind: ForgeKind) -> String {
     match e {
         ForgeError::Unauthorized if kind == ForgeKind::AzureDevOps => {
@@ -370,9 +417,14 @@ mod tests {
         assert_eq!(azure_org_from_url("git@ssh.dev.azure.com:v3/acme/p/r"), None);
     }
 
+    fn suite_store(dir: &std::path::Path) -> suite_accounts::Store {
+        suite_accounts::Store::new(&dir.join("suite"), std::sync::Arc::new(suite_accounts::MemoryVault::default()))
+    }
+
     fn window_with_form(shared_dir: &std::path::Path) -> (AccountsWindow, Shared) {
         let (store, settings, _) = SettingsFile::load(&shared_dir.join("settings.json"));
-        let (shared, _events) = Shared::new(egui::Context::default(), settings, store, None, None);
+        let (mut shared, _events) = Shared::new(egui::Context::default(), settings, store, None, None);
+        shared.set_accounts_store(suite_store(shared_dir));
         let mut window = AccountsWindow::default();
         let mut form = AccountForm::new(ForgeKind::GitHub, &[]);
         form.verifying = Some(1);
@@ -394,15 +446,14 @@ mod tests {
         let form = window.form.as_mut().unwrap();
         form.token = "jeton-non-verifie".into();
         form.host = "autre.fabrikam.test".into();
-        let mut stored = None;
-        window.on_verified(1, sent, Ok(verified_user()), &mut shared, |id, token| {
-            stored = Some((id.to_string(), token.to_string()));
-            Ok(())
-        });
-        let (id, token) = stored.expect("le jeton est enregistré");
-        assert_eq!(token, "jeton-verifie");
-        let account = &shared.settings.accounts[0];
-        assert_eq!((account.id.as_str(), account.host.as_str()), (id.as_str(), "github.contoso.test"));
+        window.on_verified(1, sent, Ok(verified_user()), &mut shared, Shared::add_account);
+        let account = shared.settings.accounts[0].clone();
+        assert_eq!(account.host, "github.contoso.test");
+        let store = shared.accounts_store().expect("comptes de la suite");
+        assert_eq!(store.token(&account.id).unwrap().as_deref(), Some("jeton-verifie"));
+        assert_eq!(store.list().len(), 1, "le compte est celui de toute la suite");
+        let saved = serde_json::to_value(&shared.settings).unwrap();
+        assert!(saved.get("accounts").is_none(), "jamais écrits dans les réglages de DragonTree");
         assert!(window.form.is_none());
     }
 
@@ -411,8 +462,120 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut window, mut shared) = window_with_form(dir.path());
         let sent = Submitted { kind: ForgeKind::GitHub, host: "github.contoso.test".into(), token: "jeton".into() };
-        window.on_verified(2, sent, Ok(verified_user()), &mut shared, |_, _| panic!("rien à enregistrer"));
+        window.on_verified(2, sent, Ok(verified_user()), &mut shared, |_, _, _| panic!("rien à enregistrer"));
         assert!(shared.settings.accounts.is_empty());
         assert!(window.form.is_some());
+    }
+
+    fn login(id: &str, kind: ForgeKind, host: &str, username: &str) -> Account {
+        Account {
+            id: id.into(),
+            kind,
+            host: host.into(),
+            username: username.into(),
+            display_name: String::new(),
+            orgs: Vec::new(),
+            avatar_url: None,
+        }
+    }
+
+    #[test]
+    fn old_accounts_move_to_the_suite_and_keep_their_repos() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = suite_store(dir.path());
+        // Déjà connu de la suite (ajouté dans Eyrie) sous un autre identifiant.
+        let known = store
+            .add(
+                suite_accounts::Account::from(&login(
+                    "eeeeeeeeeeeeeeee",
+                    ForgeKind::GitLab,
+                    "gitlab.contoso.test",
+                    "ada",
+                )),
+                "jeton-eyrie",
+            )
+            .unwrap();
+        let mut settings = crate::settings::Settings {
+            legacy_accounts: vec![
+                login("aaaaaaaaaaaaaaaa", ForgeKind::GitLab, "https://GitLab.contoso.test/", "Ada"),
+                login("bbbbbbbbbbbbbbbb", ForgeKind::GitHub, "github.com", "grace"),
+            ],
+            ..Default::default()
+        };
+        settings.repo_accounts.insert("c:/dev/depot".into(), "aaaaaaaaaaaaaaaa".into());
+        settings.repo_accounts.insert("c:/dev/autre".into(), "bbbbbbbbbbbbbbbb".into());
+
+        let legacy = |id: &str| (id == "bbbbbbbbbbbbbbbb").then(|| "jeton-grace".to_string());
+        assert_eq!(migrate_accounts(&mut settings, &store, legacy), Ok(true));
+
+        assert!(settings.legacy_accounts.is_empty(), "les comptes ne sont plus dans les réglages de DragonTree");
+        assert_eq!(settings.repo_accounts["c:/dev/depot"], known.id, "le dépôt suit le compte déjà connu");
+        assert_eq!(settings.repo_accounts["c:/dev/autre"], "bbbbbbbbbbbbbbbb");
+        assert_eq!(store.list().len(), 2);
+        assert_eq!(store.token("bbbbbbbbbbbbbbbb").unwrap().as_deref(), Some("jeton-grace"));
+        assert_eq!(store.token(&known.id).unwrap().as_deref(), Some("jeton-eyrie"));
+        assert_eq!(migrate_accounts(&mut settings, &store, legacy), Ok(false), "une seule fois");
+    }
+
+    /// Owlery est passé avant, avec un jeton en lecture seule : celui de DragonTree, qui sait pousser, l'emporte.
+    #[test]
+    fn dragontree_keeps_its_own_token_when_it_takes_over_a_known_login() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = suite_store(dir.path());
+        let known =
+            store.add((&login("eeeeeeeeeeeeeeee", ForgeKind::GitHub, "github.com", "ada")).into(), "lecture").unwrap();
+        let mut settings = crate::settings::Settings {
+            legacy_accounts: vec![login("aaaaaaaaaaaaaaaa", ForgeKind::GitHub, "github.com", "ada")],
+            ..Default::default()
+        };
+        assert_eq!(migrate_accounts(&mut settings, &store, |_| Some("ecriture".into())), Ok(true));
+        assert_eq!(store.token(&known.id).unwrap().as_deref(), Some("ecriture"));
+    }
+
+    #[test]
+    fn a_failed_migration_keeps_the_old_accounts_in_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("suite")).unwrap();
+        std::fs::write(dir.path().join("suite").join("accounts.json"), "{ pas du json").unwrap();
+        let store = suite_store(dir.path());
+        let mut settings = crate::settings::Settings {
+            legacy_accounts: vec![login("aaaaaaaaaaaaaaaa", ForgeKind::GitHub, "github.com", "ada")],
+            ..Default::default()
+        };
+        assert!(migrate_accounts(&mut settings, &store, |_| None).is_err());
+        assert_eq!(settings.legacy_accounts.len(), 1, "gardés pour le prochain lancement");
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["accounts"][0]["id"], "aaaaaaaaaaaaaaaa", "toujours écrits dans settings.json");
+    }
+
+    #[test]
+    fn accounts_survive_an_unreadable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, mut shared) = window_with_form(dir.path());
+        suite_store(dir.path())
+            .add((&login("cccccccccccccccc", ForgeKind::GitHub, "github.com", "ada")).into(), "t")
+            .unwrap();
+        shared.accounts_check = None;
+        shared.refresh_accounts();
+        assert_eq!(shared.settings.accounts.len(), 1);
+        std::fs::write(dir.path().join("suite").join("accounts.json"), "{ pas du json").unwrap();
+        shared.accounts_check = None;
+        shared.refresh_accounts();
+        assert_eq!(shared.settings.accounts.len(), 1, "la dernière liste lue reste");
+    }
+
+    #[test]
+    fn accounts_reload_when_the_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, mut shared) = window_with_form(dir.path());
+        assert!(shared.settings.accounts.is_empty());
+        let elsewhere = suite_store(dir.path());
+        elsewhere
+            .add(suite_accounts::Account::from(&login("cccccccccccccccc", ForgeKind::GitHub, "github.com", "ada")), "t")
+            .unwrap();
+        shared.accounts_check = None;
+        shared.refresh_accounts();
+        assert_eq!(shared.settings.accounts.len(), 1);
+        assert_eq!(shared.settings.accounts[0].username, "ada");
     }
 }

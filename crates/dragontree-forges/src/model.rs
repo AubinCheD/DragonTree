@@ -36,7 +36,23 @@ impl ForgeKind {
     }
 }
 
-/// Compte enregistré dans les réglages (le jeton est dans le Gestionnaire d'identifiants).
+impl ForgeKind {
+    /// Forge d'un compte de la suite EyrieSuite (`suite_accounts::forge`).
+    pub fn suite_key(self) -> &'static str {
+        match self {
+            ForgeKind::GitHub => suite_accounts::forge::GITHUB,
+            ForgeKind::GitLab => suite_accounts::forge::GITLAB,
+            ForgeKind::AzureDevOps => suite_accounts::forge::AZURE,
+        }
+    }
+
+    pub fn from_suite_key(key: &str) -> Option<ForgeKind> {
+        ForgeKind::ALL.into_iter().find(|k| k.suite_key() == key)
+    }
+}
+
+/// Un compte : ceux de toute la suite EyrieSuite (`suite-accounts`), communs à Eyrie, DragonTree et Owlery ; le jeton
+/// est dans le Gestionnaire d'identifiants (voir [`crate::secrets`]).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Account {
     pub id: String,
@@ -46,6 +62,36 @@ pub struct Account {
     pub display_name: String,
     pub orgs: Vec<String>,
     pub avatar_url: Option<String>,
+}
+
+impl From<&Account> for suite_accounts::Account {
+    fn from(a: &Account) -> Self {
+        suite_accounts::Account {
+            id: a.id.clone(),
+            forge: a.kind.suite_key().into(),
+            host: a.host.clone(),
+            username: a.username.clone(),
+            display_name: a.display_name.clone(),
+            orgs: a.orgs.clone(),
+            avatar_url: a.avatar_url.clone(),
+            ..Default::default()
+        }
+    }
+}
+
+impl Account {
+    /// Un compte de la suite ; forge inconnue de DragonTree (profil Claude…) : `None`.
+    pub fn from_suite(a: &suite_accounts::Account) -> Option<Account> {
+        Some(Account {
+            id: a.id.clone(),
+            kind: ForgeKind::from_suite_key(&a.forge)?,
+            host: a.host.clone(),
+            username: a.username.clone(),
+            display_name: a.display_name.clone(),
+            orgs: a.orgs.clone(),
+            avatar_url: a.avatar_url.clone(),
+        })
+    }
 }
 
 impl Account {
@@ -401,6 +447,20 @@ mod tests {
         }
         let unique: HashSet<&String> = ids.iter().collect();
         assert_eq!(unique.len(), ids.len());
+    }
+
+    #[test]
+    fn accounts_go_to_the_suite_and_back() {
+        let a = Account {
+            orgs: vec!["contoso".into()],
+            avatar_url: Some("https://avatars.contoso.test/camille.png".into()),
+            ..account(ForgeKind::AzureDevOps, "dev.azure.com", "camille@contoso.test", "Camille")
+        };
+        let s = suite_accounts::Account::from(&a);
+        assert_eq!((s.forge.as_str(), s.host.as_str(), s.id.as_str()), ("azure", "dev.azure.com", a.id.as_str()));
+        assert_eq!(Account::from_suite(&s), Some(a));
+        let other = suite_accounts::Account { forge: "claude".into(), ..s };
+        assert_eq!(Account::from_suite(&other), None, "forge inconnue de DragonTree");
     }
 
     #[test]

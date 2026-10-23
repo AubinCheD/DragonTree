@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
+use dragontree_forges::{Account, ForgeError, secrets};
 use dragontree_git::{Git, GitError};
 use dragontree_i18n::{Lang, tr};
 use egui::{Frame, Key, KeyboardShortcut, Modifiers};
@@ -143,7 +144,19 @@ pub struct Shared {
     pub dialog_after_op: bool,
     /// Clonages en cours, que la fin de l'application attend un peu (voir `clone::CloneTasks`).
     pub clone_tasks: crate::clone::CloneTasks,
+    /// Les comptes de toute la suite (`settings.accounts` en est le reflet) ; `None` dans les tests qui remplissent
+    /// `settings.accounts` eux-mêmes.
+    accounts_store: Option<suite_accounts::Store>,
+    accounts_stamp: Option<std::time::SystemTime>,
+    pub(crate) accounts_check: Option<Instant>,
+    /// Dernière erreur de lecture des comptes de la suite, déjà signalée.
+    accounts_error: Option<String>,
+    /// Embarqué par un hôte (Eyrie) : thème et langue viennent de lui, les comptes se règlent chez lui.
+    pub hosted: bool,
 }
+
+/// Relecture des comptes de la suite (une autre application a pu les changer) : au plus toutes les 2 s.
+const ACCOUNTS_CHECK_EVERY: Duration = Duration::from_secs(2);
 
 impl Shared {
     /// État partagé ; le récepteur reçoit les événements des tâches d'arrière-plan.
@@ -180,8 +193,128 @@ impl Shared {
             queues: Default::default(),
             dialog_after_op: false,
             clone_tasks: Default::default(),
+            accounts_store: None,
+            accounts_stamp: None,
+            accounts_check: None,
+            accounts_error: None,
+            hosted: false,
         };
         (shared, rx)
+    }
+
+    /// Reprise des comptes d'un DragonTree d'avant la suite (voir `accounts::migrate_accounts`), au démarrage et quand
+    /// des réglages relus en apportent. En capture d'écran, où rien n'est écrit, ils sont seulement montrés.
+    pub fn take_over_legacy_accounts(&mut self) {
+        if self.settings.legacy_accounts.is_empty() {
+            return;
+        }
+        let Some(store) = self.accounts_store.clone() else { return };
+        if self.settings_read_only {
+            for a in self.settings.legacy_accounts.clone() {
+                if !self.settings.accounts.iter().any(|k| k.same_login(&a)) {
+                    self.settings.accounts.push(a);
+                }
+            }
+            return;
+        }
+        let result = crate::accounts::migrate_accounts(&mut self.settings, &store, |id| {
+            secrets::legacy_token(id).ok().flatten()
+        });
+        if let Err(e) = result {
+            self.toasts.push(Toast::error(tr!("Comptes non repris par la suite"), e));
+        }
+        self.reload_accounts();
+        self.save_settings();
+    }
+
+    /// Les comptes de toute la suite, lus aussitôt dans `settings.accounts`.
+    pub fn set_accounts_store(&mut self, store: suite_accounts::Store) {
+        self.accounts_store = Some(store);
+        self.reload_accounts();
+    }
+
+    pub fn accounts_store(&self) -> Option<&suite_accounts::Store> {
+        self.accounts_store.as_ref()
+    }
+
+    /// Relit les comptes. Un fichier illisible n'est pas « aucun compte » : la dernière liste reste, la date n'avance
+    /// pas (il sera relu), et l'erreur est dite une fois.
+    fn reload_accounts(&mut self) {
+        let Some(store) = &self.accounts_store else { return };
+        self.accounts_check = Some(Instant::now() + ACCOUNTS_CHECK_EVERY);
+        // La date avant la liste : une écriture qui tombe entre les deux sera relue la fois suivante.
+        let stamp = store.stamp();
+        match store.try_list() {
+            Ok(list) => {
+                self.settings.accounts = list.iter().filter_map(Account::from_suite).collect();
+                self.accounts_stamp = stamp;
+                self.accounts_error = None;
+            }
+            Err(e) => {
+                if self.accounts_error.as_ref() != Some(&e) {
+                    self.toasts.push(Toast::error(tr!("Comptes de la suite illisibles"), e.clone()));
+                    self.accounts_error = Some(e);
+                }
+            }
+        }
+    }
+
+    /// Relit les comptes si une autre application de la suite (Eyrie, Owlery, un autre DragonTree) les a changés.
+    pub fn refresh_accounts(&mut self) {
+        let Some(store) = &self.accounts_store else { return };
+        if self.accounts_check.is_some_and(|t| Instant::now() < t) {
+            return;
+        }
+        self.accounts_check = Some(Instant::now() + ACCOUNTS_CHECK_EVERY);
+        if store.stamp() != self.accounts_stamp {
+            self.reload_accounts();
+        }
+    }
+
+    /// Ajoute un compte vérifié à toute la suite (une connexion déjà connue garde son identifiant) ; renvoie le
+    /// compte enregistré.
+    pub fn add_account(&mut self, account: Account, token: &str) -> Result<Account, ForgeError> {
+        let Some(store) = &self.accounts_store else {
+            secrets::store_token(&account.id, token)?;
+            self.settings.accounts.push(account.clone());
+            return Ok(account);
+        };
+        let stored = store.add((&account).into(), token).map_err(ForgeError::Secret)?;
+        self.reload_accounts();
+        Ok(Account::from_suite(&stored).unwrap_or(account))
+    }
+
+    /// Met à jour le nom, les organisations et l'avatar d'un compte, pour toute la suite.
+    pub fn update_account(&mut self, account: &Account) {
+        match &self.accounts_store {
+            Some(store) => {
+                if let Err(e) = store.update(&account.into()) {
+                    self.toasts.push(Toast::error(tr!("Compte non mis à jour"), e));
+                }
+                self.reload_accounts();
+            }
+            None => {
+                if let Some(a) = self.settings.accounts.iter_mut().find(|a| a.id == account.id) {
+                    *a = account.clone();
+                }
+            }
+        }
+    }
+
+    /// Retire un compte de toute la suite (liste et jeton) ; ses dépôts associés ne l'utilisent plus.
+    pub fn remove_account(&mut self, id: &str) {
+        if let Some(store) = &self.accounts_store
+            && let Err(e) = store.remove(id)
+        {
+            self.toasts.push(Toast::error(tr!("Compte non supprimé"), e));
+            return;
+        }
+        // L'ancien coffre de DragonTree aussi.
+        let _ = secrets::delete_token(id);
+        self.settings.accounts.retain(|a| a.id != id);
+        self.settings.repo_accounts.retain(|_, v| v != id);
+        self.reload_accounts();
+        self.save_settings();
     }
 
     pub fn settings_file(&self) -> PathBuf {
@@ -214,7 +347,13 @@ impl Shared {
                 None => Git::discover().ok(),
             };
         }
+        // Les comptes ne viennent pas du fichier de réglages : ceux de la suite restent.
+        let accounts = std::mem::take(&mut self.settings.accounts);
         self.settings = new;
+        if self.accounts_store.is_some() {
+            self.settings.accounts = accounts;
+            self.take_over_legacy_accounts();
+        }
         if rescan {
             self.actions.push(AppAction::Rescan);
         }
@@ -312,6 +451,9 @@ pub struct StartOptions {
     pub add_root: Option<PathBuf>,
     pub select_commit: Option<usize>,
     pub window: Option<String>,
+    /// Dossier des comptes de toute la suite, donné par un hôte qui embarque DragonTree (Eyrie) : il l'emporte sur
+    /// `suite_accounts::accounts_dir` (variable `EYRIESUITE_DIR`, profil à part, dossier commun).
+    pub accounts_dir: Option<PathBuf>,
     /// Dossier `.ssh` de la fenêtre « Clés SSH » : réservé aux tests (et à `--profile`) ; `~/.ssh` par défaut.
     pub ssh_dir: Option<PathBuf>,
     /// Lecture des pull requests d'un compte (fenêtre « Pull requests ») : réservée aux tests, qui répondent sans
@@ -368,6 +510,8 @@ pub struct DragonTreeApp {
     closing: crate::closing::Closing,
     /// Première instance du profil (RV4b, posée par `main`) : reçoit les dépôts des instances lancées ensuite.
     instance: Option<crate::single_instance::PrimaryInstance>,
+    /// Posé par l'hôte : les comptes se règlent chez lui (voir `set_accounts_link`).
+    accounts_link: Option<Box<dyn Fn()>>,
 }
 
 impl DragonTreeApp {
@@ -396,6 +540,15 @@ impl DragonTreeApp {
         // chaque image (`update`).
         shared.theme_override = start.theme;
         shared.lang_override = start.lang;
+        // Les comptes de toute la suite EyrieSuite ; un profil à part (`--profile`, essais) garde des comptes à part.
+        // Le dossier donné par l'hôte (Eyrie), sinon celui du profil à part, sinon celui de toute la suite.
+        let accounts_dir =
+            start.accounts_dir.clone().unwrap_or_else(|| suite_accounts::accounts_dir(start.profile_dir.as_deref()));
+        shared.set_accounts_store(suite_accounts::Store::new(
+            &accounts_dir,
+            std::sync::Arc::new(suite_accounts::OsVault::suite()),
+        ));
+        shared.take_over_legacy_accounts();
         let system_lang = Lang::system();
         dragontree_i18n::set_lang(shared.language().unwrap_or(system_lang));
         let applied_theme = (shared.theme(), shared.settings.ui_scale);
@@ -461,6 +614,7 @@ impl DragonTreeApp {
             workspace_dialog: Default::default(),
             closing: Default::default(),
             instance: None,
+            accounts_link: None,
         };
 
         // Onglets : ceux de la ligne de commande, sinon ceux de la dernière session.
@@ -526,6 +680,17 @@ impl DragonTreeApp {
         if self.shared.lang_override != lang {
             self.shared.lang_override = lang;
         }
+    }
+
+    /// Embarqué par un hôte (Eyrie) : thème et langue, qu'il impose, disparaissent des réglages et des menus.
+    pub fn set_hosted(&mut self, hosted: bool) {
+        self.shared.hosted = hosted;
+    }
+
+    /// Embarqué par un hôte qui règle les comptes de toute la suite : « Comptes… » appelle `open` au lieu d'ouvrir
+    /// la fenêtre Comptes de DragonTree.
+    pub fn set_accounts_link(&mut self, open: Box<dyn Fn()>) {
+        self.accounts_link = Some(open);
     }
 
     /// Dépôts transmis par les instances lancées ensuite sur le même profil : ouverts dans des onglets (ou l'onglet
@@ -864,7 +1029,10 @@ impl DragonTreeApp {
                     self.clone = Some(CloneWindow::new(&self.shared));
                 }
             }
-            AppAction::ShowAccounts => self.accounts.open = true,
+            AppAction::ShowAccounts => match &self.accounts_link {
+                Some(open) => open(),
+                None => self.accounts.open = true,
+            },
             AppAction::ShowPullRequests => self.pull_requests.show(),
             AppAction::ShowSshKeys => self.ssh_keys.show(),
             AppAction::ShowGitIdentity => self.git_identity.show(&self.shared),
@@ -932,6 +1100,7 @@ impl DragonTreeApp {
             can_reopen_tab: !self.closed_tabs.is_empty(),
             lfs_available: self.shared.lfs,
             editors: &self.shared.editors,
+            hosted: self.shared.hosted,
         }
     }
 
@@ -1286,6 +1455,7 @@ impl eframe::App for DragonTreeApp {
         let ops = Operations::new(&self.shared.queues, self.tab_work(), self.clone.as_ref());
         self.closing.intercept(ctx, &ops, self.screenshot_requested, decision);
         self.receive_forwarded(ctx);
+        self.shared.refresh_accounts();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

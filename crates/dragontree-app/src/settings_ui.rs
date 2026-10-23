@@ -127,19 +127,22 @@ impl SettingsWindow {
     fn general_tab(&mut self, ui: &mut egui::Ui, shared: &mut Shared, p: &Palette) {
         let d = &mut self.draft;
         section(ui, tr!("Apparence"));
-        ui.horizontal(|ui| {
-            ui.label(tr!("Thème"));
-            ui.selectable_value(&mut d.theme, ThemeChoice::System, tr!("Système"));
-            ui.selectable_value(&mut d.theme, ThemeChoice::Light, format!("{} {}", icons::SUN, tr!("Clair")));
-            ui.selectable_value(&mut d.theme, ThemeChoice::Dark, format!("{} {}", icons::MOON, tr!("Sombre")));
-        });
-        ui.horizontal(|ui| {
-            ui.label(tr!("Langue"));
-            ui.selectable_value(&mut d.language, None, tr!("Système"));
-            for lang in Lang::ALL {
-                ui.selectable_value(&mut d.language, Some(lang), lang.native_name());
-            }
-        });
+        // Embarqué, le thème et la langue sont ceux de l'hôte.
+        if !shared.hosted {
+            ui.horizontal(|ui| {
+                ui.label(tr!("Thème"));
+                ui.selectable_value(&mut d.theme, ThemeChoice::System, tr!("Système"));
+                ui.selectable_value(&mut d.theme, ThemeChoice::Light, format!("{} {}", icons::SUN, tr!("Clair")));
+                ui.selectable_value(&mut d.theme, ThemeChoice::Dark, format!("{} {}", icons::MOON, tr!("Sombre")));
+            });
+            ui.horizontal(|ui| {
+                ui.label(tr!("Langue"));
+                ui.selectable_value(&mut d.language, None, tr!("Système"));
+                for lang in Lang::ALL {
+                    ui.selectable_value(&mut d.language, Some(lang), lang.native_name());
+                }
+            });
+        }
         ui.horizontal(|ui| {
             let label = ui.label(tr!("Taille de l'interface"));
             ui.add(

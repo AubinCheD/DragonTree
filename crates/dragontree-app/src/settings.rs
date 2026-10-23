@@ -134,7 +134,14 @@ pub struct Settings {
     pub workspaces: BTreeMap<String, crate::workspaces::Workspace>,
     /// Espace de travail actif ; vide : « Par défaut ».
     pub current_workspace: String,
+    /// Les comptes de toute la suite EyrieSuite (`suite-accounts`), relus pendant la session (voir
+    /// `Shared::refresh_accounts`) : ni lus ni écrits ici.
+    #[serde(skip)]
     pub accounts: Vec<Account>,
+    /// Comptes d'un DragonTree d'avant la suite : gardés dans le fichier (clé `accounts`) tant que leur reprise par la
+    /// suite n'a pas réussi (voir `accounts::migrate_accounts`).
+    #[serde(rename = "accounts", skip_serializing_if = "Vec::is_empty")]
+    pub legacy_accounts: Vec<Account>,
     /// Dépôt (chemin) → identifiant du compte utilisé pour fetch/pull/push : rempli par un clonage depuis un compte,
     /// par Dépôt › Utiliser le compte… et par les réglages du dépôt (la fenêtre Réglages ne l'édite pas).
     pub repo_accounts: BTreeMap<String, String>,
@@ -217,6 +224,7 @@ impl Default for Settings {
             workspaces: BTreeMap::new(),
             current_workspace: String::new(),
             accounts: Vec::new(),
+            legacy_accounts: Vec::new(),
             repo_accounts: BTreeMap::new(),
             diff_context: 3,
             ignore_whitespace: false,
@@ -498,7 +506,6 @@ pub fn merge_session(base: &Settings, mine: &Settings, theirs: &Settings) -> Set
     for workspace in merged.workspaces.values_mut() {
         dedup_paths(&mut workspace.tabs);
     }
-    dedup_accounts(&mut merged);
     // Plafonds des listes (voir `push_recent` et `remember_message`).
     merged.recent_repos.truncate(RECENT_REPOS_MAX);
     for list in merged.recent_messages.values_mut() {
@@ -533,28 +540,6 @@ fn window_state_of_the_session(merged: &mut Settings, mine: &Settings, theirs: &
 fn dedup_paths(paths: &mut Vec<PathBuf>) {
     let mut seen = std::collections::HashSet::new();
     paths.retain(|p| seen.insert(path_key(p)));
-}
-
-/// Retire les comptes en double (même connexion, voir `Account::same_login`) ; le premier est gardé (celui de la
-/// session, en tête après la fusion) et les dépôts associés à un compte retiré passent à celui qui est gardé. Le jeton
-/// du compte retiré reste dans le Gestionnaire d'identifiants.
-fn dedup_accounts(merged: &mut Settings) {
-    let mut kept: Vec<Account> = Vec::new();
-    let mut replaced = BTreeMap::new();
-    for account in std::mem::take(&mut merged.accounts) {
-        match kept.iter().find(|k| k.same_login(&account)) {
-            Some(k) => {
-                replaced.insert(account.id, k.id.clone());
-            }
-            None => kept.push(account),
-        }
-    }
-    merged.accounts = kept;
-    for id in merged.repo_accounts.values_mut() {
-        if let Some(new) = replaced.get(id) {
-            *id = new.clone();
-        }
-    }
 }
 
 /// Fusion à trois d'une valeur JSON (voir [`merge_session`]) ; `None` : entrée absente du résultat.
@@ -873,8 +858,6 @@ mod tests {
     fn the_merge_keeps_the_file_values_the_session_did_not_change() {
         use crate::external_tools::ToolPreset;
         let base = Settings::default();
-        // Deux connexions différentes (identifiants distincts) : voir le test des doublons pour la même.
-        let account = |id: &str| Account { id: id.into(), username: id.into(), ..account("x") };
         let repo_a = Path::new(r"C:\DEV\Fabrikam");
         let repo_b = Path::new(r"C:\DEV\Contoso");
         let mut theirs = Settings {
@@ -882,7 +865,6 @@ mod tests {
             ui_scale: 1.2,
             show_tags: false,
             recent_repos: vec![repo_a.into(), repo_b.into()],
-            accounts: vec![account("compte-fichier")],
             ..Settings::default()
         };
         theirs.scan_skip_dirs.push("vendor".into());
@@ -895,7 +877,6 @@ mod tests {
         let mut mine = base.clone();
         mine.theme = ThemeChoice::Light;
         mine.push_recent(Path::new(r"C:\DEV\Northwind"));
-        mine.accounts.push(account("compte-session"));
         let removed = mine.scan_skip_dirs.remove(0);
         mine.toggle_hidden_ref(repo_a, "refs/heads/session");
         mine.diff_tool = ToolChoice::Preset(ToolPreset::VsCode);
@@ -909,14 +890,12 @@ mod tests {
         assert_eq!((merged.ui_scale, merged.show_tags), (1.2, false));
         // Listes : ajouts de la session en tête, puis celle du fichier sans ce que la session a retiré.
         assert_eq!(merged.recent_repos, [Path::new(r"C:\DEV\Northwind"), repo_a, repo_b]);
-        let ids: Vec<_> = merged.accounts.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["compte-session", "compte-fichier"]);
         assert!(!merged.scan_skip_dirs.contains(&removed), "retiré pendant la session");
         assert!(merged.scan_skip_dirs.iter().any(|d| d == "vendor"), "ajouté dans le fichier");
         // Tables par dépôt : entrée par entrée.
         assert_eq!(merged.hidden_refs_of(repo_a), ["refs/heads/session", "refs/heads/fichier"]);
         assert_eq!(merged.hidden_refs_of(repo_b), ["refs/heads/autre"]);
-        assert_eq!(merged.account_for_repo(repo_b).map(|a| a.id.as_str()), Some("compte-fichier"));
+        assert_eq!(merged.repo_accounts.get(&path_key(repo_b)).map(String::as_str), Some("compte-fichier"));
 
         // Session sans modification : les réglages du fichier tels quels ; plafonds des listes respectés.
         assert_eq!(merge_session(&base, &base, &theirs), theirs);
@@ -970,9 +949,10 @@ mod tests {
         assert_eq!(travail.active, 1, "onglet actif rangé par la session");
     }
 
-    /// Un chemin écrit autrement ou un compte ajouté des deux côtés ne compte qu'une fois, celui de la session gardé.
+    /// Un chemin écrit autrement ne compte qu'une fois, celui de la session gardé ; les comptes n'entrent plus dans la
+    /// fusion (ce sont ceux de la suite).
     #[test]
-    fn the_merge_has_no_duplicate_path_or_account() {
+    fn the_merge_has_no_duplicate_path_and_no_account() {
         let base = Settings::default();
         let login = |id: &str, host: &str, username: &str| Account {
             id: id.into(),
@@ -994,9 +974,8 @@ mod tests {
         mine.push_recent(repo);
 
         let merged = merge_session(&base, &mine, &theirs);
-        let ids: Vec<_> = merged.accounts.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["compte-session", "autre"], "même connexion : le compte de la session");
-        assert_eq!(merged.account_for_repo(repo).map(|a| a.id.as_str()), Some("compte-session"), "association reprise");
+        assert!(merged.accounts.is_empty(), "les doublons de comptes se règlent dans les comptes de la suite");
+        assert_eq!(merged.repo_accounts.get(&path_key(repo)).map(String::as_str), Some("compte-fichier"));
         assert_eq!(merged.scan_roots, [PathBuf::from(r"c:\dev\")]);
         assert_eq!(merged.recent_repos, [repo, Path::new(r"C:\DEV\Contoso")]);
     }

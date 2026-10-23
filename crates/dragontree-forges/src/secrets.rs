@@ -1,55 +1,81 @@
-//! Jetons d'accès dans le Gestionnaire d'identifiants Windows (service « DragonTree »,
-//! utilisateur « account:<id> »). Les jetons ne sont jamais écrits ailleurs.
+//! Jetons d'accès dans le Gestionnaire d'identifiants Windows : ceux de toute la suite EyrieSuite (service
+//! « EyrieSuite », utilisateur « account:<id> »), communs à Eyrie, DragonTree et Owlery. L'ancien service « DragonTree »
+//! est encore relu, pour un compte pas encore repris. Les jetons ne sont jamais écrits ailleurs.
 
 use dragontree_i18n::tr;
+use suite_accounts::{OsVault, Vault};
 
 use crate::model::ForgeError;
 
-/// Nom du service dans le Gestionnaire d'identifiants.
-const SERVICE: &str = "DragonTree";
+/// Service des jetons de DragonTree avant les comptes communs de la suite.
+const LEGACY_SERVICE: &str = "DragonTree";
 
 /// Enregistre (ou remplace) le jeton du compte.
 pub fn store_token(account_id: &str, token: &str) -> Result<(), ForgeError> {
-    let token = token.trim();
-    if token.is_empty() {
-        return Err(ForgeError::InvalidInput(tr!("le jeton est vide").into()));
-    }
-    entry(account_id)?.set_password(token).map_err(secret_error)
+    store_in(&OsVault::suite(), account_id, token)
 }
 
 /// Jeton du compte, `None` s'il n'y en a pas.
 pub fn load_token(account_id: &str) -> Result<Option<String>, ForgeError> {
-    match entry(account_id)?.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(secret_error(e)),
-    }
+    load_from(&OsVault::suite(), &OsVault::new(LEGACY_SERVICE), account_id)
 }
 
-/// Supprime le jeton du compte (sans erreur s'il n'existe pas).
+/// Supprime le jeton du compte (sans erreur s'il n'existe pas), dans les deux coffres.
 pub fn delete_token(account_id: &str) -> Result<(), ForgeError> {
-    match entry(account_id)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(secret_error(e)),
-    }
+    delete_from(&OsVault::suite(), &OsVault::new(LEGACY_SERVICE), account_id)
 }
 
-fn entry(account_id: &str) -> Result<keyring::Entry, ForgeError> {
+/// Jeton d'un compte dans l'ancien coffre de DragonTree, pour la reprise de ses comptes par la suite.
+pub fn legacy_token(account_id: &str) -> Result<Option<String>, ForgeError> {
+    OsVault::new(LEGACY_SERVICE).get(checked(account_id)?).map_err(ForgeError::Secret)
+}
+
+fn checked(account_id: &str) -> Result<&str, ForgeError> {
     let id = account_id.trim();
     if id.is_empty() {
         return Err(ForgeError::InvalidInput(tr!("identifiant de compte vide").into()));
     }
-    keyring::Entry::new(SERVICE, &format!("account:{id}")).map_err(secret_error)
+    Ok(id)
 }
 
-/// Seul le message (`Display`) est conservé : il ne contient jamais le secret.
-fn secret_error(e: keyring::Error) -> ForgeError {
-    ForgeError::Secret(e.to_string())
+fn store_in(suite: &dyn Vault, account_id: &str, token: &str) -> Result<(), ForgeError> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(ForgeError::InvalidInput(tr!("le jeton est vide").into()));
+    }
+    suite.set(checked(account_id)?, token).map_err(ForgeError::Secret)
+}
+
+fn load_from(suite: &dyn Vault, legacy: &dyn Vault, account_id: &str) -> Result<Option<String>, ForgeError> {
+    let id = checked(account_id)?;
+    match suite.get(id).map_err(ForgeError::Secret)? {
+        Some(token) => Ok(Some(token)),
+        None => legacy.get(id).map_err(ForgeError::Secret),
+    }
+}
+
+fn delete_from(suite: &dyn Vault, legacy: &dyn Vault, account_id: &str) -> Result<(), ForgeError> {
+    let id = checked(account_id)?;
+    suite.delete(id).map_err(ForgeError::Secret)?;
+    legacy.delete(id).map_err(ForgeError::Secret)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_tokens_are_still_read_and_new_ones_go_to_the_suite() {
+        use suite_accounts::{MemoryVault, Vault};
+        let (suite, legacy) = (MemoryVault::default(), MemoryVault::default());
+        legacy.set("0123456789abcdef", "ancien").unwrap();
+        assert_eq!(load_from(&suite, &legacy, "0123456789abcdef").unwrap().as_deref(), Some("ancien"));
+        store_in(&suite, "0123456789abcdef", " nouveau ").unwrap();
+        assert_eq!(suite.get("0123456789abcdef").unwrap().as_deref(), Some("nouveau"));
+        assert_eq!(load_from(&suite, &legacy, "0123456789abcdef").unwrap().as_deref(), Some("nouveau"));
+        delete_from(&suite, &legacy, "0123456789abcdef").unwrap();
+        assert_eq!(load_from(&suite, &legacy, "0123456789abcdef").unwrap(), None, "les deux coffres sont vidés");
+    }
 
     #[test]
     fn secrets_reject_empty_values_before_touching_the_store() {

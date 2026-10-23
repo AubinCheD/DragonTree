@@ -382,6 +382,8 @@ pub struct CommandContext<'a> {
     pub lfs_available: Option<bool>,
     /// Éditeurs de « Ouvrir dans » (`Shared::editors`).
     pub editors: &'a [Editor],
+    /// Embarqué par un hôte (`Shared::hosted`) : thème et langue sont les siens.
+    pub hosted: bool,
 }
 
 impl Command {
@@ -858,6 +860,11 @@ impl Command {
         )
     }
 
+    /// Réglé par l'hôte qui embarque DragonTree (Eyrie) : thème et langue.
+    pub fn host_managed(self) -> bool {
+        matches!(self, Command::Theme(_) | Command::Language(_))
+    }
+
     /// Pourquoi la commande est indisponible quand ce n'est pas à cause de l'onglet (infobulle d'une entrée
     /// grisée) : Git LFS absent ou pas encore détecté.
     pub fn disabled_hint(self, cx: &CommandContext) -> Option<&'static str> {
@@ -871,6 +878,9 @@ impl Command {
     /// La commande est utilisable (sinon son entrée est grisée et elle ne fait rien) : une commande de dépôt
     /// demande un dépôt ouvert dans l'onglet actif, puis ce que l'onglet exige (`RepoTab::can_run`).
     pub fn enabled(self, cx: &CommandContext) -> bool {
+        if cx.hosted && self.host_managed() {
+            return false;
+        }
         if self.is_lfs() && cx.lfs_available != Some(true) {
             return false;
         }
@@ -1070,6 +1080,7 @@ mod tests {
             can_reopen_tab: false,
             lfs_available,
             editors: &[],
+            hosted: false,
         };
         let lfs = repository_submenu(tr_mark!("Git LFS"));
         let missing = submenu_disabled_hint(lfs, &cx(Some(false))).expect("grisé quand git lfs est absent");
@@ -1133,6 +1144,7 @@ mod tests {
             can_reopen_tab: false,
             lfs_available: None,
             editors: &[],
+            hosted: false,
         };
         assert!(!Command::CustomCommand(1).enabled(&cx));
         assert_eq!(Command::CustomCommand(1).scope(), Scope::Repo);

@@ -58,6 +58,9 @@ fn entries(ui: &mut Ui, items: &[MenuItem], cx: &CommandContext, chosen: &mut Op
             MenuItem::Separator => {
                 ui.separator();
             }
+            // Embarqué : le thème et la langue de l'hôte, sans sous-menu.
+            MenuItem::Submenu(_, sub)
+                if cx.hosted && sub.iter().all(|i| matches!(i, MenuItem::Cmd(c) if c.host_managed())) => {}
             MenuItem::Submenu(title, sub) => {
                 let label = with_check_column(tr_str(title), column.then_some(false));
                 if let Some(hint) = submenu_disabled_hint(sub, cx) {

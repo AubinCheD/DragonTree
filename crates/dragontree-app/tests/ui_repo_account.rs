@@ -46,11 +46,12 @@ fn settings_path(base: &Path) -> PathBuf {
 /// Profil de test : deux comptes (GitHub d'abord, qui ne correspond pas au remote), pas de fetch automatique (le
 /// remote est fictif), et l'association éventuelle de `repo` à `associated`.
 fn seed(base: &Path, accounts: Vec<Account>, associated: Option<(&Path, &str)>) {
-    let mut settings = Settings { auto_fetch_minutes: 0, accounts, ..Settings::default() };
+    let mut settings = Settings { auto_fetch_minutes: 0, ..Settings::default() };
     if let Some((repo, id)) = associated {
         settings.set_account_for_repo(repo, Some(id));
     }
     settings.save_to(&settings_path(base)).unwrap();
+    seed_accounts(base, &accounts);
 }
 
 fn two_accounts() -> Vec<Account> {

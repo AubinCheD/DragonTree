@@ -32,6 +32,7 @@ notify-debouncer-mini.workspace = true
 syntect.workspace = true
 image.workspace = true
 regex.workspace = true
+suite-accounts.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

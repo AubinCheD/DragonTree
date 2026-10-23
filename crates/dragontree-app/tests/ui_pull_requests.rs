@@ -126,9 +126,9 @@ fn local_clone(base: &Path) -> PathBuf {
 }
 
 fn seed(base: &Path, accounts: Vec<Account>) {
-    let settings =
-        Settings { auto_fetch_minutes: 0, accounts, scan_roots: vec![base.join("depots")], ..Settings::default() };
+    let settings = Settings { auto_fetch_minutes: 0, scan_roots: vec![base.join("depots")], ..Settings::default() };
     settings.save_to(&settings_path(base)).unwrap();
+    seed_accounts(base, &accounts);
 }
 
 fn open_window(h: &mut H) {
