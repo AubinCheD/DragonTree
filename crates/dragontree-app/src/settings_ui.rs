@@ -147,9 +147,9 @@ impl SettingsWindow {
     /// Onglet « Général » : apparence, git, liste des dépôts, clonage, diff, réseau, comptes.
     fn general_tab(&mut self, ui: &mut egui::Ui, shared: &mut Shared, p: &Palette) {
         let d = &mut self.draft;
-        section(ui, tr!("Apparence"));
-        // Embarqué, le thème et la langue sont ceux de l'hôte.
+        // Embarqué, l'apparence (thème, langue, taille de l'interface) est celle de l'hôte, pour toute la suite.
         if !shared.hosted {
+            section(ui, tr!("Apparence"));
             ui.horizontal(|ui| {
                 ui.label(tr!("Thème"));
                 ui.selectable_value(&mut d.theme, ThemeChoice::System, tr!("Système"));
@@ -163,16 +163,16 @@ impl SettingsWindow {
                     ui.selectable_value(&mut d.language, Some(lang), lang.native_name());
                 }
             });
+            ui.horizontal(|ui| {
+                let label = ui.label(tr!("Taille de l'interface"));
+                ui.add(
+                    egui::Slider::new(&mut d.ui_scale, UI_SCALE_MIN..=UI_SCALE_MAX)
+                        .step_by(f64::from(UI_SCALE_STEP))
+                        .custom_formatter(|v, _| tr!("{percent} %", percent = format!("{:.0}", v * 100.0))),
+                )
+                .labelled_by(label.id);
+            });
         }
-        ui.horizontal(|ui| {
-            let label = ui.label(tr!("Taille de l'interface"));
-            ui.add(
-                egui::Slider::new(&mut d.ui_scale, UI_SCALE_MIN..=UI_SCALE_MAX)
-                    .step_by(f64::from(UI_SCALE_STEP))
-                    .custom_formatter(|v, _| tr!("{percent} %", percent = format!("{:.0}", v * 100.0))),
-            )
-            .labelled_by(label.id);
-        });
 
         section(ui, "Git");
         ui.horizontal(|ui| {

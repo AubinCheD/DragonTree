@@ -718,6 +718,20 @@ impl DragonTreeApp {
             crate::settings_ui::Choice::Cancel => self.settings_panel = None,
             crate::settings_ui::Choice::Keep => {}
         }
+        // Sa page peut être dessinée sans sa case (onglet caché) : « Gérer les comptes… » mène tout de suite aux
+        // comptes de l'hôte.
+        if let Some(open) = &self.accounts_link
+            && self.shared.actions.iter().any(|a| matches!(a, AppAction::ShowAccounts))
+        {
+            self.shared.actions.retain(|a| !matches!(a, AppAction::ShowAccounts));
+            open();
+        }
+    }
+
+    /// Sa page chez l'hôte quittée (fenêtre fermée, autre page) : le brouillon est oublié, comme à la fermeture de la
+    /// fenêtre Réglages.
+    pub fn settings_left(&mut self) {
+        self.settings_panel = None;
     }
 
     /// Dépôts transmis par les instances lancées ensuite sur le même profil : ouverts dans des onglets (ou l'onglet
