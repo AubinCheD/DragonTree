@@ -512,6 +512,10 @@ pub struct DragonTreeApp {
     instance: Option<crate::single_instance::PrimaryInstance>,
     /// Posé par l'hôte : les comptes se règlent chez lui (voir `set_accounts_link`).
     accounts_link: Option<Box<dyn Fn()>>,
+    /// Posé par l'hôte : les réglages s'ouvrent chez lui, sur la page de DragonTree (voir `set_settings_link`).
+    settings_link: Option<Box<dyn Fn()>>,
+    /// Brouillon des réglages dessinés dans la page d'un hôte (voir `settings_ui`).
+    settings_panel: Option<SettingsWindow>,
 }
 
 impl DragonTreeApp {
@@ -615,6 +619,8 @@ impl DragonTreeApp {
             closing: Default::default(),
             instance: None,
             accounts_link: None,
+            settings_link: None,
+            settings_panel: None,
         };
 
         // Onglets : ceux de la ligne de commande, sinon ceux de la dernière session.
@@ -691,6 +697,27 @@ impl DragonTreeApp {
     /// la fenêtre Comptes de DragonTree.
     pub fn set_accounts_link(&mut self, open: Box<dyn Fn()>) {
         self.accounts_link = Some(open);
+    }
+
+    /// Embarqué par un hôte qui montre les réglages de DragonTree dans les siens : « Réglages… » appelle `open`
+    /// (la page DragonTree des réglages de l'hôte) au lieu d'ouvrir la fenêtre Réglages.
+    pub fn set_settings_link(&mut self, open: Box<dyn Fn()>) {
+        self.settings_link = Some(open);
+    }
+
+    /// Ses réglages, dessinés dans un `Ui` de l'hôte (la page DragonTree de ses réglages), avec Enregistrer et Annuler
+    /// comme dans la fenêtre : le brouillon tient d'une image à l'autre, rien n'est enregistré sans Enregistrer.
+    pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        let p = Palette::current(ui.ctx());
+        let panel = self.settings_panel.get_or_insert_with(|| SettingsWindow::new(&self.shared));
+        match panel.contents(ui, &mut self.shared, &p) {
+            crate::settings_ui::Choice::Save => {
+                panel.save(&mut self.shared);
+                self.settings_panel = None;
+            }
+            crate::settings_ui::Choice::Cancel => self.settings_panel = None,
+            crate::settings_ui::Choice::Keep => {}
+        }
     }
 
     /// Dépôts transmis par les instances lancées ensuite sur le même profil : ouverts dans des onglets (ou l'onglet
@@ -1036,14 +1063,21 @@ impl DragonTreeApp {
             AppAction::ShowPullRequests => self.pull_requests.show(),
             AppAction::ShowSshKeys => self.ssh_keys.show(),
             AppAction::ShowGitIdentity => self.git_identity.show(&self.shared),
-            AppAction::ShowSettings => {
-                if self.settings_window.is_none() {
-                    self.settings_window = Some(SettingsWindow::new(&self.shared));
+            AppAction::ShowSettings => match &self.settings_link {
+                Some(open) => open(),
+                None => {
+                    if self.settings_window.is_none() {
+                        self.settings_window = Some(SettingsWindow::new(&self.shared));
+                    }
                 }
-            }
-            AppAction::ShowSettingsTab(tab) => {
-                self.settings_window.get_or_insert_with(|| SettingsWindow::new(&self.shared)).show_tab(tab)
-            }
+            },
+            AppAction::ShowSettingsTab(tab) => match &self.settings_link {
+                Some(open) => {
+                    self.settings_panel.get_or_insert_with(|| SettingsWindow::new(&self.shared)).show_tab(tab);
+                    open()
+                }
+                None => self.settings_window.get_or_insert_with(|| SettingsWindow::new(&self.shared)).show_tab(tab),
+            },
             AppAction::ShowLog => self.log_open = true,
             AppAction::AddScanRoot => {
                 if let Some(p) = Self::pick_folder(tr!("Dossier contenant vos dépôts (scan récursif)")) {

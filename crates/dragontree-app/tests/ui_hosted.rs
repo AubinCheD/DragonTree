@@ -57,3 +57,43 @@ fn hosted_menus_drop_theme_and_language() {
     assert!(h.query_by_label_contains("Langue").is_none());
     assert!(h.query_by_label_contains("Comptes…").is_some(), "les comptes restent, ouverts chez l'hôte");
 }
+
+#[test]
+fn hosted_the_settings_command_opens_the_host_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut h = harness(start(tmp.path()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c = calls.clone();
+    h.state_mut().set_hosted(true);
+    h.state_mut().set_settings_link(Box::new(move || {
+        c.fetch_add(1, Ordering::SeqCst);
+    }));
+    h.run_steps(2);
+    // Configuration › Réglages… (Ctrl+,) : son libellé porte le raccourci, on passe par celui-ci.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Comma);
+    h.run_steps(3);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(h.query_by_label("Enregistrer").is_none(), "la fenêtre Réglages de DragonTree reste fermée");
+}
+
+/// Ses réglages dessinés dans un `Ui` de l'hôte (la page DragonTree des réglages d'Eyrie).
+#[test]
+fn the_settings_panel_draws_in_a_host_ui() {
+    /// Un hôte minimal : il dessine les réglages de DragonTree dans son propre `Ui`.
+    struct Host(dragontree_app::DragonTreeApp);
+    impl eframe::App for Host {
+        fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+            self.0.settings_ui(ui);
+        }
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let start = start(tmp.path());
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(900.0, 700.0)).build_eframe(move |cc| {
+        let mut app = dragontree_app::DragonTreeApp::new(cc, start);
+        app.set_hosted(true);
+        Host(app)
+    });
+    h.run_steps(3);
+    assert!(h.query_by_label("Enregistrer").is_some(), "Enregistrer et Annuler, comme dans sa fenêtre");
+    assert!(h.query_by_label("Thème").is_none(), "le thème vient de l'hôte");
+}

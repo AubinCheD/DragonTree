@@ -22,6 +22,14 @@ pub enum SettingsTab {
     Commands,
 }
 
+/// Ce que l'utilisateur a demandé en bas des réglages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    Keep,
+    Save,
+    Cancel,
+}
+
 pub struct SettingsWindow {
     tab: SettingsTab,
     /// Réglages à l'ouverture de la fenêtre, avec le thème et la langue en vigueur : l'enregistrement ne reporte que
@@ -54,73 +62,86 @@ impl SettingsWindow {
     /// Renvoie faux quand la fenêtre est fermée.
     pub fn ui(&mut self, ctx: &egui::Context, shared: &mut Shared, p: &Palette) -> bool {
         let mut open = true;
-        let mut save = false;
-        let mut cancel = false;
+        let mut choice = Choice::Keep;
         crate::widgets::centered_window(ctx, format!("{} {}", icons::GEAR_SIX, tr!("Réglages")))
             .id(egui::Id::unique("settings-window"))
             .open(&mut open)
             .default_size([640.0, 620.0])
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.tab, SettingsTab::General, tr!("Général"));
-                    ui.selectable_value(&mut self.tab, SettingsTab::Commands, tr!("Commandes"));
-                });
-                ui.separator();
-                egui::ScrollArea::vertical().max_height(ui.available_height() - 44.0).show(ui, |ui| match self.tab {
-                    SettingsTab::General => self.general_tab(ui, shared, p),
-                    SettingsTab::Commands => self.commands_tab(ui, p),
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new(tr!("Enregistrer")).strong().color(egui::Color32::WHITE),
-                                )
-                                .fill(p.accent),
-                            )
-                            .clicked()
-                        {
-                            save = true;
-                        }
-                        if ui.button(tr!("Annuler")).clicked() {
-                            cancel = true;
-                        }
-                    });
-                });
-            });
-        if save {
-            let mut d = self.draft.clone();
-            d.scan_skip_dirs =
-                self.skip_dirs.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
-            d.git_path = (!self.git_path.trim().is_empty()).then(|| PathBuf::from(self.git_path.trim()));
-            // Une commande laissée vide est retirée ; les autres sont gardées telles que saisies, sans blancs autour.
-            d.custom_commands.retain(|c| !c.name.trim().is_empty() || !c.command.trim().is_empty());
-            for c in &mut d.custom_commands {
-                c.name = c.name.trim().to_string();
-                c.command = c.command.trim().to_string();
+            .show(ctx, |ui| choice = self.contents(ui, shared, p));
+        match choice {
+            Choice::Save => {
+                self.save(shared);
+                false
             }
-            d.commit_hard_limit = d.commit_hard_limit.max(d.commit_soft_limit);
-            d.custom_diff_tool = d.custom_diff_tool.trim().to_string();
-            d.custom_merge_tool = d.custom_merge_tool.trim().to_string();
-            // Les réglages actuels, avec seulement ce que la fenêtre a changé : un réglage modifié ailleurs pendant
-            // qu'elle était ouverte (menu Affichage, réglages du dépôt, barre d'onglets, vue diff…) est conservé.
-            let mut merged = shared.settings.clone();
-            take_edits(&mut merged, &self.opened, &d);
-            // Un thème ou une langue choisis ici sont enregistrés et remplacent ceux de `--theme` ou `--lang` ; sans
-            // y toucher, ceux-ci restent en vigueur et ne sont pas enregistrés (voir `Shared::theme_override`).
-            if d.theme != self.opened.theme {
-                shared.theme_override = None;
-            }
-            if d.language != self.opened.language {
-                shared.lang_override = None;
-            }
-            shared.adopt_settings(merged);
-            shared.save_settings();
-            return false;
+            Choice::Cancel => false,
+            Choice::Keep => open,
         }
-        open && !cancel
+    }
+
+    /// Onglets, réglages, Enregistrer et Annuler : dans la fenêtre, ou dans la page qu'un hôte donne à DragonTree
+    /// dans ses propres réglages (`DragonTreeApp::settings_ui`).
+    pub fn contents(&mut self, ui: &mut egui::Ui, shared: &mut Shared, p: &Palette) -> Choice {
+        let mut choice = Choice::Keep;
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.tab, SettingsTab::General, tr!("Général"));
+            ui.selectable_value(&mut self.tab, SettingsTab::Commands, tr!("Commandes"));
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().max_height((ui.available_height() - 44.0).max(240.0)).show(ui, |ui| {
+            match self.tab {
+                SettingsTab::General => self.general_tab(ui, shared, p),
+                SettingsTab::Commands => self.commands_tab(ui, p),
+            }
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new(tr!("Enregistrer")).strong().color(egui::Color32::WHITE))
+                            .fill(p.accent),
+                    )
+                    .clicked()
+                {
+                    choice = Choice::Save;
+                }
+                if ui.button(tr!("Annuler")).clicked() {
+                    choice = Choice::Cancel;
+                }
+            });
+        });
+        choice
+    }
+
+    /// Enregistre ce que le brouillon a changé.
+    pub fn save(&mut self, shared: &mut Shared) {
+        let mut d = self.draft.clone();
+        d.scan_skip_dirs =
+            self.skip_dirs.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
+        d.git_path = (!self.git_path.trim().is_empty()).then(|| PathBuf::from(self.git_path.trim()));
+        // Une commande laissée vide est retirée ; les autres sont gardées telles que saisies, sans blancs autour.
+        d.custom_commands.retain(|c| !c.name.trim().is_empty() || !c.command.trim().is_empty());
+        for c in &mut d.custom_commands {
+            c.name = c.name.trim().to_string();
+            c.command = c.command.trim().to_string();
+        }
+        d.commit_hard_limit = d.commit_hard_limit.max(d.commit_soft_limit);
+        d.custom_diff_tool = d.custom_diff_tool.trim().to_string();
+        d.custom_merge_tool = d.custom_merge_tool.trim().to_string();
+        // Les réglages actuels, avec seulement ce que la fenêtre a changé : un réglage modifié ailleurs pendant
+        // qu'elle était ouverte (menu Affichage, réglages du dépôt, barre d'onglets, vue diff…) est conservé.
+        let mut merged = shared.settings.clone();
+        take_edits(&mut merged, &self.opened, &d);
+        // Un thème ou une langue choisis ici sont enregistrés et remplacent ceux de `--theme` ou `--lang` ; sans
+        // y toucher, ceux-ci restent en vigueur et ne sont pas enregistrés (voir `Shared::theme_override`).
+        if d.theme != self.opened.theme {
+            shared.theme_override = None;
+        }
+        if d.language != self.opened.language {
+            shared.lang_override = None;
+        }
+        shared.adopt_settings(merged);
+        shared.save_settings();
     }
 
     /// Onglet « Général » : apparence, git, liste des dépôts, clonage, diff, réseau, comptes.
