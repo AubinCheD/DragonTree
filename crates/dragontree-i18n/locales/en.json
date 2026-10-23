@@ -1400,5 +1400,9 @@
   "Compte non mis à jour": "Account not updated",
   "Compte non supprimé": "Account not removed",
   "Comptes de la suite illisibles": "The suite accounts cannot be read",
-  "Comptes non repris par la suite": "Accounts not taken over by the suite"
+  "Comptes non repris par la suite": "Accounts not taken over by the suite",
+  "Ajouter un dépôt…": "Add a repository…",
+  "Cloner un dépôt distant…": "Clone a remote repository…",
+  "Compte": "Account",
+  "Aucun : identifiants de git": "None: git credentials"
 }

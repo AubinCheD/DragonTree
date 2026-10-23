@@ -185,9 +185,25 @@ impl RepoListState {
                 if widgets::icon_button(ui, icons::ARROWS_CLOCKWISE, tr!("Rescanner les dossiers")).clicked() {
                     shared.actions.push(AppAction::Rescan);
                 }
-                if widgets::icon_button(ui, icons::PLUS, tr!("Ajouter un dossier à scanner…")).clicked() {
-                    shared.actions.push(AppAction::AddScanRoot);
-                }
+                // Un dépôt de plus : un dossier sur le disque, un dépôt distant à cloner, ou un dossier à scanner.
+                let add = widgets::icon_button(ui, icons::PLUS, tr!("Ajouter un dépôt…"));
+                widgets::a11y(&add, tr!("Ajouter un dépôt…"), true);
+                egui::Popup::menu(&add).show(|ui| {
+                    if ui.button(format!("{} {}", icons::FOLDER_OPEN, tr!("Ouvrir un dépôt…"))).clicked() {
+                        shared.actions.push(AppAction::PickAndOpenRepo);
+                    }
+                    if ui.button(format!("{} {}", icons::DOWNLOAD_SIMPLE, tr!("Cloner un dépôt distant…"))).clicked()
+                    {
+                        shared.actions.push(AppAction::ShowClone);
+                    }
+                    ui.separator();
+                    if ui
+                        .button(format!("{} {}", icons::TREE_STRUCTURE, tr!("Ajouter un dossier à scanner…")))
+                        .clicked()
+                    {
+                        shared.actions.push(AppAction::AddScanRoot);
+                    }
+                });
             });
         });
         widgets::search_field(ui, &mut self.filter, tr!("Rechercher un dépôt (Ctrl+P)"), "repo-list-filter");

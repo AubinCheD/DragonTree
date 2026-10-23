@@ -132,7 +132,11 @@ pub struct CloneWindow {
     branch: String,
     recurse: bool,
     open_after: bool,
+    /// Compte qui authentifie le clonage (et que le dépôt cloné gardera) : celui du dépôt choisi, ou, depuis une URL,
+    /// celui que l'on choisit (présélectionné d'après l'URL, voir `url_account_for`).
     account: Option<String>,
+    /// URL pour laquelle le compte a été présélectionné : un choix fait à la main tient tant qu'elle ne change pas.
+    url_account_for: String,
     /// Clonage en cours : identifiant et annulation.
     running: Option<(u64, CancelToken)>,
     progress: Option<Progress>,
@@ -145,6 +149,11 @@ pub struct CloneWindow {
 /// pas (Azure DevOps).
 fn updated_label(r: &RemoteRepo, now: i64) -> Option<String> {
     r.updated_timestamp().map(|ts| widgets::format_time(ts, now))
+}
+
+/// Le compte présélectionné pour cloner `url` : le premier dont l'hôte (et l'organisation Azure) correspond.
+pub(crate) fn default_account_for(url: &str, accounts: &[dragontree_forges::Account]) -> Option<String> {
+    accounts.iter().find(|a| dragontree_forges::account_matches_url(a, url)).map(|a| a.id.clone())
 }
 
 /// Nom de dossier déduit d'une URL (`…/repo.git` → `repo`).
@@ -178,6 +187,7 @@ impl CloneWindow {
             recurse: true,
             open_after: true,
             account: None,
+            url_account_for: String::new(),
             running: None,
             progress: None,
             error: None,
@@ -247,7 +257,7 @@ impl CloneWindow {
         };
         let dest = self.dest();
         let created_dir = !dest.exists();
-        let account = if self.source == Source::Accounts && !self.use_ssh { self.account.clone() } else { None };
+        let account = if self.use_ssh { None } else { self.account.clone() };
         let acc = account.as_ref().and_then(|id| shared.settings.accounts.iter().find(|a| &a.id == id).cloned());
         let (url, branch, recurse) = (self.url.trim().to_string(), self.branch.trim().to_string(), self.recurse);
         let (parent, open_after) = (PathBuf::from(self.parent_dir.trim()), self.open_after);
@@ -327,8 +337,8 @@ impl CloneWindow {
                         if resp.changed() && !self.folder_touched {
                             self.folder = folder_from_url(&self.url);
                         }
-                        self.account = None;
-                        ui.add_space(list_h - 40.0);
+                        self.url_account_ui(ui, shared);
+                        ui.add_space(list_h - 70.0);
                     }
                 }
                 ui.separator();
@@ -338,6 +348,38 @@ impl CloneWindow {
             c.cancel();
         }
         open
+    }
+
+    /// Le compte d'un clonage par URL : ceux qui correspondent à l'URL, ou aucun (les identifiants de git).
+    fn url_account_ui(&mut self, ui: &mut egui::Ui, shared: &Shared) {
+        let accounts = &shared.settings.accounts;
+        if self.url_account_for != self.url {
+            self.url_account_for = self.url.clone();
+            self.account = default_account_for(self.url.trim(), accounts);
+        }
+        let none = tr!("Aucun : identifiants de git");
+        let current = self
+            .account
+            .as_ref()
+            .and_then(|id| accounts.iter().find(|a| &a.id == id))
+            .map_or(none.to_string(), |a| a.title());
+        ui.horizontal(|ui| {
+            let label = ui.label(tr!("Compte"));
+            egui::ComboBox::from_id_salt("clone-url-account")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    for a in accounts.iter().filter(|a| dragontree_forges::account_matches_url(a, self.url.trim())) {
+                        ui.selectable_value(
+                            &mut self.account,
+                            Some(a.id.clone()),
+                            format!("{} {}", kind_icon(a.kind), a.title()),
+                        );
+                    }
+                    ui.selectable_value(&mut self.account, None, none);
+                })
+                .response
+                .labelled_by(label.id);
+        });
     }
 
     fn accounts_ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared, p: &Palette, list_h: f32) {
