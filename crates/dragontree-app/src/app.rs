@@ -507,6 +507,18 @@ impl DragonTreeApp {
         self.instance = Some(instance);
     }
 
+    /// Thème et langue imposés par un hôte qui embarque DragonTree (la suite), comme `--theme` et
+    /// `--lang` : ils remplacent les réglages pour la session sans y être écrits (voir
+    /// `Shared::theme_override`). `None` : les réglages.
+    pub fn set_host_overrides(&mut self, theme: Option<ThemeChoice>, lang: Option<Lang>) {
+        if self.shared.theme_override != theme {
+            self.shared.theme_override = theme;
+        }
+        if self.shared.lang_override != lang {
+            self.shared.lang_override = lang;
+        }
+    }
+
     /// Dépôts transmis par les instances lancées ensuite sur le même profil : ouverts dans des onglets (ou l'onglet
     /// existant activé), et la fenêtre passe au premier plan, rendue si elle était réduite ; une fermeture suspendue
     /// (question posée ou attente de la fin des opérations, RV4a) y renonce, sinon le dépôt transmis serait perdu.
