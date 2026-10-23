@@ -96,8 +96,7 @@ enum Leaf<'a> {
 impl RepoTab {
     /// « Dernier fetch : il y a 5 min » (date de `FETCH_HEAD`), ou « Jamais fetché ».
     fn last_fetch_text(&self) -> String {
-        let when =
-            self.repo.as_ref().and_then(|r| std::fs::metadata(r.common_dir.join("FETCH_HEAD")).ok()?.modified().ok());
+        let when = self.repo.as_ref().and_then(|r| super::last_fetch_time(&r.git_dir, &r.common_dir));
         let secs = |t: std::time::SystemTime| {
             t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
         };

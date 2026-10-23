@@ -56,3 +56,27 @@ fn a_freshly_fetched_repository_waits_for_its_interval() {
     }
     assert!(h.query_by_label(NEW_BRANCH).is_none(), "fetché à l'instant : pas de nouveau fetch à l'ouverture");
 }
+
+/// Un worktree lié a son propre `FETCH_HEAD` (`.git/worktrees/<nom>/`) ; les branches distantes sont communes : son
+/// fetch récent compte, pour lui comme pour le dépôt principal.
+#[test]
+fn a_linked_worktree_counts_its_own_fetch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = clone_behind_its_server(tmp.path(), Duration::from_secs(3600));
+    let wt = tmp.path().join("wt");
+    git(&repo, &["worktree", "add", "-q", "-b", "travail", wt.to_str().unwrap()]);
+    std::fs::write(repo.join(".git").join("worktrees").join("wt").join("FETCH_HEAD"), "").unwrap();
+    let mut h = open(wt, tmp.path());
+    wait_until(&mut h, "branches distantes lues", |h| h.query_by_label("origin").is_some());
+    h.get_by_label("origin").hover();
+    wait_until(&mut h, "infobulle du remote", |h| h.query_by_label_contains("Dernier fetch").is_some());
+    assert!(h.query_by_label_contains("à l'instant").is_some(), "le fetch du worktree, pas celui du dépôt principal");
+    for _ in 0..60 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        h.query_by_label(NEW_BRANCH).is_none(),
+        "fetché à l'instant depuis le worktree : pas de fetch à l'ouverture"
+    );
+}

@@ -548,10 +548,7 @@ impl DragonTreeApp {
         // Le dossier donné par l'hôte (Eyrie), sinon celui du profil à part, sinon celui de toute la suite.
         let accounts_dir =
             start.accounts_dir.clone().unwrap_or_else(|| suite_accounts::accounts_dir(start.profile_dir.as_deref()));
-        shared.set_accounts_store(suite_accounts::Store::new(
-            &accounts_dir,
-            std::sync::Arc::new(suite_accounts::OsVault::suite()),
-        ));
+        shared.set_accounts_store(suite_accounts::Store::new(&accounts_dir, dragontree_forges::secrets::suite_vault()));
         shared.take_over_legacy_accounts();
         let system_lang = Lang::system();
         dragontree_i18n::set_lang(shared.language().unwrap_or(system_lang));

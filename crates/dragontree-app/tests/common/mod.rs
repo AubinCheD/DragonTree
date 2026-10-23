@@ -103,9 +103,21 @@ pub fn demo_repo(base: &Path) -> PathBuf {
     dir
 }
 
+/// Les essais n'approchent jamais le coffre de Windows : des coffres en mémoire, pour tout le processus.
+pub fn isolate_vaults() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        dragontree_forges::secrets::use_vaults(
+            std::sync::Arc::new(suite_accounts::MemoryVault::default()),
+            std::sync::Arc::new(suite_accounts::MemoryVault::default()),
+        );
+    });
+}
+
 /// Application lancée avec `start` ; la configuration git globale est isolée avant (l'application lance git dès son
 /// démarrage : détection de git lfs, ouverture des dépôts).
 pub fn harness(start: StartOptions) -> Harness<'static, DragonTreeApp> {
+    isolate_vaults();
     isolate_git_config_for_this_test();
     Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| DragonTreeApp::new(cc, start))
 }
@@ -113,6 +125,7 @@ pub fn harness(start: StartOptions) -> Harness<'static, DragonTreeApp> {
 /// Options de lancement des tests (profil temporaire, interface en français) ; isole aussi la configuration git
 /// globale, pour un harnais construit à part.
 pub fn start(base: &Path) -> StartOptions {
+    isolate_vaults();
     isolate_git_config_for_this_test();
     StartOptions {
         profile_dir: Some(base.join("profil")),

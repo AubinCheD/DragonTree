@@ -946,7 +946,7 @@ impl RepoTab {
                     shared.jobs.sender(),
                     shared.settings.scan_skip_dirs.clone(),
                 );
-                self.last_fetch = last_fetch_of(&repo.common_dir);
+                self.last_fetch = last_fetch_time(&repo.git_dir, &repo.common_dir).and_then(instant_of);
                 self.repo = Some(repo);
                 self.refresh(shared, Refresh::ALL);
                 self.load_commit_template(shared);
@@ -1593,11 +1593,27 @@ pub fn split_message(msg: &str) -> (String, String) {
     }
 }
 
-/// L'instant du dernier fetch d'un dépôt (date de `FETCH_HEAD` dans son dossier commun) ; `None` : jamais, date
-/// illisible ou dans le futur, ou antérieure au démarrage de Windows.
-fn last_fetch_of(common_dir: &std::path::Path) -> Option<Instant> {
-    let age = std::fs::metadata(common_dir.join("FETCH_HEAD")).and_then(|m| m.modified()).ok()?.elapsed().ok()?;
-    Instant::now().checked_sub(age)
+/// La date du dernier fetch d'un dépôt : le plus récent `FETCH_HEAD` du dépôt et de ses worktrees (chacun a le sien,
+/// `.git/worktrees/<nom>/FETCH_HEAD` ; les branches distantes, elles, sont communes) ; `None` : jamais fetché.
+pub(super) fn last_fetch_time(
+    git_dir: &std::path::Path,
+    common_dir: &std::path::Path,
+) -> Option<std::time::SystemTime> {
+    let worktrees = std::fs::read_dir(common_dir.join("worktrees"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path().join("FETCH_HEAD"));
+    [git_dir.join("FETCH_HEAD"), common_dir.join("FETCH_HEAD")]
+        .into_iter()
+        .chain(worktrees)
+        .filter_map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok())
+        .max()
+}
+
+/// L'instant correspondant à une date passée ; `None` : dans le futur, ou antérieure au démarrage de Windows.
+fn instant_of(t: std::time::SystemTime) -> Option<Instant> {
+    Instant::now().checked_sub(t.elapsed().ok()?)
 }
 
 #[cfg(test)]

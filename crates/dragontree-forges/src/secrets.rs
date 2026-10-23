@@ -2,6 +2,8 @@
 //! « EyrieSuite », utilisateur « account:<id> »), communs à Eyrie, DragonTree et Owlery. L'ancien service « DragonTree »
 //! est encore relu, pour un compte pas encore repris. Les jetons ne sont jamais écrits ailleurs.
 
+use std::sync::{Arc, PoisonError, RwLock};
+
 use dragontree_i18n::tr;
 use suite_accounts::{OsVault, Vault};
 
@@ -10,24 +12,54 @@ use crate::model::ForgeError;
 /// Service des jetons de DragonTree avant les comptes communs de la suite.
 const LEGACY_SERVICE: &str = "DragonTree";
 
+/// Coffres qui remplacent ceux de Windows pour tout le processus (`use_vaults`) : celui de la suite, puis l'ancien.
+type Vaults = (Arc<dyn Vault>, Arc<dyn Vault>);
+static REPLACED: RwLock<Option<Vaults>> = RwLock::new(None);
+
+/// Remplace les coffres de Windows (celui de la suite et l'ancien de DragonTree) pour tout le processus : les essais
+/// n'y touchent jamais.
+pub fn use_vaults(suite: Arc<dyn Vault>, legacy: Arc<dyn Vault>) {
+    *REPLACED.write().unwrap_or_else(PoisonError::into_inner) = Some((suite, legacy));
+}
+
+/// Les coffres de Windows sont ceux qui servent (pas de `use_vaults`).
+pub fn uses_windows_vaults() -> bool {
+    REPLACED.read().unwrap_or_else(PoisonError::into_inner).is_none()
+}
+
+/// Le coffre de la suite : celui de Windows (service « EyrieSuite »), sauf remplacement (`use_vaults`).
+pub fn suite_vault() -> Arc<dyn Vault> {
+    match &*REPLACED.read().unwrap_or_else(PoisonError::into_inner) {
+        Some((suite, _)) => suite.clone(),
+        None => Arc::new(OsVault::suite()),
+    }
+}
+
+fn legacy_vault() -> Arc<dyn Vault> {
+    match &*REPLACED.read().unwrap_or_else(PoisonError::into_inner) {
+        Some((_, legacy)) => legacy.clone(),
+        None => Arc::new(OsVault::new(LEGACY_SERVICE)),
+    }
+}
+
 /// Enregistre (ou remplace) le jeton du compte.
 pub fn store_token(account_id: &str, token: &str) -> Result<(), ForgeError> {
-    store_in(&OsVault::suite(), account_id, token)
+    store_in(&*suite_vault(), account_id, token)
 }
 
 /// Jeton du compte, `None` s'il n'y en a pas.
 pub fn load_token(account_id: &str) -> Result<Option<String>, ForgeError> {
-    load_from(&OsVault::suite(), &OsVault::new(LEGACY_SERVICE), account_id)
+    load_from(&*suite_vault(), &*legacy_vault(), account_id)
 }
 
 /// Supprime le jeton du compte (sans erreur s'il n'existe pas), dans les deux coffres.
 pub fn delete_token(account_id: &str) -> Result<(), ForgeError> {
-    delete_from(&OsVault::suite(), &OsVault::new(LEGACY_SERVICE), account_id)
+    delete_from(&*suite_vault(), &*legacy_vault(), account_id)
 }
 
 /// Jeton d'un compte dans l'ancien coffre de DragonTree, pour la reprise de ses comptes par la suite.
 pub fn legacy_token(account_id: &str) -> Result<Option<String>, ForgeError> {
-    OsVault::new(LEGACY_SERVICE).get(checked(account_id)?).map_err(ForgeError::Secret)
+    legacy_vault().get(checked(account_id)?).map_err(ForgeError::Secret)
 }
 
 fn checked(account_id: &str) -> Result<&str, ForgeError> {

@@ -353,10 +353,7 @@ impl CloneWindow {
     /// Le compte d'un clonage par URL : ceux qui correspondent à l'URL, ou aucun (les identifiants de git).
     fn url_account_ui(&mut self, ui: &mut egui::Ui, shared: &Shared) {
         let accounts = &shared.settings.accounts;
-        if self.url_account_for != self.url {
-            self.url_account_for = self.url.clone();
-            self.account = default_account_for(self.url.trim(), accounts);
-        }
+        self.preselect_for_url(accounts);
         let none = tr!("Aucun : identifiants de git");
         let current = self
             .account
@@ -530,15 +527,30 @@ impl CloneWindow {
             },
         );
         if let Some((acc, r)) = chosen {
-            self.selected = Some((acc.clone(), r.clone_url.clone()));
-            self.account = Some(acc);
-            self.url =
-                if self.use_ssh { r.ssh_url.clone().unwrap_or(r.clone_url.clone()) } else { r.clone_url.clone() };
-            if !self.folder_touched {
-                self.folder = r.name.clone();
-            }
-            self.branch.clear();
-            self.ssh_available = r.ssh_url.clone();
+            self.choose_repo(acc, &r);
+        }
+    }
+
+    /// Un dépôt d'un compte choisi dans la liste : son URL, et ce compte, que la présélection d'après l'URL ne remplace
+    /// pas (voir `preselect_for_url`).
+    fn choose_repo(&mut self, acc: String, r: &RemoteRepo) {
+        self.selected = Some((acc.clone(), r.clone_url.clone()));
+        self.account = Some(acc);
+        self.url = if self.use_ssh { r.ssh_url.clone().unwrap_or(r.clone_url.clone()) } else { r.clone_url.clone() };
+        self.url_account_for = self.url.clone();
+        if !self.folder_touched {
+            self.folder = r.name.clone();
+        }
+        self.branch.clear();
+        self.ssh_available = r.ssh_url.clone();
+    }
+
+    /// Une URL tapée (ou changée) : le compte présélectionné est le premier qui lui correspond. Un compte choisi, à la
+    /// main ou avec un dépôt de la liste, tient tant que l'URL ne change pas.
+    fn preselect_for_url(&mut self, accounts: &[dragontree_forges::Account]) {
+        if self.url_account_for != self.url {
+            self.url_account_for = self.url.clone();
+            self.account = default_account_for(self.url.trim(), accounts);
         }
     }
 
@@ -652,7 +664,58 @@ impl CloneWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{folder_from_url, updated_label};
+    use super::{CloneWindow, Source, folder_from_url, updated_label};
+
+    fn window() -> CloneWindow {
+        CloneWindow {
+            source: Source::Accounts,
+            account_filter: None,
+            repos: Default::default(),
+            filter: String::new(),
+            selected: None,
+            url: String::new(),
+            use_ssh: false,
+            parent_dir: String::new(),
+            folder: String::new(),
+            folder_touched: false,
+            branch: String::new(),
+            recurse: false,
+            open_after: true,
+            account: None,
+            url_account_for: String::new(),
+            running: None,
+            progress: None,
+            error: None,
+            ssh_available: None,
+            done: false,
+        }
+    }
+
+    fn github(id: &str) -> dragontree_forges::Account {
+        dragontree_forges::Account {
+            id: id.into(),
+            kind: dragontree_forges::ForgeKind::GitHub,
+            host: "github.com".into(),
+            username: id.into(),
+            display_name: String::new(),
+            orgs: Vec::new(),
+            avatar_url: None,
+        }
+    }
+
+    /// Le dépôt d'un compte choisi dans la liste garde ce compte en passant par « Depuis une URL » : la présélection
+    /// d'après l'URL ne vaut que pour une URL tapée.
+    #[test]
+    fn a_repository_picked_in_an_account_keeps_that_account_through_the_url_tab() {
+        let accounts = [github("perso"), github("pro")];
+        let mut w = window();
+        w.choose_repo("pro".into(), &repo(None));
+        w.preselect_for_url(&accounts);
+        assert_eq!(w.account.as_deref(), Some("pro"), "celui du dépôt choisi, pas le premier qui correspond");
+        w.url = "https://github.com/autre/depot.git".into();
+        w.preselect_for_url(&accounts);
+        assert_eq!(w.account.as_deref(), Some("perso"), "une autre URL : présélection d'après elle");
+    }
 
     fn repo(updated_at: Option<&str>) -> dragontree_forges::RemoteRepo {
         dragontree_forges::RemoteRepo {
