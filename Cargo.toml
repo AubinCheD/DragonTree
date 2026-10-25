@@ -44,7 +44,7 @@ tempfile = "3"
 regex = "1"
 windows-sys = "0.61"
 # Comptes communs de la suite EyrieSuite (dépôt voisin).
-suite-accounts = { path = "../SuperApp/crates/suite-accounts" }
+suite-accounts = { path = "../Eyrie/crates/suite-accounts" }
 
 [profile.dev]
 opt-level = 1

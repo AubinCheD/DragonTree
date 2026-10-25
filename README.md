@@ -244,7 +244,7 @@ Pour Azure DevOps, si le jeton est limité à une organisation, indiquez-la dans
 (DragonTree propose celles trouvées dans les remotes de vos dépôts).
 
 Les comptes sont **communs à toute la suite EyrieSuite** : ceux ajoutés ici valent aussi dans Eyrie et Owlery, et
-réciproquement (liste dans `%APPDATA%\EyrieSuite\accounts.json`, voir `../SuperApp/docs/comptes.md`). Au premier
+réciproquement (liste dans `%APPDATA%\EyrieSuite\accounts.json`, voir `../Eyrie/docs/comptes.md`). Au premier
 lancement, les comptes d'avant la suite y sont repris, avec leurs dépôts associés. Dans Eyrie, « Comptes… » ouvre la
 page Comptes d'Eyrie.
 
