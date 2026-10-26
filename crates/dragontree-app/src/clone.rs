@@ -306,10 +306,14 @@ impl CloneWindow {
             return false;
         }
         let mut open = true;
+        // Bornée à la fenêtre principale (sous l'en-tête où elle s'ouvre) : la liste prend ce qui reste, sans jamais
+        // agrandir la fenêtre (une liste qui se mesurait sur la fenêtre la faisait grandir à chaque image).
+        let max_h = (ctx.content_rect().height() - 56.0 - 12.0).max(240.0);
         crate::widgets::centered_window(ctx, format!("{} {}", icons::DOWNLOAD_SIMPLE, tr!("Cloner un dépôt")))
             .id(egui::Id::unique("clone-window"))
             .open(&mut open)
-            .default_size([760.0, 640.0])
+            .default_size([640.0, max_h.min(540.0)])
+            .max_height(max_h)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(
@@ -324,9 +328,16 @@ impl CloneWindow {
                     );
                 });
                 ui.separator();
-                let list_h = (ui.available_height() - 230.0).max(160.0);
+                // La destination en bas de la fenêtre, d'abord : le haut sait alors ce qui lui reste.
+                egui::Panel::bottom("clone-destination").frame(egui::Frame::new()).show_separator_line(false).show(
+                    ui,
+                    |ui| {
+                        ui.separator();
+                        self.destination_ui(ui, shared, p);
+                    },
+                );
                 match self.source {
-                    Source::Accounts => self.accounts_ui(ui, shared, p, list_h),
+                    Source::Accounts => self.accounts_ui(ui, shared, p),
                     Source::Url => {
                         ui.label(tr!("URL du dépôt (HTTPS ou SSH)"));
                         let resp = ui.add(
@@ -338,11 +349,8 @@ impl CloneWindow {
                             self.folder = folder_from_url(&self.url);
                         }
                         self.url_account_ui(ui, shared);
-                        ui.add_space(list_h - 70.0);
                     }
                 }
-                ui.separator();
-                self.destination_ui(ui, shared, p);
             });
         if !open && let Some((_, c)) = &self.running {
             c.cancel();
@@ -379,7 +387,7 @@ impl CloneWindow {
         });
     }
 
-    fn accounts_ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared, p: &Palette, list_h: f32) {
+    fn accounts_ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared, p: &Palette) {
         let accounts = shared.settings.accounts.clone();
         if accounts.is_empty() {
             ui.add_space(20.0);
@@ -389,7 +397,6 @@ impl CloneWindow {
                     shared.actions.push(AppAction::ShowAccounts);
                 }
             });
-            ui.add_space(list_h - 60.0);
             return;
         }
         ui.horizontal(|ui| {
@@ -398,16 +405,20 @@ impl CloneWindow {
                 .as_ref()
                 .and_then(|id| accounts.iter().find(|a| &a.id == id))
                 .map_or(tr!("Tous les comptes").to_string(), |a| a.title());
-            egui::ComboBox::from_id_salt("clone-account").selected_text(label).width(260.0).show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.account_filter, None, tr!("Tous les comptes"));
-                for a in &accounts {
-                    ui.selectable_value(
-                        &mut self.account_filter,
-                        Some(a.id.clone()),
-                        format!("{} {}", kind_icon(a.kind), a.title()),
-                    );
-                }
-            });
+            let combo =
+                egui::ComboBox::from_id_salt("clone-account").selected_text(label).width(260.0).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.account_filter, None, tr!("Tous les comptes"));
+                    for a in &accounts {
+                        ui.selectable_value(
+                            &mut self.account_filter,
+                            Some(a.id.clone()),
+                            format!("{} {}", kind_icon(a.kind), a.title()),
+                        );
+                    }
+                });
+            // Sans libellé à côté : son nom pour les lecteurs d'écran.
+            let name = tr!("Compte").to_string();
+            combo.response.widget_info(move || egui::WidgetInfo::labeled(egui::Role::ComboBox, true, name.clone()));
             if widgets::icon_button(ui, icons::ARROWS_CLOCKWISE, tr!("Recharger les listes")).clicked() {
                 self.load_all(shared);
             }
@@ -456,7 +467,8 @@ impl CloneWindow {
         ui.label(RichText::new(trn!(rows.len(), "{n} dépôt", "{n} dépôts")).color(p.weak).size(12.0));
         let mut chosen: Option<(String, RemoteRepo)> = None;
         let now = widgets::now_ts();
-        egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, true]).show_rows(
+        // Tout ce qui reste au-dessus de la destination, même si c'est peu.
+        egui::ScrollArea::vertical().max_height(ui.available_height()).auto_shrink([false, false]).show_rows(
             ui,
             38.0,
             rows.len(),
@@ -741,6 +753,52 @@ mod tests {
         let old = updated_label(&repo(Some("2011-01-26T19:06:43Z")), now + 30 * 86_400).unwrap();
         assert!(old.contains("2011"), "date absolue : {old}");
         assert_eq!(updated_label(&repo(None), now), None, "Azure DevOps : pas de date");
+    }
+
+    /// La fenêtre Cloner ouverte sur une liste de `n` dépôts, dans une fenêtre principale de cette taille ; rend le
+    /// rectangle de la fenêtre Cloner et celui de la fenêtre principale.
+    fn clone_window_in(size: [f32; 2], n: usize) -> (egui::Rect, egui::Rect) {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, mut settings, _) = crate::settings::SettingsFile::load(&dir.path().join("settings.json"));
+        // Trois comptes : un chargé, un en échec, un qui charge encore (une ligne chacun au-dessus de la liste).
+        settings.accounts = vec![github("perso"), github("pro"), github("asso")];
+        let (mut shared, _events) = crate::app::Shared::new(egui::Context::default(), settings, store, None, None);
+        let mut w = window();
+        w.repos.insert("pro".into(), super::Load::Failed("HTTP 401 : jeton refusé par le serveur".into()));
+        w.repos.insert("asso".into(), super::Load::Loading);
+        let list = (0..n)
+            .map(|i| dragontree_forges::RemoteRepo {
+                name: format!("depot-{i}"),
+                account_id: "perso".into(),
+                clone_url: format!("https://example.com/contoso/depot-{i}.git"),
+                ..repo(None)
+            })
+            .collect();
+        w.repos.insert("perso".into(), super::Load::Loaded(list));
+        let p = crate::theme::Palette::dark();
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(size)
+            .with_context_setup(|ctx| crate::theme::install_fonts(ctx, Default::default()))
+            .build_ui(|ui| {
+                w.ui(&ui.ctx().clone(), &mut shared, &p);
+            });
+        h.run_steps(8);
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("clone-window"))).expect("fenêtre Cloner");
+        (window, h.ctx.content_rect())
+    }
+
+    /// Une longue liste ne pousse pas la fenêtre hors de la fenêtre principale, même petite.
+    #[test]
+    fn a_long_list_stays_inside_a_small_main_window() {
+        let (window, screen) = clone_window_in([900.0, 560.0], 200);
+        assert!(screen.expand(1.0).contains_rect(window), "{window:?} hors de {screen:?}");
+    }
+
+    /// Dans une grande fenêtre, la fenêtre Cloner reste de taille raisonnable.
+    #[test]
+    fn the_window_stays_compact_in_a_large_main_window() {
+        let (window, _) = clone_window_in([1600.0, 1000.0], 200);
+        assert!(window.width() <= 680.0 && window.height() <= 600.0, "{window:?}");
     }
 
     #[test]
