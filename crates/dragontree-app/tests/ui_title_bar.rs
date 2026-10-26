@@ -7,9 +7,9 @@ use common::*;
 use egui_kittest::kittest::Queryable;
 use suite_titlebar::hit;
 
-/// La zone du bouton de ce nom dans la barre de titre (le titre de la fenêtre n'est pas un bouton).
+/// La zone du bouton de ce nom dans la barre de titre (le titre de la fenêtre et l'icône ne sont pas des boutons).
 fn in_title_bar(h: &egui_kittest::Harness<'static, dragontree_app::DragonTreeApp>, label: &str) -> Option<egui::Rect> {
-    h.query_all_by(|n| n.label().as_deref() == Some(label) && n.role() != egui::accesskit::Role::Label)
+    h.query_all_by(|n| n.label().as_deref() == Some(label) && n.role() == egui::accesskit::Role::Button)
         .map(|n| n.rect())
         .find(|r| r.bottom() <= suite_titlebar::HEIGHT + 0.5)
 }
