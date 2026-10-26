@@ -503,6 +503,9 @@ pub struct DragonTreeApp {
     /// Langue de Windows, lue au démarrage (réglage « Système »).
     system_lang: Lang,
     window_title: String,
+    /// Lancé seul : l'icône de sa barre de titre, et la barre confiée à Windows (`suite_titlebar::install`).
+    title_icon: Option<egui::TextureHandle>,
+    title_bar_hooked: bool,
     /// Onglets de dépôt fermés pendant la session (Ctrl+Maj+T).
     closed_tabs: ClosedTabs,
     workspace_dialog: crate::workspace_dialog::WorkspaceDialog,
@@ -611,6 +614,8 @@ impl DragonTreeApp {
             diff_font_generation: Default::default(),
             system_lang,
             window_title: String::new(),
+            title_icon: None,
+            title_bar_hooked: false,
             closed_tabs: ClosedTabs::default(),
             workspace_dialog: Default::default(),
             closing: Default::default(),
@@ -1464,6 +1469,57 @@ impl DragonTreeApp {
         }
     }
 
+    /// Lancé seul : la barre de titre de DragonTree, comme celle de Fawkes et d'Eyrie (`suite_titlebar`) : icône, titre
+    /// de la fenêtre et menus, l'indicateur des réglages non enregistrés à droite, puis réduire / agrandir / fermer.
+    /// Rend la commande choisie et la demande d'un nouvel essai d'enregistrement.
+    fn title_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        frame: &eframe::Frame,
+        unsaved: Option<&(PathBuf, crate::settings::Pending)>,
+        p: &Palette,
+    ) -> (Option<Command>, bool) {
+        // La fenêtre n'existe qu'après la première image : la barre est confiée à Windows dès que possible.
+        if !self.title_bar_hooked {
+            self.title_bar_hooked = suite_titlebar::install(frame);
+        }
+        let ctx = ui.ctx().clone();
+        let icon = self
+            .title_icon
+            .get_or_insert_with(|| {
+                let i = crate::app_icon::window_icon();
+                let image = egui::ColorImage::from_rgba_unmultiplied([i.width as usize, i.height as usize], &i.rgba);
+                let options = egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear));
+                ctx.load_texture("dragontree-icone", image, options)
+            })
+            .id();
+        let bar = suite_titlebar::Bar {
+            icon: Some(icon),
+            title: &self.window_title,
+            colors: suite_titlebar::Colors { fill: p.sidebar, text: p.text, text_dim: p.weak, hover: p.hover },
+            labels: suite_titlebar::Labels {
+                minimize: tr!("Réduire"),
+                maximize: tr!("Agrandir"),
+                restore: tr!("Niveau inférieur"),
+                close: tr!("Fermer"),
+            },
+        };
+        let cx = self.command_context();
+        let (mut chosen, mut retry) = (None, false);
+        suite_titlebar::show(ui, &bar, |side, ui| match side {
+            suite_titlebar::Side::Left => {
+                let (c, buttons) = crate::menu_bar::show(ui, &cx);
+                chosen = c;
+                buttons
+            }
+            suite_titlebar::Side::Right => {
+                retry = unsaved.is_some_and(|(path, pending)| crate::menu_bar::unsaved_settings(ui, path, pending, p));
+                ui.min_rect()
+            }
+        });
+        (chosen, retry)
+    }
+
     fn maybe_screenshot(&mut self, ctx: &egui::Context) {
         let Some(path) = self.start.screenshot.clone() else { return };
         if self.screenshot_requested {
@@ -1503,7 +1559,7 @@ impl eframe::App for DragonTreeApp {
         self.shared.refresh_accounts();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_shortcuts(&ctx);
         self.handle_dropped_files(&ctx);
@@ -1532,19 +1588,24 @@ impl eframe::App for DragonTreeApp {
         }
 
         let unsaved = self.shared.unsaved_settings().map(|pending| (self.shared.settings_file(), pending.clone()));
-        let (chosen, retry) = egui::Panel::top("menu-bar")
-            .frame(Frame::new().fill(p.sidebar).inner_margin(egui::Margin { left: 6, right: 6, top: 2, bottom: 0 }))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let chosen = crate::menu_bar::show(ui, &self.command_context());
-                    let retry = unsaved
-                        .as_ref()
-                        .is_some_and(|(path, pending)| crate::menu_bar::unsaved_settings(ui, path, pending, &p));
-                    (chosen, retry)
+        let (chosen, retry) = if self.shared.hosted {
+            // Embarqué : la barre de titre est celle de l'hôte, les menus restent dans la case.
+            egui::Panel::top("menu-bar")
+                .frame(Frame::new().fill(p.sidebar).inner_margin(egui::Margin { left: 6, right: 6, top: 2, bottom: 0 }))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let (chosen, _) = crate::menu_bar::show(ui, &self.command_context());
+                        let retry = unsaved
+                            .as_ref()
+                            .is_some_and(|(path, pending)| crate::menu_bar::unsaved_settings(ui, path, pending, &p));
+                        (chosen, retry)
+                    })
+                    .inner
                 })
                 .inner
-            })
-            .inner;
+        } else {
+            self.title_bar(ui, frame, unsaved.as_ref(), &p)
+        };
         if let Some(cmd) = chosen {
             self.run_command(cmd);
         }

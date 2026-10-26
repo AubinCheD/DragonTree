@@ -215,13 +215,36 @@ impl Palette {
         }
     }
 
+    /// La palette du thème actif : celle de l'hôte si DragonTree est embarqué et que l'hôte en a donné une pour ce
+    /// thème (voir [`set_host_palette`]), sinon la sienne.
     pub fn current(ctx: &egui::Context) -> Palette {
-        if ctx.global_style().visuals.dark_mode { Palette::dark() } else { Palette::light() }
+        let dark = ctx.global_style().visuals.dark_mode;
+        match ctx.data(|d| d.get_temp::<Palette>(host_palette_id())) {
+            Some(p) if p.dark == dark => p,
+            _ if dark => Palette::dark(),
+            _ => Palette::light(),
+        }
     }
 
     pub fn lane(&self, color: u8) -> Color32 {
         self.graph[color as usize % self.graph.len()]
     }
+}
+
+fn host_palette_id() -> egui::Id {
+    egui::Id::unique("dragontree-palette-hote")
+}
+
+/// Embarqué (Eyrie) : les couleurs de l'hôte remplacent celles de DragonTree (fonds, texte, accent, sélection), pour
+/// qu'il se fonde dans les autres modules ; `None` rend les siennes.
+pub fn set_host_palette(ctx: &egui::Context, palette: Option<Palette>) {
+    ctx.data_mut(|d| {
+        if let Some(p) = palette {
+            d.insert_temp(host_palette_id(), p);
+        } else {
+            d.remove::<Palette>(host_palette_id());
+        }
+    });
 }
 
 fn visuals_for(p: &Palette) -> Visuals {
@@ -276,4 +299,24 @@ pub fn apply(ctx: &egui::Context, choice: crate::settings::ThemeChoice, scale: f
     // Le zoom clavier d'egui est coupé : seul le réglage enregistré (Affichage › Zoom) agit.
     ctx.options_mut(|o| o.zoom_with_keyboard = false);
     ctx.set_zoom_factor(scale.clamp(0.75, 2.0));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// La palette de l'hôte vaut pour son thème seulement ; retirée, DragonTree reprend la sienne.
+    #[test]
+    fn the_host_palette_replaces_the_own_one_for_its_theme() {
+        let ctx = egui::Context::default();
+        ctx.set_theme(egui::Theme::Dark);
+        let host = Palette { bg: Color32::from_rgb(1, 2, 3), ..Palette::dark() };
+        set_host_palette(&ctx, Some(host));
+        assert_eq!(Palette::current(&ctx).bg, host.bg, "fond de l'hôte");
+        ctx.set_theme(egui::Theme::Light);
+        assert_eq!(Palette::current(&ctx).bg, Palette::light().bg, "une palette sombre ne vaut pas en clair");
+        ctx.set_theme(egui::Theme::Dark);
+        set_host_palette(&ctx, None);
+        assert_eq!(Palette::current(&ctx).bg, Palette::dark().bg, "la sienne revient");
+    }
 }

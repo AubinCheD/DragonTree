@@ -1408,5 +1408,8 @@
   "Tout déplier": "Expand all",
   "Tout replier": "Collapse all",
   "Dernier fetch : {when}": "Last fetch: {when}",
-  "Jamais fetché": "Never fetched"
+  "Jamais fetché": "Never fetched",
+  "Réduire": "Minimize",
+  "Agrandir": "Maximize",
+  "Niveau inférieur": "Restore down"
 }

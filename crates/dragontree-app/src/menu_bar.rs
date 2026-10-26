@@ -13,15 +13,21 @@ use crate::icons;
 use crate::settings::Pending;
 use crate::theme::Palette;
 
-/// Affiche la barre ; renvoie la commande choisie.
-pub fn show(ui: &mut Ui, cx: &CommandContext) -> Option<Command> {
+/// Affiche la barre ; renvoie la commande choisie et la zone des boutons de menu (la barre, elle, prend toute la
+/// largeur : dans la barre de titre, seule cette zone reste à DragonTree).
+pub fn show(ui: &mut Ui, cx: &CommandContext) -> (Option<Command>, egui::Rect) {
     let mut chosen = None;
-    egui::MenuBar::new().ui(ui, |ui| {
-        for (title, items) in MENUS {
-            ui.menu_button(tr_str(title), |ui| entries(ui, items, cx, &mut chosen));
-        }
-    });
-    chosen
+    let buttons = egui::MenuBar::new()
+        .ui(ui, |ui| {
+            let mut buttons = egui::Rect::NOTHING;
+            for (title, items) in MENUS {
+                let r = ui.menu_button(tr_str(title), |ui| entries(ui, items, cx, &mut chosen)).response.rect;
+                buttons = buttons.union(r);
+            }
+            buttons
+        })
+        .inner;
+    (chosen, buttons)
 }
 
 /// Indicateur « Réglages non enregistrés » (L3), à droite de la barre : des réglages ont été modifiés, mais le fichier

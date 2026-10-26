@@ -109,7 +109,9 @@ fn main() -> eframe::Result {
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([820.0, 520.0])
         // Même dessin que l'icône de l'exécutable (`assets/dragontree.ico`, intégrée par build.rs).
-        .with_icon(Arc::new(dragontree_app::app_icon::window_icon()));
+        .with_icon(Arc::new(dragontree_app::app_icon::window_icon()))
+        // DragonTree dessine sa barre de titre, menus compris (`suite_titlebar`, comme Fawkes et Eyrie).
+        .with_decorations(false);
     if start.screenshot.is_some() {
         // Taille fixe pour des captures comparables.
         viewport = viewport.with_inner_size([1440.0, 900.0]);

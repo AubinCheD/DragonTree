@@ -33,6 +33,7 @@ syntect.workspace = true
 image.workspace = true
 regex.workspace = true
 suite-accounts.workspace = true
+suite-titlebar.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

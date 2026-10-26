@@ -45,6 +45,8 @@ regex = "1"
 windows-sys = "0.61"
 # Comptes communs de la suite EyrieSuite (dépôt voisin).
 suite-accounts = { path = "../Eyrie/crates/suite-accounts" }
+# Barre de titre dessinée (menus dans le bandeau de la fenêtre), commune avec Eyrie.
+suite-titlebar = { path = "../Eyrie/crates/suite-titlebar" }
 
 [profile.dev]
 opt-level = 1

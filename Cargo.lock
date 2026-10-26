@@ -1018,6 +1018,7 @@ dependencies = [
  "serde_json",
  "similar",
  "suite-accounts",
+ "suite-titlebar",
  "syntect",
  "tempfile",
  "windows-sys 0.61.2",
@@ -3640,6 +3641,15 @@ dependencies = [
  "keyring",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "suite-titlebar"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "raw-window-handle",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
