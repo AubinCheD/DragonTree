@@ -262,6 +262,41 @@ pub fn path_key(p: &Path) -> String {
     s.trim_end_matches('/').to_lowercase()
 }
 
+/// Comme [`path_key`], le chemin d'abord mis en forme longue : sous Windows, `C:\Users\CLBR-A~1\…` et
+/// `C:\Users\clbr-achedotal\…` sont le même dossier, et git donne toujours la forme longue (dépôt principal d'un
+/// worktree). Un chemin sans `~`, ou qui n'existe pas, reste tel quel.
+pub fn long_path_key(p: &Path) -> String {
+    path_key(&long_path(p))
+}
+
+#[cfg(windows)]
+fn long_path(p: &Path) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
+    if !p.to_string_lossy().contains('~') {
+        return p.to_path_buf();
+    }
+    let wide: Vec<u16> = p.as_os_str().encode_wide().chain([0]).collect();
+    let mut buf = vec![0u16; 512];
+    loop {
+        // Longueur écrite, ou taille nécessaire (zéro final compris) si le tampon est trop petit ; 0 : échec.
+        let n = unsafe { GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        if n == 0 {
+            return p.to_path_buf();
+        }
+        if n < buf.len() {
+            buf.truncate(n);
+            return PathBuf::from(std::ffi::OsString::from_wide(&buf));
+        }
+        buf.resize(n, 0);
+    }
+}
+
+#[cfg(not(windows))]
+fn long_path(p: &Path) -> PathBuf {
+    p.to_path_buf()
+}
+
 pub fn config_dir() -> PathBuf {
     dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("DragonTree")
 }
@@ -636,18 +671,24 @@ impl Settings {
     }
 
     /// Compte associé au dépôt `path` (voir [`Settings::repo_accounts`]) : `None` sans association, ou si le compte
-    /// n'existe plus.
+    /// n'existe plus. Le chemin est comparé en forme longue ([`long_path_key`]) ; une association enregistrée avant
+    /// sous un chemin court est encore trouvée par ce même chemin.
     pub fn account_for_repo(&self, path: &Path) -> Option<&Account> {
-        let id = self.repo_accounts.get(&path_key(path))?;
+        let id = self.repo_accounts.get(&long_path_key(path)).or_else(|| self.repo_accounts.get(&path_key(path)))?;
         self.accounts.iter().find(|a| &a.id == id)
     }
 
     /// Associe le compte `account_id` au dépôt `path` (fetch, pull et push s'authentifient avec son jeton), ou
-    /// retire l'association (`None`) : git reprend alors sa configuration habituelle.
+    /// retire l'association (`None`) : git reprend alors sa configuration habituelle. L'entrée est rangée sous le
+    /// chemin en forme longue, celle d'avant sous un chemin court est retirée.
     pub fn set_account_for_repo(&mut self, path: &Path, account_id: Option<&str>) {
+        let (long, plain) = (long_path_key(path), path_key(path));
+        if plain != long {
+            self.repo_accounts.remove(&plain);
+        }
         match account_id {
-            Some(id) => self.repo_accounts.insert(path_key(path), id.to_string()),
-            None => self.repo_accounts.remove(&path_key(path)),
+            Some(id) => self.repo_accounts.insert(long, id.to_string()),
+            None => self.repo_accounts.remove(&long),
         };
     }
 
@@ -1145,6 +1186,47 @@ mod tests {
         s.set_account_for_repo(repo, None);
         assert!(s.account_for_repo(repo).is_none());
         assert!(s.repo_accounts.is_empty(), "plus d'entrée pour un dépôt dissocié");
+    }
+
+    /// Le nom court Windows d'un dossier existant (`DPTAU~1`), ou le chemin tel quel si le volume n'en crée pas.
+    #[cfg(windows)]
+    fn short_path(p: &Path) -> PathBuf {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+        let wide: Vec<u16> = p.as_os_str().encode_wide().chain([0]).collect();
+        let mut buf = vec![0u16; 1024];
+        let n = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        if n == 0 || n >= buf.len() {
+            return p.to_path_buf();
+        }
+        buf.truncate(n);
+        PathBuf::from(std::ffi::OsString::from_wide(&buf))
+    }
+
+    /// Un dépôt ouvert par son chemin court (`C:\Users\CLBR-A~1\…`) et retrouvé par le chemin long que donne git (dépôt
+    /// principal d'un worktree) : c'est la même association.
+    #[cfg(windows)]
+    #[test]
+    fn a_short_windows_path_and_its_long_form_share_the_account() {
+        let t = tempfile::tempdir().unwrap();
+        let long = t.path().join("Dépôt au nom long");
+        std::fs::create_dir(&long).unwrap();
+        let short = short_path(&long);
+        if path_key(&short) == path_key(&long) {
+            eprintln!("noms courts désactivés sur ce volume : rien à vérifier");
+            return;
+        }
+        let mut s = Settings { accounts: vec![account("compte-a")], ..Settings::default() };
+        s.set_account_for_repo(&short, Some("compte-a"));
+        assert_eq!(s.account_for_repo(&long).map(|a| a.id.as_str()), Some("compte-a"), "trouvé par le chemin long");
+        assert_eq!(s.account_for_repo(&short).map(|a| a.id.as_str()), Some("compte-a"), "et par le chemin court");
+        // Une association d'avant, rangée sous le chemin court, est remplacée et non doublée.
+        s.repo_accounts.clear();
+        s.repo_accounts.insert(path_key(&short), "compte-a".into());
+        assert_eq!(s.account_for_repo(&short).map(|a| a.id.as_str()), Some("compte-a"), "ancienne entrée lue");
+        s.set_account_for_repo(&long, None);
+        s.set_account_for_repo(&short, None);
+        assert!(s.repo_accounts.is_empty(), "plus aucune entrée");
     }
 
     #[test]
