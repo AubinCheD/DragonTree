@@ -17,7 +17,7 @@ use crate::closing::Operations;
 use crate::commands::{self, Command, CommandContext, Scope};
 use crate::jobs::Jobs;
 use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsWindow};
-use crate::repo::{RepoEvent, RepoTab};
+use crate::repo::{Refresh, RemoteOp, RepoEvent, RepoTab};
 use crate::repo_list::{RepoListState, ScanEvent};
 use crate::settings::{Pending, Saved, Settings, SettingsFile, ThemeChoice, path_key};
 use crate::settings_ui::{SettingsTab, SettingsWindow};
@@ -734,6 +734,75 @@ impl DragonTreeApp {
     /// fenêtre Réglages.
     pub fn settings_left(&mut self) {
         self.settings_panel = None;
+    }
+
+    // --- Pour un hôte qui pilote DragonTree à distance (le téléphone de la suite) ---------------------------------
+
+    /// L'onglet ouvert sur le dossier `repo`.
+    pub fn repo_tab(&self, repo: &Path) -> Option<&RepoTab> {
+        match &self.tabs[self.repo_tab_index(repo)?].kind {
+            TabKind::Repo(r) => Some(r),
+            TabKind::Welcome => None,
+        }
+    }
+
+    fn repo_tab_index(&self, repo: &Path) -> Option<usize> {
+        let key = path_key(repo);
+        self.tabs.iter().position(|t| matches!(&t.kind, TabKind::Repo(r) if path_key(&r.path) == key))
+    }
+
+    /// Ouvre `repo` dans un onglet s'il ne l'est pas, sans changer l'onglet affiché : DragonTree le lit (état,
+    /// branches, historique) et y mène les opérations demandées à distance.
+    pub fn open_repo_tab(&mut self, repo: &Path) {
+        if self.repo_tab_index(repo).is_some() {
+            return;
+        }
+        let id = self.alloc_tab_id();
+        let tab = RepoTab::new(id, repo.to_path_buf(), &mut self.shared);
+        self.tabs.push(Tab { id, kind: TabKind::Repo(Box::new(tab)) });
+        self.remember_tabs();
+        self.shared.ctx.request_repaint();
+    }
+
+    /// Affiche l'onglet de `repo` (ouvert au besoin), comme un dépôt choisi dans la liste.
+    pub fn show_repo(&mut self, repo: &Path) {
+        self.open_repo(repo, false);
+        self.shared.ctx.request_repaint();
+    }
+
+    /// Relit `what` dans l'onglet de `repo` : `Refresh::ALL` comme « Actualiser » ; sans l'historique, il n'est relu
+    /// que si les branches ont bougé.
+    pub fn refresh_repo(&mut self, repo: &Path, what: Refresh) {
+        if let Some(i) = self.repo_tab_index(repo)
+            && let TabKind::Repo(r) = &mut self.tabs[i].kind
+        {
+            r.refresh(&self.shared, what);
+        }
+    }
+
+    /// Lance `op` sur l'onglet de `repo` comme son bouton (voir `RemoteOp`) ; rend son numéro, à suivre dans
+    /// `RepoTab::running` pendant qu'elle tourne, puis dans `RepoTab::outcome`.
+    pub fn queue_operation(&mut self, repo: &Path, op: RemoteOp) -> Result<u64, String> {
+        // Comme depuis le dialogue : les onglets ouverts sur le worktree supprimé sont fermés avant.
+        if let RemoteOp::RemoveWorktree(path) = &op {
+            if path_key(path) == path_key(repo) {
+                return Err(tr!("Ce worktree est celui de l'onglet : supprimez-le depuis un autre.").into());
+            }
+            self.close_tabs_of(path);
+        }
+        let i = self.repo_tab_index(repo).ok_or_else(|| tr!("Ce dépôt n'est pas ouvert dans DragonTree."))?;
+        let TabKind::Repo(r) = &mut self.tabs[i].kind else {
+            return Err(tr!("Ce dépôt n'est pas ouvert dans DragonTree.").into());
+        };
+        let id = r.run_remote(&mut self.shared, op)?;
+        self.shared.ctx.request_repaint();
+        Ok(id)
+    }
+
+    /// Annule l'opération `id` de l'onglet de `repo`, comme son bouton Annuler ; faux si elle est déjà finie.
+    pub fn cancel_operation(&self, repo: &Path, id: u64) -> bool {
+        let op = self.repo_tab(repo).and_then(|r| r.running.iter().find(|o| o.id == id));
+        op.inspect(|o| o.cancel.cancel()).is_some()
     }
 
     /// Dépôts transmis par les instances lancées ensuite sur le même profil : ouverts dans des onglets (ou l'onglet

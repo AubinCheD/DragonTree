@@ -200,7 +200,7 @@ impl RepoTab {
     }
 
     /// Opération locale sans progression, d'un type donné (état « occupé » des boutons).
-    fn run_simple_as(
+    pub(super) fn run_simple_as(
         &mut self,
         shared: &Shared,
         kind: OpKind,

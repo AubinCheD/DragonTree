@@ -30,6 +30,7 @@ mod open_in;
 mod patches;
 mod pull_request;
 mod rebase_ui;
+mod remote;
 mod repo_account;
 mod repo_settings;
 mod restore;
@@ -41,7 +42,7 @@ mod toolbar;
 mod watcher;
 mod worktrees;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -67,6 +68,7 @@ pub use blame::FileHistoryWindow;
 pub use dialogs::Dialog;
 pub use diff_view::DiffViewState;
 pub use patches::is_patch_file;
+pub use remote::{OpOutcome, RemoteOp};
 
 /// Nombre de commits du premier affichage (le reste suit en arrière-plan).
 const FIRST_BATCH: usize = 2000;
@@ -547,6 +549,8 @@ pub struct RepoTab {
     pr_generation: u64,
     /// Créations de pull request envoyées à la forge, sans réponse encore (la fermeture de l'application les attend).
     pr_creating: usize,
+    /// Ce qu'ont donné les dernières opérations visibles (voir `outcome`).
+    outcomes: VecDeque<remote::OpOutcome>,
 }
 
 impl RepoTab {
@@ -599,6 +603,7 @@ impl RepoTab {
             pr_after_push: None,
             pr_generation: 0,
             pr_creating: 0,
+            outcomes: VecDeque::new(),
         };
         // Le choix « branche courante seulement » est mémorisé par dépôt (le filtre sur des branches ne l'est pas).
         tab.history.current_branch_only = shared.settings.current_branch_only_of(&tab.path);
@@ -1105,6 +1110,9 @@ impl RepoTab {
                     .map_or((false, actions::OpKind::Other), |o| (o.silent, o.kind));
                 self.running.retain(|o| o.id != id);
                 let succeeded = result.is_ok();
+                if !silent {
+                    self.keep_outcome(id, &title, result.clone().map_err(|e| e.to_string()));
+                }
                 // Authentification du fetch (L4), automatique ou non : l'indicateur de l'onglet reste jusqu'au prochain
                 // fetch de tous les remotes réussi.
                 let all_remotes = self.fetches_of_all_remotes.remove(&id);
