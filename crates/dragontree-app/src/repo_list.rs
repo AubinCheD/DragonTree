@@ -535,13 +535,15 @@ fn section_label(ui: &mut Ui, text: &str, p: &Palette) {
     ui.label(RichText::new(text).size(11.5).color(p.weak).strong());
 }
 
-/// État rapide d'un dépôt pour la liste.
+/// État rapide d'un dépôt pour la liste. Calculé sans que l'utilisateur ait ouvert le dépôt : rien de ce que désigne
+/// sa configuration n'est lancé, et l'état des sous-modules n'est pas calculé (ils ont leur propre configuration).
 pub fn quick_status(git: &dragontree_git::Git, path: &Path) -> QuickStatus {
     let out = git
         .cmd(path)
         .read_only()
         .non_interactive()
-        .args(["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal"])
+        .args(dragontree_git::discovery::untrusted_config_args(git, path))
+        .args(["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignore-submodules=dirty"])
         .run();
     match out {
         Ok(o) => match parse_status_v2(&o.stdout) {
@@ -584,6 +586,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Un dépôt trouvé sur le disque (archive extraite, dossier partagé) n'a pas été ouvert : l'état rapide ne lance
+    /// aucun programme désigné par sa configuration (`core.fsmonitor`, filtre `clean`).
+    #[test]
+    fn quick_status_runs_no_program_from_the_repository_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("piege");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = crate::test_git();
+        git_in(&git, &repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join(".gitattributes"), "*.txt filter=piege\n").unwrap();
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        git_in(&git, &repo, &["add", "-A"]);
+        git_in(&git, &repo, &["-c", "user.name=T", "-c", "user.email=t@x", "commit", "-q", "-m", "init"]);
+        git_in(&git, &repo, &["config", "core.fsmonitor", "touch fsmonitor-lance; echo"]);
+        git_in(&git, &repo, &["config", "filter.piege.clean", "touch filtre-lance; cat"]);
+        // Fichier modifié : git doit le relire, donc passer par le filtre.
+        std::fs::write(repo.join("a.txt"), "b\n").unwrap();
+        let status = quick_status(&git, &repo);
+        assert_eq!(status.error, None);
+        assert!(!repo.join("fsmonitor-lance").exists(), "core.fsmonitor du dépôt lancé");
+        assert!(!repo.join("filtre-lance").exists(), "filtre clean du dépôt lancé");
+        assert_eq!(status.dirty, 1);
     }
 
     #[test]

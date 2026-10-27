@@ -8,7 +8,7 @@ use ignore::{WalkBuilder, WalkState};
 use serde::{Deserialize, Serialize};
 
 use crate::refs::{HeadState, read_head};
-use crate::runner::CancelToken;
+use crate::runner::{CancelToken, Git};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RepoKind {
@@ -179,7 +179,43 @@ fn git_dir_of(repo_path: &Path) -> Option<PathBuf> {
         return Some(dotgit);
     }
     let gd = PathBuf::from(read_gitdir_file(&dotgit)?);
-    Some(if gd.is_absolute() { gd } else { repo_path.join(gd) })
+    let gd = if gd.is_absolute() { gd } else { repo_path.join(gd) };
+    stays_local(repo_path, gd)
+}
+
+/// Chemin désigné par un fichier du dépôt (`gitdir:`, `commondir`), lu sans que l'utilisateur ait ouvert le dépôt :
+/// refusé s'il mène sur le réseau (`\\serveur\…`, `//serveur/…`) alors que le dépôt est sur un disque local. Le
+/// simple fait de le lire ouvrirait une connexion SMB, où Windows présente l'identité de l'utilisateur.
+fn stays_local(repo_path: &Path, target: PathBuf) -> Option<PathBuf> {
+    let remote = |p: &Path| {
+        let s = p.as_os_str().to_string_lossy();
+        s.starts_with(r"\\") || s.starts_with("//")
+    };
+    (!remote(&target) || remote(repo_path)).then_some(target)
+}
+
+/// Options à placer avant la sous-commande de git pour un dépôt trouvé que l'utilisateur n'a pas ouvert (archive
+/// extraite, dossier synchronisé) : sa configuration ne doit lancer aucun programme. `git status` lance `core.fsmonitor`
+/// et les filtres `clean`/`process` des `.gitattributes` ; la ligne de commande l'emporte sur la configuration, et
+/// celle des sous-processus git en hérite. Seuls les filtres définis par le dépôt (portée `local` ou `worktree`) sont
+/// neutralisés : ceux de l'utilisateur (Git LFS) restent. Lire la configuration ne lance rien.
+pub fn untrusted_config_args(git: &Git, repo_path: &Path) -> Vec<String> {
+    let mut args = vec!["-c".to_string(), "core.fsmonitor=false".to_string()];
+    let listed = git
+        .cmd(repo_path)
+        .read_only()
+        .non_interactive()
+        .args(["config", "--show-scope", "--name-only", "--get-regexp", r"^filter\..+\.(clean|process)$"])
+        .allow_codes(&[1])
+        .run();
+    let Ok(listed) = listed else { return args };
+    for line in listed.stdout_str().lines() {
+        let Some((scope, name)) = line.split_once('\t') else { continue };
+        if matches!(scope, "local" | "worktree") {
+            args.extend(["-c".to_string(), format!("{name}=")]);
+        }
+    }
+    args
 }
 
 /// État de HEAD d'un dépôt trouvé, lu directement sur disque (suit un fichier `.git` `gitdir:`).
@@ -195,7 +231,9 @@ pub fn remote_urls(repo_path: &Path) -> Vec<String> {
     let common_dir = match std::fs::read_to_string(git_dir.join("commondir")) {
         Ok(common) => {
             let common = PathBuf::from(common.trim());
-            if common.is_absolute() { common } else { git_dir.join(common) }
+            let common = if common.is_absolute() { common } else { git_dir.join(common) };
+            let Some(common) = stays_local(repo_path, common) else { return Vec::new() };
+            common
         }
         Err(_) => git_dir,
     };
@@ -443,5 +481,17 @@ mod tests {
         assert_eq!(repo_head(&main), Some(HeadState::Branch("main".into())));
         assert_eq!(repo_head(&wt), Some(HeadState::Branch("feature/é".into())));
         assert_eq!(repo_head(d.path()), None);
+    }
+
+    /// Un fichier `.git` d'un dossier local qui mène sur le réseau n'est pas suivi (aucune connexion SMB ouverte).
+    #[test]
+    fn a_gitdir_file_leading_to_the_network_is_not_followed() {
+        let d = tempfile::tempdir().unwrap();
+        let unc = mkdotgit_file(d.path(), "unc", r"\\hote.invalid\partage\x");
+        let slashes = mkdotgit_file(d.path(), "slashes", "//hote.invalid/partage/x");
+        assert_eq!(git_dir_of(&unc), None);
+        assert_eq!(git_dir_of(&slashes), None);
+        assert!(remote_urls(&unc).is_empty());
+        assert!(stays_local(Path::new(r"\\nas\depots\a"), PathBuf::from(r"\\nas\depots\a\.git")).is_some());
     }
 }
