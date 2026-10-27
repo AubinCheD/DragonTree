@@ -26,6 +26,11 @@ pub struct RebaseItem {
     pub summary: String,
 }
 
+/// `s` entre apostrophes pour `sh` : rien n'y est interprété (une apostrophe devient `'\''`).
+fn sh_quoted(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Contenu du fichier « todo » de git. Un `Reword` devient `pick` suivi d'un
 /// `exec git commit --amend` lisant le message dans `msg_dir` (aucun éditeur ouvert).
 pub fn build_todo(items: &[RebaseItem], msg_dir: &Path) -> std::io::Result<String> {
@@ -43,8 +48,10 @@ pub fn build_todo(items: &[RebaseItem], msg_dir: &Path) -> std::io::Result<Strin
         if let RebaseAction::Reword(message) = &item.action {
             let file = msg_dir.join(format!("reword-{}.txt", item.id));
             std::fs::write(&file, message)?;
-            let path = file.to_string_lossy().replace('\\', "/");
-            out.push_str(&format!("exec git commit --amend --only --no-verify -F \"{path}\"\n"));
+            // Entre apostrophes : git passe la ligne `exec` à `sh`, et le chemin contient le nom du dossier du worktree
+            // (souvent repris d'un nom de branche), où `$(…)` ou `` ` `` seraient exécutés entre guillemets doubles.
+            let path = sh_quoted(&file.to_string_lossy().replace('\\', "/"));
+            out.push_str(&format!("exec git commit --amend --only --no-verify -F {path}\n"));
         }
     }
     Ok(out)
@@ -73,10 +80,10 @@ impl Repo {
         let todo_file = dir.join("todo.txt");
         std::fs::write(&todo_file, todo)?;
         // git lance l'éditeur de séquence via sh : `cp <notre todo> <fichier de git>`.
-        let src = todo_file.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
+        let src = sh_quoted(&todo_file.to_string_lossy().replace('\\', "/"));
         let result = self
             .cmd()
-            .env("GIT_SEQUENCE_EDITOR", format!("cp '{src}'"))
+            .env("GIT_SEQUENCE_EDITOR", format!("cp {src}"))
             .env("GIT_EDITOR", "true")
             .args(["rebase", "-i", base])
             .run()
@@ -114,7 +121,7 @@ mod tests {
         assert!(lines[0].starts_with(&format!("pick {}", Oid([1; 20]))));
         assert!(lines[1].starts_with(&format!("pick {}", Oid([2; 20]))));
         assert!(lines[2].starts_with("exec git commit --amend --only --no-verify -F "), "{}", lines[2]);
-        let path = lines[2].split("-F ").nth(1).unwrap().trim_matches('"');
+        let path = lines[2].split("-F ").nth(1).unwrap().trim_matches('\'');
         assert_eq!(std::fs::read_to_string(path).unwrap(), "Nouveau\n\nCorps");
     }
 

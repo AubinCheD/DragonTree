@@ -61,6 +61,26 @@ fn interactive_rebase_squash_reword_and_drop() {
     assert!(!t.file("c").exists(), "c3 a été supprimé");
 }
 
+/// Le chemin du message d'un « reword » passe par `sh` (ligne `exec` du todo) : un `$(…)` dans le nom du dossier d'un
+/// worktree (repris d'un nom de branche distante) reste du texte.
+#[test]
+fn reword_in_a_folder_named_like_a_command_runs_nothing() {
+    let t = TestRepo::new();
+    t.write("f", "0\n");
+    let base = t.commit_all("base");
+    t.write("a", "a\n");
+    t.commit_all("c1");
+    let wt = t.path().join("wt-$(touch${IFS}marqueur)");
+    t.run(&["worktree", "add", "-q", "-b", "autre", wt.to_str().unwrap()]);
+    let repo = Repo::open(&t.git, &wt).unwrap();
+    let c = repo.rebase_candidates(&base).unwrap();
+    let items =
+        vec![RebaseItem { id: c[0].id, action: RebaseAction::Reword("c1 renommé".into()), summary: "c1".into() }];
+    repo.interactive_rebase(&base, &items).unwrap();
+    assert!(!wt.join("marqueur").exists(), "le nom du dossier a été exécuté");
+    assert_eq!(repo.last_commit_message().unwrap(), "c1 renommé");
+}
+
 fn conflicted_repo() -> (TestRepo, Repo) {
     let t = TestRepo::new();
     t.write("f", "base\n");

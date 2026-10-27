@@ -15,10 +15,12 @@ use crate::theme::{Palette, bold_family};
 use crate::widgets;
 
 /// Dossier proposé pour un nouveau worktree : à côté du worktree principal `main`, nommé
-/// `<dépôt>-<suffixe>` (les `/` d'un nom de branche deviennent des `-`).
+/// `<dépôt>-<suffixe>` : du suffixe (souvent un nom de branche, parfois venu d'un serveur), seuls les lettres, chiffres,
+/// `.`, `_` et `-` sont gardés, le reste (`/`, `$`, `(`, `` ` ``…) devient `-`.
 pub fn worktree_folder(main: &Path, suffix: &str) -> PathBuf {
     let repo = main.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let suffix = suffix.replace(['/', '\\'], "-");
+    let suffix: String =
+        suffix.chars().map(|c| if c.is_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' }).collect();
     let name = if repo.is_empty() { suffix } else { format!("{repo}-{suffix}") };
     main.parent().unwrap_or(main).join(name)
 }
@@ -343,5 +345,14 @@ mod tests {
         let main = Path::new(r"C:\DEV\fabrikam");
         assert_eq!(worktree_folder(main, "fonction"), Path::new(r"C:\DEV\fabrikam-fonction"));
         assert_eq!(worktree_folder(main, "feature/x"), Path::new(r"C:\DEV\fabrikam-feature-x"));
+        assert_eq!(worktree_folder(main, "évolution_2.1"), Path::new(r"C:\DEV\fabrikam-évolution_2.1"));
+    }
+
+    /// Un nom de branche distante ne fait pas entrer de caractères de shell dans le chemin proposé.
+    #[test]
+    fn the_proposed_folder_keeps_no_shell_characters() {
+        let main = Path::new(r"C:\DEV\fabrikam");
+        assert_eq!(worktree_folder(main, "fix-$(sh${IFS}x)"), Path::new(r"C:\DEV\fabrikam-fix---sh--IFS-x-"));
+        assert_eq!(worktree_folder(main, "a`b`"), Path::new(r"C:\DEV\fabrikam-a-b-"));
     }
 }
