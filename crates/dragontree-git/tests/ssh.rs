@@ -27,6 +27,18 @@ fn generates_lists_and_fingerprints_a_key_without_overwriting() {
 
     // Une clé avec phrase secrète, et une clé publique orpheline (ignorée).
     let locked = ssh::generate_key(&dir, &keygen, "travail", KeyType::Ed25519, "w", "secret phrase").unwrap();
+    let unlock = |phrase: &str| {
+        std::process::Command::new(&keygen)
+            .args(["-y", "-P", phrase, "-f"])
+            .arg(&locked.private_path)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    assert!(unlock("secret phrase"), "la clé s'ouvre avec sa phrase secrète");
+    assert!(!unlock(""), "la clé est protégée par sa phrase secrète");
     std::fs::write(dir.join("orpheline.pub"), "ssh-ed25519 AAAA x").unwrap();
     let keys = ssh::list_keys(&dir, &keygen).unwrap();
     assert_eq!(keys.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), ["id_ed25519", "travail"]);

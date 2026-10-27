@@ -84,17 +84,26 @@ fn keygen_failure(e: std::io::Error) -> GitError {
     }
 }
 
-/// Lance `ssh-keygen` sans console ni entrée : il ne peut jamais attendre une saisie.
-fn run_keygen(keygen: &Path, args: &[&OsStr]) -> Result<String, GitError> {
+/// Lance `ssh-keygen` sans console : il ne peut jamais attendre une saisie. `input` (la phrase secrète, deux fois) est
+/// écrit sur son entrée, qu'il lit faute de terminal ; sans `input`, l'entrée est vide.
+fn run_keygen(keygen: &Path, args: &[&OsStr], input: Option<&str>) -> Result<String, GitError> {
+    use std::io::Write;
     let mut command = Command::new(keygen);
-    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Jamais de programme « askpass » : la phrase vient de l'entrée.
+    command.env("SSH_ASKPASS_REQUIRE", "never").env_remove("DISPLAY");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-    let out = command.output().map_err(keygen_failure)?;
+    let mut child = command.spawn().map_err(keygen_failure)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // Une erreur d'écriture (ssh-keygen déjà arrêté) se lit dans son code de sortie.
+        let _ = stdin.write_all(input.unwrap_or_default().as_bytes());
+    }
+    let out = child.wait_with_output().map_err(keygen_failure)?;
     if out.status.success() {
         return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
@@ -122,7 +131,7 @@ pub fn parse_fingerprint_line(line: &str) -> Option<(u32, String, String, String
 fn read_key(keygen: &Path, private_path: &Path) -> Result<SshKey, GitError> {
     let name = private_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let public_path = PathBuf::from(format!("{}.pub", private_path.display()));
-    let line = run_keygen(keygen, &[OsStr::new("-l"), OsStr::new("-f"), public_path.as_os_str()])?;
+    let line = run_keygen(keygen, &[OsStr::new("-l"), OsStr::new("-f"), public_path.as_os_str()], None)?;
     let (bits, fingerprint, comment, key_type) = parse_fingerprint_line(line.lines().next().unwrap_or_default())
         .ok_or_else(|| GitError::Parse(format!("ssh-keygen -lf : {}", line.trim())))?;
     let public_key = std::fs::read_to_string(&public_path).map_err(|e| GitError::Io(e.to_string()))?.trim().to_string();
@@ -180,7 +189,7 @@ fn valid_file_name(name: &str) -> bool {
 }
 
 /// Génère une paire dans `ssh_dir` (créé au besoin). Refuse d'écraser un fichier existant. La phrase secrète
-/// (vide : aucune) est passée en argument : pas de terminal, donc aucune invite.
+/// (vide : aucune) est écrite sur l'entrée de `ssh-keygen`, jamais passée en argument.
 pub fn generate_key(
     ssh_dir: &Path,
     keygen: &Path,
@@ -210,8 +219,17 @@ pub fn generate_key(
         KeyType::Ed25519 => args.push(o("ed25519")),
         KeyType::Rsa4096 => args.extend([o("rsa"), o("-b"), o("4096")]),
     }
-    args.extend([o("-f"), private.as_os_str(), o("-C"), o(comment), o("-N"), o(passphrase)]);
-    run_keygen(keygen, &args)?;
+    args.extend([o("-f"), private.as_os_str(), o("-C"), o(comment)]);
+    // La ligne de commande d'un processus est consignée par l'audit de Windows (événement 4688), Sysmon ou un EDR.
+    let input = if passphrase.is_empty() {
+        args.extend([o("-N"), o("")]);
+        None
+    } else if passphrase.contains(['\r', '\n']) {
+        return Err(GitError::Refused(tr!("La phrase secrète ne peut pas contenir de retour à la ligne.").to_string()));
+    } else {
+        Some(format!("{passphrase}\n{passphrase}\n"))
+    };
+    run_keygen(keygen, &args, input.as_deref())?;
     read_key(keygen, &private)
 }
 
