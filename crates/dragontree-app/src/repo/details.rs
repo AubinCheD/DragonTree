@@ -6,6 +6,7 @@ use egui::{Frame, RichText, Sense, Ui};
 
 use super::RepoTab;
 use super::custom::Clicked;
+use super::dialogs::{ConfirmAction, Dialog};
 use super::diff_view::{self, DiffMode};
 use super::restore::RestoreTarget;
 use crate::app::Shared;
@@ -402,7 +403,19 @@ impl RepoTab {
         ui.separator();
         if full.exists() {
             if ui.button(format!("{} {}", icons::ARROW_SQUARE_OUT, tr!("Ouvrir le fichier"))).clicked() {
-                crate::util::open_with_default_app(&full);
+                if crate::util::is_runnable(&full) {
+                    let name = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.dialog = Some(Dialog::Confirm {
+                        title: tr!("Lancer « {name} » ?", name),
+                        text: tr!(
+                            "Windows exécute ce type de fichier (programme, script ou raccourci) au lieu de l'ouvrir, avec vos droits. Ne le lancez que si vous faites confiance à ce dépôt."
+                        )
+                        .into(),
+                        action: ConfirmAction::LaunchFile(full.clone()),
+                    });
+                } else {
+                    crate::util::open_with_default_app(&full);
+                }
                 ui.close();
             }
             if ui.button(format!("{} {}", icons::FOLDER_OPEN, tr!("Afficher dans l'Explorateur"))).clicked() {

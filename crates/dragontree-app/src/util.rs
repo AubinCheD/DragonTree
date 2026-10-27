@@ -43,9 +43,87 @@ pub fn reveal_in_explorer(path: &Path) {
     let _ = cmd.spawn();
 }
 
-/// Ouvre un fichier avec l'application associée.
+/// Ouvre un fichier avec l'application associée, par le shell de Windows : pas par `explorer.exe`, qui découpe son
+/// argument aux virgules (un nom de fichier `a,b` ne désignerait plus ce fichier).
+#[cfg(windows)]
 pub fn open_with_default_app(path: &Path) {
-    let _ = Command::new("explorer.exe").arg(native_path(path)).spawn();
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain([0]).collect::<Vec<u16>>();
+    let (verb, file) = (wide("open".as_ref()), wide(native_path(path).as_os_str()));
+    // SAFETY : chaînes terminées par un zéro, vivantes pendant l'appel ; aucune fenêtre parente.
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+}
+
+#[cfg(not(windows))]
+pub fn open_with_default_app(path: &Path) {
+    let _ = Command::new("xdg-open").arg(path).spawn();
+}
+
+/// Extensions que Windows exécute au lieu de les ouvrir dans une application : programmes, scripts, raccourcis,
+/// installeurs, fichiers de registre ou d'aide compilée… (et celles de `PATHEXT`).
+const RUNNABLE: &[&str] = &[
+    "appinstaller",
+    "application",
+    "appref-ms",
+    "appx",
+    "appxbundle",
+    "bat",
+    "chm",
+    "cmd",
+    "com",
+    "cpl",
+    "diagcab",
+    "exe",
+    "hta",
+    "inf",
+    "iqy",
+    "jar",
+    "js",
+    "jse",
+    "library-ms",
+    "lnk",
+    "msc",
+    "msi",
+    "msix",
+    "msixbundle",
+    "msp",
+    "mst",
+    "pif",
+    "ps1",
+    "psm1",
+    "reg",
+    "scf",
+    "scr",
+    "searchconnector-ms",
+    "settingcontent-ms",
+    "slk",
+    "url",
+    "vbe",
+    "vbs",
+    "website",
+    "wsf",
+    "wsh",
+    "xll",
+];
+
+/// Ouvrir ce fichier avec l'application associée le lancerait-il ? Un fichier d'un dépôt cloné n'a pas la marque
+/// « venu d'Internet » : ni Windows ni SmartScreen ne préviendraient.
+pub fn is_runnable(path: &Path) -> bool {
+    let Some(ext) = path.extension().map(|e| e.to_string_lossy().to_lowercase()) else { return false };
+    RUNNABLE.contains(&ext.as_str())
+        || std::env::var("PATHEXT")
+            .is_ok_and(|exts| exts.split(';').any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext)))
 }
 
 pub fn open_url(ctx: &egui::Context, url: &str) {
@@ -95,5 +173,17 @@ mod tests {
     fn explorer_select_uses_windows_separators() {
         let file = Path::new(r"C:\DEV\Peppol - Copie").join("src/Factures/a.cs");
         assert_eq!(explorer_select_arg(&file), r#"/select,"C:\DEV\Peppol - Copie\src\Factures\a.cs""#);
+    }
+
+    #[test]
+    fn programs_scripts_and_shortcuts_are_runnable() {
+        for name in
+            ["setup.EXE", "build.bat", "a.cmd", "x.ps1", "Lien.lnk", "site.url", "app.hta", "cle.reg", "aide.chm"]
+        {
+            assert!(is_runnable(Path::new(name)), "{name}");
+        }
+        for name in ["README.md", "main.rs", "Projet.sln", "image.png", "Makefile", "archive.tar.gz", "bat"] {
+            assert!(!is_runnable(Path::new(name)), "{name}");
+        }
     }
 }

@@ -33,6 +33,8 @@ pub enum ConfirmAction {
         replaced: Oid,
         amended: Oid,
     },
+    /// Ouvrir un fichier du dépôt que Windows exécuterait (programme, script, raccourci…).
+    LaunchFile(PathBuf),
 }
 
 /// Libellé de l'abandon d'une opération en cours (bandeau et confirmation).
@@ -235,6 +237,9 @@ impl Dialog {
             }
             Dialog::Confirm { title, action: ConfirmAction::ForcePushAmended { .. }, .. } => {
                 (title.clone(), tr!("Pousser en forçant").into(), true)
+            }
+            Dialog::Confirm { title, action: ConfirmAction::LaunchFile(_), .. } => {
+                (title.clone(), tr!("Lancer").into(), true)
             }
         }
     }
@@ -813,6 +818,7 @@ impl RepoTab {
                 ConfirmAction::ForcePushAmended { remote, remote_branch, replaced, amended } => {
                     self.op_force_push_amended(shared, remote, remote_branch, replaced, amended)
                 }
+                ConfirmAction::LaunchFile(path) => crate::util::open_with_default_app(&path),
             },
         }
     }
