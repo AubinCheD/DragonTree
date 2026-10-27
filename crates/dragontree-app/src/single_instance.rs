@@ -241,10 +241,14 @@ mod sys {
 
     use windows_sys::Win32::Foundation::{
         ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GetLastError, HANDLE,
-        INVALID_HANDLE_VALUE,
+        INVALID_HANDLE_VALUE, LocalFree,
+    };
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
     use windows_sys::Win32::Security::{
-        GetLengthSid, GetTokenInformation, IsValidSid, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        GetLengthSid, GetTokenInformation, IsValidSid, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY,
+        TOKEN_USER, TokenUser,
     };
     use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND};
     use windows_sys::Win32::System::Pipes::{
@@ -338,15 +342,64 @@ mod sys {
         }
     }
 
-    /// Crée le tube `name` (première instance : un tube du même nom créé par un autre processus est refusé) et lance
-    /// le thread qui l'écoute ; un seul client à la fois, les suivants attendent leur tour.
+    /// Descripteur de sécurité « tout accès pour l'utilisateur, rien pour personne d'autre » (`D:P(A;;GA;;;<SID>)`).
+    /// Celui par défaut d'un tube laisse « Tout le monde » l'ouvrir en lecture : un autre compte du poste pouvait occuper
+    /// sa seule instance sans rien écrire, et la première instance ne recevait plus aucune demande.
+    pub(super) struct UserOnly(pub(super) PSECURITY_DESCRIPTOR);
+
+    impl UserOnly {
+        pub(super) fn new() -> io::Result<UserOnly> {
+            // SAFETY: SID lu dans le jeton du processus ; chaînes terminées par un zéro ; le texte du SID et le
+            // descripteur, alloués par Windows, sont libérés par LocalFree (le descripteur par `Drop`).
+            unsafe {
+                let sid = token_user(GetCurrentProcess()).ok_or_else(io::Error::last_os_error)?;
+                let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
+                if ConvertSidToStringSidW(sid.as_ptr() as PSID, &mut text) == 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                let n = (0..).take_while(|&i| *text.add(i) != 0).count();
+                let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, n));
+                LocalFree(text.cast());
+                let sddl = wide(&format!("D:P(A;;GA;;;{sid})"));
+                let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+                if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl.as_ptr(),
+                    SDDL_REVISION_1,
+                    &mut sd,
+                    std::ptr::null_mut(),
+                ) == 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(UserOnly(sd))
+            }
+        }
+    }
+
+    impl Drop for UserOnly {
+        fn drop(&mut self) {
+            // SAFETY: descripteur alloué par ConvertStringSecurityDescriptorToSecurityDescriptorW.
+            unsafe { LocalFree(self.0) };
+        }
+    }
+
+    /// Crée le tube `name` (première instance : un tube du même nom créé par un autre processus est refusé), réservé
+    /// au compte de l'utilisateur, et lance le thread qui l'écoute ; un seul client à la fois, les suivants attendent
+    /// leur tour.
     pub fn listen(
         name: &str,
         stop: Arc<AtomicBool>,
         mut on_message: impl FnMut(Forwarded) + Send + 'static,
     ) -> io::Result<std::thread::JoinHandle<()>> {
         let name = wide(name);
-        // SAFETY: nom terminé par un zéro ; sécurité par défaut (pointeur nul) ; le handle rendu est possédé par `File`.
+        let sd = UserOnly::new()?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: sd.0,
+            bInheritHandle: 0,
+        };
+        // SAFETY: nom terminé par un zéro ; attributs et descripteur valides pendant l'appel ; le handle rendu est
+        // possédé par `File`.
         let pipe = unsafe {
             let handle = CreateNamedPipeW(
                 name.as_ptr(),
@@ -356,7 +409,7 @@ mod sys {
                 0,
                 64 * 1024,
                 0,
-                std::ptr::null(),
+                &attributes,
             );
             if handle == INVALID_HANDLE_VALUE {
                 return Err(io::Error::last_os_error());
@@ -494,6 +547,48 @@ mod tests {
     fn the_pipe_name_carries_the_session() {
         let session = sys::session_id().expect("session courante");
         assert_eq!(pipe_name("0123"), format!(r"\\.\pipe\DragonTree-{session}-0123"));
+    }
+
+    /// Le tube de la première instance n'admet que le compte de l'utilisateur : ni « Tout le monde » en lecture (qui
+    /// occuperait sa seule instance), ni personne d'autre.
+    #[cfg(windows)]
+    #[test]
+    fn the_pipe_admits_only_the_user() {
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
+        };
+        use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+        let sd = sys::UserOnly::new().unwrap();
+        let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
+        // SAFETY: descripteur valide ; texte alloué par Windows, libéré ensuite.
+        let sddl = unsafe {
+            let ok = ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                sd.0,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                std::ptr::null_mut(),
+            );
+            assert_ne!(ok, 0);
+            let n = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(text, n));
+            LocalFree(text.cast());
+            s
+        };
+        assert!(sddl.starts_with("D:P(A;;GA;;;S-1-") && sddl.matches('(').count() == 1, "{sddl}");
+        // Le tube créé ainsi reçoit toujours les demandes du même utilisateur.
+        let name = format!(r"\\.\pipe\DragonTree-essai-acl-{}", std::process::id());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _listener = sys::listen(&name, stop.clone(), move |m| {
+            let _ = tx.send(m);
+        })
+        .unwrap();
+        let message = Forwarded { open: vec![PathBuf::from(r"C:\x")] };
+        sys::send(&name, &message.encode(), Duration::from_secs(5)).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), message);
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Le client ne parle qu'à un serveur du même utilisateur : un autre a pu créer le tube avant la première instance.
