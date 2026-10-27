@@ -93,10 +93,19 @@ fn clone_reports_progress_and_init_works() {
     let work = tempfile::tempdir().unwrap();
     let dest = work.path().join("c");
     let mut phases = Vec::new();
-    clone_repo(&remote.git, &remote.url(), &dest, Some("main"), true, &NetOptions::default(), &mut |p| {
-        phases.push(p.phase)
-    })
-    .unwrap();
+    let mut clone = |recurse| {
+        clone_repo(&remote.git, &remote.url(), &dest, Some("main"), recurse, &NetOptions::default(), &mut |p| {
+            phases.push(p.phase)
+        })
+    };
+    // Avec les sous-modules, seulement si le git installé n'a pas la faille CVE-2024-32002.
+    if dragontree_git::net::submodule_clone_is_safe(&remote.git.version().unwrap()) {
+        clone(true).unwrap();
+    } else {
+        assert!(matches!(clone(true), Err(GitError::Refused(_))));
+        assert!(!dest.exists(), "rien n'est cloné");
+        clone(false).unwrap();
+    }
     assert!(dest.join("a.txt").exists());
 
     let fresh = work.path().join("nouveau dépôt");

@@ -264,6 +264,13 @@ pub fn clone_repo(
         cmd = cmd.args(["--branch", b]);
     }
     if recurse {
+        let version = git.version()?;
+        if !submodule_clone_is_safe(&version) {
+            return Err(GitError::Refused(tr!(
+                "{version} a une faille connue (CVE-2024-32002) : cloner avec les sous-modules un dépôt piégé peut exécuter son code. Mettez Git pour Windows à jour (2.45.1 ou plus), ou décochez « Sous-modules ».",
+                version
+            )));
+        }
         cmd = cmd.arg("--recurse-submodules");
     }
     run_with_progress(cmd.arg("--").arg(url).arg(dest), on)?;
@@ -272,6 +279,29 @@ pub fn clone_repo(
     match crate::repo::check_object_format(git.cmd(dest).envs(&n.env), dest) {
         Err(e @ GitError::UnsupportedObjectFormat { .. }) => Err(e),
         _ => Ok(()),
+    }
+}
+
+/// `git --version` (« git version 2.44.0.windows.1 ») corrige-t-il CVE-2024-32002, l'exécution de code par un
+/// sous-module piégé au clonage (`--recurse-submodules`) : 2.45.1 et plus, ou les versions de correction des
+/// branches précédentes. Une version illisible est jugée ancienne.
+pub fn submodule_clone_is_safe(version: &str) -> bool {
+    let Some(number) = version.split_whitespace().find(|w| w.starts_with(|c: char| c.is_ascii_digit())) else {
+        return false;
+    };
+    let mut parts = number.split('.').map(|p| p.parse::<u32>().ok());
+    let (Some(Some(major)), Some(Some(minor)), patch) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    let patch = patch.flatten().unwrap_or(0);
+    match (major, minor) {
+        (2, 39) => patch >= 4,
+        (2, 40) => patch >= 2,
+        (2, 41) => patch >= 1,
+        (2, 42) => patch >= 2,
+        (2, 43) => patch >= 4,
+        (2, 44) => patch >= 1,
+        _ => (major, minor, patch) >= (2, 45, 1),
     }
 }
 
@@ -292,6 +322,17 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn submodule_clone_needs_a_git_without_cve_2024_32002() {
+        for v in ["git version 2.45.1.windows.1", "git version 2.47.0", "git version 3.0.0", "git version 2.44.1"] {
+            assert!(submodule_clone_is_safe(v), "{v}");
+        }
+        for v in ["git version 2.44.0.windows.1", "git version 2.45.0", "git version 2.30.2", "git version 2.43.3", ""]
+        {
+            assert!(!submodule_clone_is_safe(v), "{v}");
+        }
+    }
 
     /// Ligne de commande du fetch du dépôt (sans le lancer).
     fn fetch_line(non_interactive: bool) -> String {

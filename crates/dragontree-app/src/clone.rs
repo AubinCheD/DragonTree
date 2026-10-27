@@ -184,7 +184,8 @@ impl CloneWindow {
             folder: String::new(),
             folder_touched: false,
             branch: String::new(),
-            recurse: true,
+            // Les sous-modules sont une demande explicite : leur clonage suit des URL choisies par le dépôt.
+            recurse: false,
             open_after: true,
             account: None,
             url_account_for: String::new(),
