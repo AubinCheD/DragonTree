@@ -11,7 +11,7 @@ use dragontree_i18n::{Lang, tr};
 use egui::{Frame, Key, KeyboardShortcut, Modifiers};
 
 use crate::accounts::{AccountsWindow, ForgeEvent};
-use crate::clone::{CloneEvent, CloneWindow};
+use crate::clone::{CloneDefaults, CloneDone, CloneEvent, CloneRequest, CloneWindow, HostJob};
 use crate::closed_tabs::ClosedTabs;
 use crate::closing::Operations;
 use crate::commands::{self, Command, CommandContext, Scope};
@@ -522,7 +522,14 @@ pub struct DragonTreeApp {
     /// Le dépôt (clé de chemin) qu'un hôte regarde à distance : son onglet est traité comme l'onglet affiché (voir
     /// `set_remote_focus`).
     remote_focus: Option<String>,
+    /// Les clonages lancés par un hôte, sans fenêtre (voir `clone_remote`).
+    host_jobs: Vec<HostJob>,
 }
+
+/// Au lancement d'un clonage par un hôte, ceux qui sont finis depuis plus d'une heure sont oubliés, et les plus anciens
+/// au-delà de 20.
+const HOST_JOBS_KEPT: Duration = Duration::from_secs(3600);
+const HOST_JOBS_MAX: usize = 20;
 
 impl DragonTreeApp {
     pub fn new(cc: &eframe::CreationContext<'_>, start: StartOptions) -> DragonTreeApp {
@@ -627,6 +634,7 @@ impl DragonTreeApp {
             settings_link: None,
             settings_panel: None,
             remote_focus: None,
+            host_jobs: Vec::new(),
         };
 
         // Onglets : ceux de la ligne de commande, sinon ceux de la dernière session.
@@ -865,6 +873,75 @@ impl DragonTreeApp {
         self.remember_tabs();
         self.shared.ctx.request_repaint();
         true
+    }
+
+    /// Ce que propose « Cloner » à son ouverture (le dossier parent, les comptes), pour un hôte qui monte sa demande de
+    /// clonage (voir `clone_remote`).
+    pub fn clone_defaults(&self) -> CloneDefaults {
+        CloneDefaults {
+            parent: crate::clone::default_parent(&self.shared),
+            accounts: self.shared.settings.accounts.clone(),
+        }
+    }
+
+    /// Le compte que « Cloner » présélectionne pour `url` : le premier dont l'hôte (et l'organisation Azure DevOps)
+    /// correspond ; `None` : aucun, les identifiants de git. Le dépôt cloné garde le compte qui l'a cloné.
+    pub fn account_for_url(&self, url: &str) -> Option<String> {
+        crate::clone::default_account_for(url.trim(), &self.shared.settings.accounts)
+    }
+
+    /// Clone `req` sans fenêtre, pour un hôte, comme « Cloner » depuis une URL : le compte choisi authentifie le
+    /// clonage et reste celui du dépôt, un dossier créé pour rien est supprimé. Suivi dans `host_jobs`, annulable par
+    /// `cancel_host_job` ; réussi, le dépôt est ouvert dans un onglet de fond (l'onglet affiché ne change pas), en tête
+    /// des récents, et une notification le dit sur le PC, comme un échec. Rend son numéro, ou pourquoi il ne part pas
+    /// (git introuvable, demande incomplète, destination occupée, compte inconnu, clonage déjà en cours vers elle).
+    pub fn clone_remote(&mut self, req: CloneRequest) -> Result<u64, String> {
+        let git = self.shared.git.clone().ok_or_else(|| tr!("git est introuvable.").to_string())?;
+        let dest = crate::clone::check_request(&req, &self.shared.settings.accounts)?;
+        if self.host_jobs.iter().any(|j| j.result.is_none() && path_key(&j.dest) == path_key(&dest)) {
+            return Err(tr!("Un clonage vers ce dossier est déjà en cours.").into());
+        }
+        // Les clonages finis depuis longtemps sont oubliés, les plus anciens d'abord.
+        self.host_jobs.retain(|j| j.result.is_none() || j.at.elapsed() < HOST_JOBS_KEPT);
+        while self.host_jobs.iter().filter(|j| j.result.is_some()).count() >= HOST_JOBS_MAX {
+            let Some(oldest) = self.host_jobs.iter().position(|j| j.result.is_some()) else { break };
+            self.host_jobs.remove(oldest);
+        }
+        let job = crate::clone::start_host_clone(&self.shared, git, req, dest);
+        let id = job.id;
+        self.host_jobs.push(job);
+        self.shared.ctx.request_repaint();
+        Ok(id)
+    }
+
+    /// Les clonages lancés par l'hôte (`clone_remote`), dans l'ordre de leur lancement : en cours (`result` vide), puis
+    /// finis (oubliés au lancement d'un autre s'ils le sont depuis plus d'une heure, ou au-delà de 20).
+    pub fn host_jobs(&self) -> &[HostJob] {
+        &self.host_jobs
+    }
+
+    /// Annule le clonage `id` lancé par l'hôte, comme « Annuler » de la fenêtre (son dossier partiel est supprimé) ;
+    /// faux s'il est déjà fini, ou inconnu.
+    pub fn cancel_host_job(&self, id: u64) -> bool {
+        let job = self.host_jobs.iter().find(|j| j.id == id && j.result.is_none());
+        job.inspect(|j| j.cancel.cancel()).is_some()
+    }
+
+    /// Fin d'un clonage lancé par l'hôte : ce qu'il a donné reste dans `host_jobs`. Réussi, DragonTree en retient ce
+    /// que retient la fenêtre (compte du dépôt, dossier de clonage, notification, liste refaite s'il est sous un
+    /// dossier analysé) et l'ouvre dans un onglet de fond, en tête des récents : fait ici, DragonTree peut être masqué
+    /// (ses actions attendent alors qu'il soit affiché).
+    fn finish_host_clone(&mut self, done: &CloneDone) {
+        if let Some(job) = self.host_jobs.iter_mut().find(|j| j.id == done.id) {
+            job.finish(&done.result);
+        }
+        if crate::clone::record_clone(&mut self.shared, done, false) {
+            self.open_repo_tab(&done.dest);
+            self.shared.settings.push_recent(&done.dest);
+            if crate::clone::under_root(&self.shared, &done.dest) {
+                self.repo_list.start_scan(&self.shared);
+            }
+        }
     }
 
     /// Affiche l'onglet de `repo` (ouvert au besoin), comme un dépôt choisi dans la liste.
@@ -1140,6 +1217,14 @@ impl DragonTreeApp {
                 AppEvent::Forge(ev) => self.accounts.handle(ev, &mut self.shared),
                 AppEvent::Ssh(ev) => self.ssh_keys.handle(ev, &mut self.shared),
                 AppEvent::GitIdentity(ev) => self.git_identity.handle(ev, &mut self.shared),
+                AppEvent::Clone(CloneEvent::Done(done)) if self.host_jobs.iter().any(|j| j.id == done.id) => {
+                    self.finish_host_clone(&done)
+                }
+                AppEvent::Clone(CloneEvent::Progress(id, p)) if self.host_jobs.iter().any(|j| j.id == id) => {
+                    if let Some(job) = self.host_jobs.iter_mut().find(|j| j.id == id) {
+                        job.progress = Some(p);
+                    }
+                }
                 AppEvent::Clone(CloneEvent::Done(done)) => {
                     crate::clone::finish_clone(&mut self.shared, &done, self.clone.is_some());
                     if let Some(c) = &mut self.clone {
@@ -1562,13 +1647,20 @@ impl DragonTreeApp {
             .collect()
     }
 
-    /// Travail visible suivi par les onglets de dépôt, que la fermeture attend (voir `closing::TabWork`).
+    /// Travail visible suivi par les onglets de dépôt, que la fermeture attend (voir `closing::TabWork`), et les
+    /// clonages lancés par un hôte : « Quitter quand même » les annule, et la fin de l'application attend le nettoyage
+    /// de leur dossier partiel.
     fn tab_work(&self) -> Vec<crate::closing::TabWork> {
         let repos = self.tabs.iter().filter_map(|t| match &t.kind {
             TabKind::Repo(r) => Some(r.pending_work()),
             TabKind::Welcome => None,
         });
-        repos.flatten().collect()
+        let clones = self.host_jobs.iter().filter(|j| j.result.is_none()).map(|j| crate::closing::TabWork {
+            op: None,
+            title: j.title.clone(),
+            cancel: Some(j.cancel.clone()),
+        });
+        repos.flatten().chain(clones).collect()
     }
 
     /// Position actuelle de l'onglet `id` ; `None` s'il a été fermé entre-temps.

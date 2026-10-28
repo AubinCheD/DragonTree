@@ -1,13 +1,15 @@
-//! Fenêtre « Cloner » : dépôts de tous les comptes (ou une URL), destination, progression.
+//! Fenêtre « Cloner » : dépôts de tous les comptes (ou une URL), destination, progression. Un hôte qui pilote
+//! DragonTree à distance (le téléphone de la suite) clone aussi sans fenêtre (`DragonTreeApp::clone_remote`) : même
+//! clonage, suivi dans ses [`HostJob`].
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use dragontree_forges::{ForgeError, RemoteRepo, secrets};
-use dragontree_git::{CancelToken, GitError, NetOptions, Progress};
+use dragontree_forges::{Account, ForgeError, RemoteRepo, secrets};
+use dragontree_git::{CancelToken, Git, GitError, NetOptions, Progress};
 use dragontree_i18n::{tr, trn};
 use egui::{RichText, Sense};
 
@@ -19,10 +21,67 @@ use crate::theme::Palette;
 use crate::toasts::Toast;
 use crate::widgets;
 
+/// Événements de la fenêtre et des clonages ; une progression porte le numéro de son clonage (celui de la fenêtre, ou
+/// d'un hôte), comme sa fin.
 pub enum CloneEvent {
     Repos { account_id: String, result: Result<Vec<RemoteRepo>, ForgeError> },
-    Progress(Progress),
+    Progress(u64, Progress),
     Done(CloneDone),
+}
+
+/// Un clonage demandé par un hôte qui pilote DragonTree à distance (le téléphone de la suite), sans fenêtre : comme
+/// « Cloner » de la fenêtre depuis une URL (voir `DragonTreeApp::clone_remote`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CloneRequest {
+    pub url: String,
+    /// Dossier où le dépôt est créé : un dossier existant, en chemin absolu.
+    pub parent: PathBuf,
+    /// Nom du dossier du dépôt dans `parent`, absent ou vide.
+    pub folder: String,
+    /// Branche à extraire ; `None` : celle par défaut du dépôt.
+    pub branch: Option<String>,
+    /// Compte qui authentifie le clonage et que le dépôt garde ensuite (voir `DragonTreeApp::account_for_url`) ;
+    /// `None` : les identifiants de git.
+    pub account: Option<String>,
+    /// Sous-modules compris.
+    pub recurse: bool,
+}
+
+/// Ce que propose la fenêtre « Cloner » à son ouverture, pour un hôte qui monte sa propre demande.
+#[derive(Debug, Clone, Default)]
+pub struct CloneDefaults {
+    /// Dossier parent : celui du dernier clonage, sinon le premier dossier analysé, sinon `~\source\repos`.
+    pub parent: PathBuf,
+    /// Les comptes enregistrés, dans l'ordre des réglages.
+    pub accounts: Vec<Account>,
+}
+
+/// Un clonage lancé par un hôte (`DragonTreeApp::clone_remote`) : sa progression, puis ce qu'il a donné.
+#[derive(Debug, Clone)]
+pub struct HostJob {
+    pub id: u64,
+    /// « Clonage de <dossier> ».
+    pub title: String,
+    pub dest: PathBuf,
+    pub progress: Option<Progress>,
+    /// `None` : en cours ; sinon réussi, ou pourquoi il a échoué (« Clonage annulé. » s'il l'a été).
+    pub result: Option<Result<(), String>>,
+    /// Son lancement, puis sa fin.
+    pub at: Instant,
+    pub(crate) cancel: CancelToken,
+}
+
+impl HostJob {
+    /// Fin du clonage : ce qu'il a donné, et quand.
+    pub(crate) fn finish(&mut self, result: &Result<(), GitError>) {
+        self.progress = None;
+        self.at = Instant::now();
+        self.result = Some(match result {
+            Ok(()) => Ok(()),
+            Err(GitError::Cancelled) => Err(tr!("Clonage annulé.").into()),
+            Err(e) => Err(e.to_string()),
+        });
+    }
 }
 
 /// Fin d'un clonage. Traitée par l'application même si la fenêtre a été fermée entre-temps.
@@ -84,6 +143,20 @@ pub fn remove_failed_clone(dir: &Path) {
 /// Suite d'un clonage, côté application : compte associé, ouverture, notifications.
 /// `window_open` : la fenêtre affiche elle-même l'erreur (sinon, notification).
 pub fn finish_clone(shared: &mut Shared, done: &CloneDone, window_open: bool) {
+    if record_clone(shared, done, window_open) {
+        if done.open_after {
+            shared.actions.push(AppAction::OpenRepo(done.dest.clone()));
+        }
+        if under_root(shared, &done.dest) {
+            shared.actions.push(AppAction::Rescan);
+        }
+    }
+}
+
+/// Ce que retient DragonTree d'un clonage fini, depuis la fenêtre ou un hôte : réussi, le compte qui l'a authentifié
+/// reste celui du dépôt, son dossier parent devient le dossier de clonage proposé, et une notification le dit ; échoué
+/// ou annulé, une notification, sauf si la fenêtre (`window_open`) l'affiche elle-même. Rend vrai s'il a réussi.
+pub(crate) fn record_clone(shared: &mut Shared, done: &CloneDone, window_open: bool) -> bool {
     match &done.result {
         Ok(()) => {
             if let Some(acc) = &done.account {
@@ -92,18 +165,136 @@ pub fn finish_clone(shared: &mut Shared, done: &CloneDone, window_open: bool) {
             shared.settings.default_clone_dir = Some(done.parent.clone());
             shared.settings_dirty = true;
             shared.toast(Toast::success(tr!("Dépôt cloné dans {path}", path = done.dest.display())));
-            if done.open_after {
-                shared.actions.push(AppAction::OpenRepo(done.dest.clone()));
-            }
-            let under_root = shared.settings.scan_roots.iter().any(|r| path_key(&done.dest).starts_with(&path_key(r)));
-            if under_root {
-                shared.actions.push(AppAction::Rescan);
-            }
+            return true;
         }
         Err(GitError::Cancelled) if !window_open => shared.toast(Toast::info(tr!("Clonage annulé"))),
         Err(e) if !window_open => shared.toast(Toast::error(tr!("Le clonage a échoué"), e.to_string())),
         Err(_) => {}
     }
+    false
+}
+
+/// Le dépôt cloné dans `dest` est sous un dossier analysé : la liste des dépôts est à refaire.
+pub(crate) fn under_root(shared: &Shared, dest: &Path) -> bool {
+    shared.settings.scan_roots.iter().any(|r| path_key(dest).starts_with(&path_key(r)))
+}
+
+/// Dossier parent proposé pour un clonage : celui du dernier clonage, sinon le premier dossier analysé, sinon
+/// `~\source\repos`.
+pub fn default_parent(shared: &Shared) -> PathBuf {
+    shared
+        .settings
+        .default_clone_dir
+        .clone()
+        .or_else(|| shared.settings.scan_roots.first().cloned())
+        .or_else(|| dirs::home_dir().map(|h| h.join("source").join("repos")))
+        .unwrap_or_default()
+}
+
+/// La destination d'une demande de clonage d'un hôte (`parent\folder`), ou pourquoi elle ne part pas : URL vide, nom de
+/// dossier qui n'est pas un simple nom, dossier parent qui n'existe pas (ou chemin relatif), destination déjà occupée
+/// (un dossier vide convient, comme dans la fenêtre), branche vide ou qui serait lue comme une option, compte inconnu.
+pub(crate) fn check_request(req: &CloneRequest, accounts: &[Account]) -> Result<PathBuf, String> {
+    let url = req.url.trim();
+    if url.is_empty() || url.starts_with('-') {
+        return Err(tr!("URL du dépôt invalide : « {url} »", url));
+    }
+    let folder = req.folder.trim();
+    let single = matches!(Path::new(folder).components().collect::<Vec<_>>().as_slice(), [Component::Normal(_)]);
+    if !single || folder.contains(['/', '\\', ':']) {
+        return Err(tr!("Nom de dossier invalide : « {name} »", name = folder));
+    }
+    if !req.parent.is_absolute() || !req.parent.is_dir() {
+        return Err(tr!("Dossier parent introuvable : {path}", path = req.parent.display()));
+    }
+    let dest = req.parent.join(folder);
+    let empty = || std::fs::read_dir(&dest).is_ok_and(|mut d| d.next().is_none());
+    if dest.exists() && !(dest.is_dir() && empty()) {
+        return Err(tr!("Ce dossier existe déjà et n'est pas vide.").into());
+    }
+    if let Some(branch) = req.branch.as_deref().map(str::trim).filter(|b| b.is_empty() || b.starts_with('-')) {
+        return Err(tr!("Nom de branche invalide : « {name} »", name = branch));
+    }
+    if let Some(id) = req.account.as_ref().filter(|id| !accounts.iter().any(|a| &a.id == *id)) {
+        return Err(tr!("Compte inconnu : {id}", id));
+    }
+    Ok(dest)
+}
+
+/// Lance le clonage d'un hôte (demande contrôlée par [`check_request`], destination `dest`) : comme « Cloner » de la
+/// fenêtre depuis une URL, sans ouverture à la fin (l'application l'ouvre en fond, voir `DragonTreeApp::clone_remote`).
+pub(crate) fn start_host_clone(shared: &Shared, git: Git, req: CloneRequest, dest: PathBuf) -> HostJob {
+    let id = NEXT_CLONE_ID.fetch_add(1, Ordering::Relaxed);
+    let cancel = CancelToken::new();
+    let title = tr!("Clonage de {name}", name = req.folder.trim());
+    let spec = CloneSpec {
+        id,
+        url: req.url.trim().to_string(),
+        dest: dest.clone(),
+        parent: req.parent,
+        branch: req.branch.map(|b| b.trim().to_string()).unwrap_or_default(),
+        recurse: req.recurse,
+        account: req.account,
+        open_after: false,
+        cancel: cancel.clone(),
+    };
+    spawn_clone(shared, git, spec);
+    HostJob { id, title, dest, progress: None, result: None, at: Instant::now(), cancel }
+}
+
+/// Ce que lance un clonage, de la fenêtre ou d'un hôte.
+struct CloneSpec {
+    id: u64,
+    url: String,
+    dest: PathBuf,
+    parent: PathBuf,
+    /// Vide : la branche par défaut.
+    branch: String,
+    recurse: bool,
+    account: Option<String>,
+    open_after: bool,
+    cancel: CancelToken,
+}
+
+/// Lance le clonage `s` en tâche de fond : sa progression et sa fin arrivent en [`CloneEvent`], avec son numéro ; le
+/// jeton du compte authentifie git (variables d'environnement) ; un dossier créé pour lui est supprimé s'il échoue ou
+/// est annulé.
+fn spawn_clone(shared: &Shared, git: Git, s: CloneSpec) {
+    let CloneSpec { id, url, dest, parent, branch, recurse, account, open_after, cancel } = s;
+    let created_dir = !dest.exists();
+    let acc = account.as_ref().and_then(|id| shared.settings.accounts.iter().find(|a| &a.id == id).cloned());
+    let sender = shared.jobs.sender();
+    let task = shared.clone_tasks.start();
+    shared.jobs.spawn("clone", move || {
+        let _task = task;
+        let mut env = Vec::new();
+        if let Some(acc) = &acc
+            && let Ok(Some(token)) = secrets::load_token(&acc.id)
+        {
+            env = dragontree_forges::git_auth_env(acc, &token, &[url.as_str()]);
+        }
+        let net = NetOptions { env, cancel, non_interactive: false };
+        let mut last = std::time::Instant::now();
+        let result = dragontree_git::clone_repo(
+            &git,
+            &url,
+            &dest,
+            (!branch.is_empty()).then_some(branch.as_str()),
+            recurse,
+            &net,
+            &mut |p| {
+                if last.elapsed().as_millis() >= 80 || p.percent == Some(100) {
+                    last = std::time::Instant::now();
+                    sender.send(AppEvent::Clone(CloneEvent::Progress(id, p)));
+                }
+            },
+        );
+        // Nettoyage ici (et non dans la fenêtre) : il a lieu même si la fenêtre a été fermée.
+        if result.is_err() && created_dir {
+            remove_failed_clone(&dest);
+        }
+        Some(AppEvent::Clone(CloneEvent::Done(CloneDone { id, dest, parent, account, open_after, result })))
+    });
 }
 
 enum Load {
@@ -165,13 +356,7 @@ pub fn folder_from_url(url: &str) -> String {
 
 impl CloneWindow {
     pub fn new(shared: &Shared) -> CloneWindow {
-        let parent = shared
-            .settings
-            .default_clone_dir
-            .clone()
-            .or_else(|| shared.settings.scan_roots.first().cloned())
-            .or_else(|| dirs::home_dir().map(|h| h.join("source").join("repos")))
-            .unwrap_or_default();
+        let parent = default_parent(shared);
         let mut w = CloneWindow {
             source: if shared.settings.accounts.is_empty() { Source::Url } else { Source::Accounts },
             account_filter: None,
@@ -223,7 +408,11 @@ impl CloneWindow {
                 };
                 self.repos.insert(account_id, load);
             }
-            CloneEvent::Progress(p) => self.progress = Some(p),
+            CloneEvent::Progress(id, p) => {
+                if self.running.as_ref().is_some_and(|(running, _)| *running == id) {
+                    self.progress = Some(p);
+                }
+            }
             CloneEvent::Done(done) => self.on_done(&done),
         }
     }
@@ -256,49 +445,24 @@ impl CloneWindow {
             self.error = Some(tr!("git est introuvable.").into());
             return;
         };
-        let dest = self.dest();
-        let created_dir = !dest.exists();
         let account = if self.use_ssh { None } else { self.account.clone() };
-        let acc = account.as_ref().and_then(|id| shared.settings.accounts.iter().find(|a| &a.id == id).cloned());
-        let (url, branch, recurse) = (self.url.trim().to_string(), self.branch.trim().to_string(), self.recurse);
-        let (parent, open_after) = (PathBuf::from(self.parent_dir.trim()), self.open_after);
         let id = NEXT_CLONE_ID.fetch_add(1, Ordering::Relaxed);
         let cancel = CancelToken::new();
         self.running = Some((id, cancel.clone()));
         self.error = None;
         self.progress = None;
-        let sender = shared.jobs.sender();
-        let task = shared.clone_tasks.start();
-        shared.jobs.spawn("clone", move || {
-            let _task = task;
-            let mut env = Vec::new();
-            if let Some(acc) = &acc
-                && let Ok(Some(token)) = secrets::load_token(&acc.id)
-            {
-                env = dragontree_forges::git_auth_env(acc, &token, &[url.as_str()]);
-            }
-            let net = NetOptions { env, cancel, non_interactive: false };
-            let mut last = std::time::Instant::now();
-            let result = dragontree_git::clone_repo(
-                &git,
-                &url,
-                &dest,
-                (!branch.is_empty()).then_some(branch.as_str()),
-                recurse,
-                &net,
-                &mut |p| {
-                    if last.elapsed().as_millis() >= 80 || p.percent == Some(100) {
-                        last = std::time::Instant::now();
-                        sender.send(AppEvent::Clone(CloneEvent::Progress(p)));
-                    }
-                },
-            );
-            // Nettoyage ici (et non dans la fenêtre) : il a lieu même si la fenêtre a été fermée.
-            if result.is_err() && created_dir {
-                remove_failed_clone(&dest);
-            }
-            Some(AppEvent::Clone(CloneEvent::Done(CloneDone { id, dest, parent, account, open_after, result })))
-        });
+        let spec = CloneSpec {
+            id,
+            url: self.url.trim().to_string(),
+            dest: self.dest(),
+            parent: PathBuf::from(self.parent_dir.trim()),
+            branch: self.branch.trim().to_string(),
+            recurse: self.recurse,
+            account,
+            open_after: self.open_after,
+            cancel,
+        };
+        spawn_clone(shared, git, spec);
     }
 
     /// Renvoie faux quand la fenêtre est fermée.

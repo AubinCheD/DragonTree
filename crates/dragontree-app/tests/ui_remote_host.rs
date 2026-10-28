@@ -1,16 +1,20 @@
 //! Ce qu'un hôte qui pilote DragonTree à distance (le téléphone de la suite) lit de lui : ses dépôts, tels qu'il les
 //! connaît en mémoire, leur état rapide, les lectures ratées d'un onglet ; DragonTree masqué chez lui, qui vit quand
-//! même ; et ce qu'il y fait : un dépôt existant ajouté en fond, ses onglets de fond refermés.
+//! même ; et ce qu'il y fait : un dépôt existant ajouté en fond, ses onglets de fond refermés, un dépôt cloné sans
+//! fenêtre.
 
 mod common;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use common::{SilentServer, commit_file, git, harness, init_repo, repo_with_silent_remote, start, wait_until};
+use common::{
+    SilentServer, commit_file, git, harness, init_repo, repo_with_silent_remote, seed_accounts, start, wait_until,
+};
 use dragontree_app::DragonTreeApp;
+use dragontree_app::clone::CloneRequest;
 use dragontree_app::repo::{Refresh, RemoteOp};
-use dragontree_app::settings::{Settings, path_key};
+use dragontree_app::settings::{Settings, long_path_key, path_key};
 use dragontree_app::workspaces::TabColor;
 use dragontree_git::{GitError, HeadState};
 use egui_kittest::Harness;
@@ -275,5 +279,109 @@ fn the_host_closes_its_background_tab_unless_shown_or_busy() {
     assert!(h.state().repo_tab(&background).is_none(), "pas rouvert par Ctrl+Maj+T");
     let file = tmp.path().join("profil").join("settings.json");
     wait_until(&mut h, "onglets enregistrés", |_| Settings::load_from(&file).open_tabs == [shown.clone()]);
+    server.release();
+}
+
+/// L'hôte clone sans fenêtre, comme « Cloner » depuis une URL : ce que propose la fenêtre (dossier parent, comptes, le
+/// compte de l'URL) lui est donné ; une demande incomplète ou une destination occupée est refusée sans rien lancer.
+/// Le clonage est suivi (titre, puis ce qu'il a donné) ; réussi, le compte choisi reste celui du dépôt, son dossier
+/// parent devient le dossier de clonage proposé, et le dépôt est ouvert dans un onglet de fond, en tête des récents,
+/// même DragonTree masqué. Annulé, son dossier partiel est supprimé.
+#[test]
+fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source");
+    repo_with_commit(&source);
+    let (root, parent, shown) = (tmp.path().join("racine"), tmp.path().join("clones"), tmp.path().join("affiche"));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&parent).unwrap();
+    repo_with_commit(&shown);
+    let profile = tmp.path().join("profil");
+    std::fs::create_dir_all(&profile).unwrap();
+    let file = profile.join("settings.json");
+    let settings = Settings { scan_roots: vec![root.clone()], ..Default::default() };
+    std::fs::write(&file, serde_json::to_vec(&settings).unwrap()).unwrap();
+    let ada = dragontree_forges::Account {
+        id: "aaaaaaaaaaaaaaaa".into(),
+        kind: dragontree_forges::ForgeKind::GitHub,
+        host: "github.com".into(),
+        username: "ada".into(),
+        display_name: String::new(),
+        orgs: Vec::new(),
+        avatar_url: None,
+    };
+    seed_accounts(tmp.path(), std::slice::from_ref(&ada));
+    let mut h = hidden(tmp.path());
+    h.state_mut().0.show_repo(&shown);
+    run_until(&mut h, "comptes lus", |a| !a.clone_defaults().accounts.is_empty());
+
+    let defaults = h.state().0.clone_defaults();
+    assert_eq!(defaults.parent, root, "sans clonage passé : le premier dossier analysé");
+    assert_eq!(defaults.accounts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), [ada.id.as_str()]);
+    assert_eq!(h.state().0.account_for_url(" https://github.com/ada/depot.git "), Some(ada.id.clone()));
+    assert_eq!(h.state().0.account_for_url("https://gitlab.com/ada/depot.git"), None);
+
+    let request = CloneRequest {
+        url: source.display().to_string(),
+        parent: parent.clone(),
+        folder: "copie".into(),
+        branch: Some("main".into()),
+        account: Some(ada.id.clone()),
+        recurse: false,
+    };
+    let occupied = parent.join("occupe");
+    std::fs::create_dir_all(&occupied).unwrap();
+    std::fs::write(occupied.join("x.txt"), "x").unwrap();
+    for bad in [
+        CloneRequest { url: " ".into(), ..request.clone() },
+        CloneRequest { url: "--upload-pack=x".into(), ..request.clone() },
+        CloneRequest { folder: "a/b".into(), ..request.clone() },
+        CloneRequest { folder: "..".into(), ..request.clone() },
+        CloneRequest { folder: String::new(), ..request.clone() },
+        CloneRequest { parent: PathBuf::from("relatif"), ..request.clone() },
+        CloneRequest { parent: tmp.path().join("absent"), ..request.clone() },
+        CloneRequest { folder: "occupe".into(), ..request.clone() },
+        CloneRequest { branch: Some("-x".into()), ..request.clone() },
+        CloneRequest { account: Some("inconnu".into()), ..request.clone() },
+    ] {
+        assert!(h.state_mut().0.clone_remote(bad.clone()).is_err(), "{bad:?}");
+    }
+    assert!(h.state().0.host_jobs().is_empty(), "rien de lancé");
+
+    let id = h.state_mut().0.clone_remote(request.clone()).unwrap();
+    let job = &h.state().0.host_jobs()[0];
+    assert_eq!((job.id, job.title.as_str(), job.result.is_none()), (id, "Clonage de copie", true));
+    let dest = parent.join("copie");
+    run_until(&mut h, "clonage fini", |a| a.host_jobs()[0].result.is_some());
+    assert_eq!(h.state().0.host_jobs()[0].result, Some(Ok(())));
+    assert!(h.state().0.repo_tab(&dest).is_some(), "ouvert dans un onglet");
+    let d = h.state().0.repo_directory();
+    assert_eq!(d.active.as_deref(), Some(shown.as_path()), "l'onglet affiché ne change pas");
+    assert_eq!(d.recent.first(), Some(&dest), "en tête des récents");
+    assert_eq!(h.state().0.clone_defaults().parent, parent, "le dossier de ce clonage est proposé ensuite");
+    let account_of = |file: &Path| Settings::load_from(file).repo_accounts.get(&long_path_key(&dest)).cloned();
+    run_until(&mut h, "compte du dépôt enregistré", |_| account_of(&file) == Some(ada.id.clone()));
+    assert!(h.state_mut().0.clone_remote(request.clone()).is_err(), "destination désormais occupée");
+
+    // Un serveur qui ne répond pas : le clonage tourne jusqu'à son annulation, un second vers la même destination
+    // attend qu'il soit fini.
+    let server = SilentServer::start();
+    let hanging = CloneRequest {
+        url: format!("http://127.0.0.1:{}/depot.git", server.port),
+        folder: "muet".into(),
+        branch: None,
+        account: None,
+        ..request
+    };
+    let id = h.state_mut().0.clone_remote(hanging.clone()).unwrap();
+    run_until(&mut h, "clonage parti", |_| server.connections() > 0);
+    assert!(h.state_mut().0.clone_remote(hanging).is_err(), "déjà en cours vers ce dossier");
+    assert!(h.state().0.cancel_host_job(id));
+    run_until(&mut h, "clonage annulé", |a| a.host_jobs().iter().any(|j| j.id == id && j.result.is_some()));
+    let job = h.state().0.host_jobs().iter().find(|j| j.id == id).cloned().unwrap();
+    assert_eq!(job.result, Some(Err("Clonage annulé.".into())));
+    assert!(!parent.join("muet").exists(), "dossier partiel supprimé");
+    assert!(!h.state().0.cancel_host_job(id), "déjà fini");
+    assert!(h.state().0.repo_tab(&parent.join("muet")).is_none());
     server.release();
 }
