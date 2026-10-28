@@ -688,6 +688,11 @@ impl RepoTab {
         if !std::mem::take(&mut self.quick_dirty) {
             return None;
         }
+        self.summary()
+    }
+
+    /// État résumé, comme la liste de droite le montre ; `None` : l'état n'est pas encore lu.
+    pub(crate) fn summary(&self) -> Option<(QuickStatus, Option<HeadState>)> {
         let status = self.status.as_ref()?;
         let q = QuickStatus {
             dirty: status.entries.iter().filter(|e| e.worktree != dragontree_git::FileState::Ignored).count() as u32,

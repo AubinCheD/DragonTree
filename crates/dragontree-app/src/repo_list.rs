@@ -1,6 +1,6 @@
 //! Barre latérale droite : dépôts trouvés automatiquement sous les dossiers racines.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -16,6 +16,7 @@ use crate::settings::{cache_dir, path_key};
 use crate::theme::Palette;
 use crate::toasts::Toast;
 use crate::widgets;
+use crate::workspaces::TabColor;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuickStatus {
@@ -25,6 +26,43 @@ pub struct QuickStatus {
     /// Dépôt refusé par git (`safe.directory`).
     pub untrusted: bool,
     pub error: Option<String>,
+}
+
+/// Un dépôt trouvé sous un dossier racine, avec ce que la liste en sait.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListedRepo {
+    pub repo: FoundRepo,
+    /// Son état rapide ; `None` : pas encore relevé.
+    pub status: Option<QuickStatus>,
+    /// Sa branche, lue sur le disque ; `None` : illisible.
+    pub head: Option<HeadState>,
+}
+
+/// Les dépôts de DragonTree tels qu'il les connaît en ce moment, en mémoire (ses réglages ne sont écrits qu'ensuite),
+/// pour un hôte qui les montre ailleurs : le téléphone de la suite (voir `DragonTreeApp::repo_directory`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RepoDirectory {
+    /// Les dossiers des onglets de dépôt, dans l'ordre de la barre (ceux ouverts à distance compris).
+    pub tabs: Vec<PathBuf>,
+    /// Celui de l'onglet affiché ; `None` : un onglet d'accueil.
+    pub active: Option<PathBuf>,
+    /// Épinglés en haut de la liste.
+    pub favorites: Vec<PathBuf>,
+    /// Ouverts récemment, le plus récent d'abord.
+    pub recent: Vec<PathBuf>,
+    /// Les dossiers racines analysés, dans l'ordre des réglages.
+    pub roots: Vec<PathBuf>,
+    /// Les dépôts trouvés sous les racines, dans l'ordre du scan (ceux d'une racine retirée peuvent y rester jusqu'à
+    /// la fin du scan suivant).
+    pub found: Vec<ListedRepo>,
+    /// Masqués de la liste.
+    pub hidden: Vec<PathBuf>,
+    /// Couleur de l'onglet d'un dépôt (clé : `path_key` de son dossier).
+    pub tab_colors: BTreeMap<String, TabColor>,
+    /// Un scan des dossiers racines est en cours.
+    pub scanning: bool,
+    /// Le relevé de l'état des dépôts trouvés est en cours.
+    pub sweeping: bool,
 }
 
 pub enum ScanEvent {
@@ -133,6 +171,23 @@ impl RepoListState {
                     .then_some(AppEvent::Scan(ScanEvent::SweepDone))
             });
         }
+    }
+
+    /// Les dépôts trouvés, dans l'ordre du scan, avec leur état relevé et leur branche.
+    pub fn listed(&self) -> Vec<ListedRepo> {
+        let listed = |r: &FoundRepo| {
+            let key = path_key(&r.path);
+            let head = self.heads.get(&key).cloned().flatten();
+            ListedRepo { repo: r.clone(), status: self.statuses.get(&key).cloned(), head }
+        };
+        self.repos.iter().map(listed).collect()
+    }
+
+    /// L'état relevé du dépôt `path` et sa branche ; `None` : pas encore relevé, ou pas dans la liste.
+    pub fn status_of(&self, path: &Path) -> Option<(QuickStatus, Option<HeadState>)> {
+        let key = path_key(path);
+        let status = self.statuses.get(&key)?.clone();
+        Some((status, self.heads.get(&key).cloned().flatten()))
     }
 
     /// Met à jour l'état d'un dépôt à partir de l'onglet qui l'affiche (sans relancer git).

@@ -6,7 +6,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use dragontree_forges::{Account, ForgeError, secrets};
-use dragontree_git::{Git, GitError};
+use dragontree_git::{Git, GitError, HeadState};
 use dragontree_i18n::{Lang, tr};
 use egui::{Frame, Key, KeyboardShortcut, Modifiers};
 
@@ -18,7 +18,7 @@ use crate::commands::{self, Command, CommandContext, Scope};
 use crate::jobs::Jobs;
 use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsWindow};
 use crate::repo::{Refresh, RemoteOp, RepoEvent, RepoTab};
-use crate::repo_list::{RepoListState, ScanEvent};
+use crate::repo_list::{QuickStatus, RepoDirectory, RepoListState, ScanEvent};
 use crate::settings::{Pending, Saved, Settings, SettingsFile, ThemeChoice, path_key};
 use crate::settings_ui::{SettingsTab, SettingsWindow};
 use crate::ssh_keys::{SshEvent, SshKeysWindow};
@@ -749,6 +749,35 @@ impl DragonTreeApp {
     fn repo_tab_index(&self, repo: &Path) -> Option<usize> {
         let key = path_key(repo);
         self.tabs.iter().position(|t| matches!(&t.kind, TabKind::Repo(r) if path_key(&r.path) == key))
+    }
+
+    /// Ses dépôts tels qu'il les connaît en ce moment : onglets, favoris, récents, dossiers racines et dépôts trouvés
+    /// dessous avec leur état, masqués, couleurs des onglets. Lus en mémoire : ce qui vient de changer y est, avant
+    /// même que ses réglages et la liste du scan soient écrits.
+    pub fn repo_directory(&self) -> RepoDirectory {
+        let s = &self.shared.settings;
+        let tabs = self.tabs.iter().filter_map(|t| match &t.kind {
+            TabKind::Repo(r) => Some(r.path.clone()),
+            TabKind::Welcome => None,
+        });
+        RepoDirectory {
+            tabs: tabs.collect(),
+            active: self.active_repo_dir().map(Path::to_path_buf),
+            favorites: s.favorites.clone(),
+            recent: s.recent_repos.clone(),
+            roots: s.scan_roots.clone(),
+            found: self.repo_list.listed(),
+            hidden: s.hidden_repos.clone(),
+            tab_colors: s.tab_colors.clone(),
+            scanning: self.repo_list.scanning,
+            sweeping: self.repo_list.sweeping,
+        }
+    }
+
+    /// L'état rapide de `repo` et sa branche, tels que DragonTree les connaît : lus par son onglet s'il en a un, sinon
+    /// relevés par la liste des dépôts ; `None` : il n'en sait rien (pas encore lu, ni dans la liste).
+    pub fn repo_quick_status(&self, repo: &Path) -> Option<(QuickStatus, Option<HeadState>)> {
+        self.repo_tab(repo).and_then(RepoTab::summary).or_else(|| self.repo_list.status_of(repo))
     }
 
     /// Ouvre `repo` dans un onglet s'il ne l'est pas, sans changer l'onglet affiché : DragonTree le lit (état,
