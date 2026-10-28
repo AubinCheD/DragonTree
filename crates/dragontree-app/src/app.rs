@@ -830,6 +830,23 @@ impl DragonTreeApp {
         self.shared.ctx.request_repaint();
     }
 
+    /// Ajoute le dépôt existant `dir` sans changer l'onglet affiché (« Ouvrir un dépôt… », lui, l'affiche) : git doit
+    /// l'ouvrir (une commande courte, lancée ici) ; il est ouvert dans un onglet de fond (voir `open_repo_tab`), mis
+    /// en tête des récents, et les réglages sont enregistrés aussitôt. Rend le chemin de son onglet : celui d'un
+    /// onglet déjà ouvert sur ce dossier (sous une autre forme, peut-être), qui reste tel quel ; ou pourquoi git ne
+    /// l'ouvre pas, et rien ne change.
+    pub fn add_repo(&mut self, dir: &Path) -> Result<PathBuf, String> {
+        if let Some(t) = self.repo_tab(dir) {
+            return Ok(t.path.clone());
+        }
+        let git = self.shared.git.clone().ok_or_else(|| GitError::NotFound.to_string())?;
+        dragontree_git::Repo::open(&git, dir).map_err(|e| e.to_string())?;
+        self.open_repo_tab(dir);
+        self.shared.settings.push_recent(dir);
+        self.shared.save_settings();
+        Ok(dir.to_path_buf())
+    }
+
     /// Affiche l'onglet de `repo` (ouvert au besoin), comme un dépôt choisi dans la liste.
     pub fn show_repo(&mut self, repo: &Path) {
         self.open_repo(repo, false);

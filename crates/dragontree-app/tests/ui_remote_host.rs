@@ -1,10 +1,10 @@
 //! Ce qu'un hôte qui pilote DragonTree à distance (le téléphone de la suite) lit de lui : ses dépôts, tels qu'il les
-//! connaît en mémoire, leur état rapide, les lectures ratées d'un onglet ; et DragonTree masqué chez lui, qui vit quand
-//! même.
+//! connaît en mémoire, leur état rapide, les lectures ratées d'un onglet ; DragonTree masqué chez lui, qui vit quand
+//! même ; et ce qu'il y fait : un dépôt existant ajouté en fond.
 
 mod common;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use common::{commit_file, git, harness, init_repo, start, wait_until};
@@ -199,4 +199,43 @@ fn a_failed_read_is_kept_on_the_tab_until_the_next_good_one() {
     std::fs::write(&index, index_was).unwrap();
     h.state_mut().refresh_repo(&repo, Refresh::ALL);
     wait_until(&mut h, "relu", |h| reads(h.state(), &repo) == all_read);
+}
+
+/// Un dépôt existant ajouté par l'hôte : git doit l'ouvrir ; il l'est dans un onglet de fond (l'onglet affiché ne
+/// change pas), en tête des récents, et les réglages sont enregistrés aussitôt. Un dossier que git n'ouvre pas est
+/// refusé sans rien changer ; un dépôt déjà ouvert garde son onglet, sous la forme où DragonTree le connaît.
+#[test]
+fn a_repo_added_by_the_host_opens_in_the_background_and_is_remembered() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (shown, added) = (tmp.path().join("affiche"), tmp.path().join("ajoute"));
+    repo_with_commit(&shown);
+    repo_with_commit(&added);
+    let plain = tmp.path().join("pas-un-depot");
+    std::fs::create_dir_all(&plain).unwrap();
+    let mut h = harness(start(tmp.path()));
+    h.state_mut().show_repo(&shown);
+    h.step();
+    let file = tmp.path().join("profil").join("settings.json");
+    let saved = || Settings::load_from(&file);
+
+    for bad in [plain.clone(), tmp.path().join("absent")] {
+        assert!(h.state_mut().add_repo(&bad).is_err(), "{}", bad.display());
+        let d = h.state().repo_directory();
+        assert!(d.tabs == [shown.clone()] && !d.recent.contains(&bad), "rien de changé : {:?}", d.recent);
+    }
+
+    assert_eq!(h.state_mut().add_repo(&added), Ok(added.clone()));
+    let d = h.state().repo_directory();
+    assert_eq!(d.active.as_deref(), Some(shown.as_path()), "l'onglet affiché ne change pas");
+    assert_eq!(d.tabs, [shown.clone(), added.clone()]);
+    assert_eq!(d.recent.first(), Some(&added));
+    let s = saved();
+    assert_eq!(s.recent_repos.first(), Some(&added), "enregistré aussitôt");
+    assert_eq!(s.open_tabs, [shown.clone(), added.clone()]);
+
+    let other_form = PathBuf::from(added.display().to_string().to_uppercase());
+    assert_eq!(h.state_mut().add_repo(&other_form), Ok(added.clone()), "déjà ouvert : son onglet");
+    assert_eq!(h.state().repo_directory().tabs.len(), 2);
+    wait_until(&mut h, "dépôt ajouté lu", |h| h.state().repo_tab(&added).is_some_and(|t| t.status.is_some()));
+    assert_eq!(h.state().active_repo_dir(), Some(shown.as_path()));
 }
