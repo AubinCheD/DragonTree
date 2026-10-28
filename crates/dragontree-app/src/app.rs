@@ -847,6 +847,26 @@ impl DragonTreeApp {
         Ok(dir.to_path_buf())
     }
 
+    /// Referme l'onglet de `repo` (celui que donne `repo_tab`) qu'un hôte avait ouvert en fond, quand il n'en a plus
+    /// besoin : refusé (faux) s'il est l'onglet affiché ou s'il est occupé (dépôt qui s'ouvre, opération visible ou
+    /// création de pull request en cours), ou s'il n'y en a pas. L'utilisateur ne l'a pas fermé : il n'est pas
+    /// proposé par « Rouvrir l'onglet fermé ».
+    pub fn close_repo_tab(&mut self, repo: &Path) -> bool {
+        let Some(index) = self.repo_tab_index(repo) else { return false };
+        let TabKind::Repo(r) = &self.tabs[index].kind else { return false };
+        if index == self.active || r.is_busy() || !r.pending_work().is_empty() {
+            return false;
+        }
+        // L'onglet affiché est un autre : la barre n'est pas vide après.
+        self.tabs.remove(index);
+        if self.active > index {
+            self.active -= 1;
+        }
+        self.remember_tabs();
+        self.shared.ctx.request_repaint();
+        true
+    }
+
     /// Affiche l'onglet de `repo` (ouvert au besoin), comme un dépôt choisi dans la liste.
     pub fn show_repo(&mut self, repo: &Path) {
         self.open_repo(repo, false);

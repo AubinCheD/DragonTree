@@ -1,15 +1,15 @@
 //! Ce qu'un hôte qui pilote DragonTree à distance (le téléphone de la suite) lit de lui : ses dépôts, tels qu'il les
 //! connaît en mémoire, leur état rapide, les lectures ratées d'un onglet ; DragonTree masqué chez lui, qui vit quand
-//! même ; et ce qu'il y fait : un dépôt existant ajouté en fond.
+//! même ; et ce qu'il y fait : un dépôt existant ajouté en fond, ses onglets de fond refermés.
 
 mod common;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use common::{commit_file, git, harness, init_repo, start, wait_until};
+use common::{SilentServer, commit_file, git, harness, init_repo, repo_with_silent_remote, start, wait_until};
 use dragontree_app::DragonTreeApp;
-use dragontree_app::repo::Refresh;
+use dragontree_app::repo::{Refresh, RemoteOp};
 use dragontree_app::settings::{Settings, path_key};
 use dragontree_app::workspaces::TabColor;
 use dragontree_git::{GitError, HeadState};
@@ -238,4 +238,42 @@ fn a_repo_added_by_the_host_opens_in_the_background_and_is_remembered() {
     assert_eq!(h.state().repo_directory().tabs.len(), 2);
     wait_until(&mut h, "dépôt ajouté lu", |h| h.state().repo_tab(&added).is_some_and(|t| t.status.is_some()));
     assert_eq!(h.state().active_repo_dir(), Some(shown.as_path()));
+}
+
+/// L'hôte referme un onglet qu'il avait ouvert en fond : jamais l'onglet affiché, ni un onglet occupé (dépôt qui
+/// s'ouvre, opération en cours) ; l'onglet refermé n'est pas proposé par « Rouvrir l'onglet fermé » (Ctrl+Maj+T),
+/// l'utilisateur ne l'a pas fermé, et il quitte les onglets enregistrés.
+#[test]
+fn the_host_closes_its_background_tab_unless_shown_or_busy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = SilentServer::start();
+    let background = repo_with_silent_remote(tmp.path(), &server);
+    let shown = tmp.path().join("affiche");
+    repo_with_commit(&shown);
+    let mut h = harness(start(tmp.path()));
+    h.state_mut().show_repo(&shown);
+    h.state_mut().open_repo_tab(&background);
+    assert!(!h.state_mut().close_repo_tab(&background), "il s'ouvre encore");
+    assert!(!h.state_mut().close_repo_tab(&tmp.path().join("inconnu")));
+    let opened =
+        |h: &Harness<'static, DragonTreeApp>, p: &Path| h.state().repo_tab(p).is_some_and(|t| t.repo.is_some());
+    wait_until(&mut h, "dépôts ouverts", |h| opened(h, &shown) && opened(h, &background));
+    assert!(!h.state_mut().close_repo_tab(&shown), "affiché");
+
+    // Un fetch qui ne répond pas : occupé tant qu'il tourne.
+    let id = h.state_mut().queue_operation(&background, RemoteOp::Fetch).unwrap();
+    wait_until(&mut h, "fetch parti", |_| server.connections() > 0);
+    assert!(!h.state_mut().close_repo_tab(&background), "occupé");
+    assert!(h.state().cancel_operation(&background, id));
+    wait_until(&mut h, "fetch arrêté", |h| h.state().repo_tab(&background).is_some_and(|t| !t.is_busy()));
+
+    assert!(h.state_mut().close_repo_tab(&background));
+    assert!(h.state().repo_tab(&background).is_none());
+    assert_eq!(h.state().active_repo_dir(), Some(shown.as_path()), "l'onglet affiché reste");
+    h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::T);
+    h.run_steps(5);
+    assert!(h.state().repo_tab(&background).is_none(), "pas rouvert par Ctrl+Maj+T");
+    let file = tmp.path().join("profil").join("settings.json");
+    wait_until(&mut h, "onglets enregistrés", |_| Settings::load_from(&file).open_tabs == [shown.clone()]);
+    server.release();
 }
