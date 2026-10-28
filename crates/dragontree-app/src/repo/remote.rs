@@ -85,6 +85,11 @@ pub enum RemoteOp {
         name: String,
         force: bool,
     },
+    /// Branche `branch` supprimée du serveur `remote` (« Supprimer sur le remote… », sa question confirmée).
+    DeleteRemoteBranch {
+        remote: String,
+        branch: String,
+    },
     /// Push d'une branche vers une branche du même nom, qui devient sa branche suivie.
     PushBranch {
         name: String,
@@ -172,6 +177,9 @@ impl RepoTab {
             RemoteOp::RenameBranch { old, new } => self.execute_dialog(Dialog::RenameBranch { old, new }, shared),
             RemoteOp::DeleteBranch { name, force } => {
                 self.execute_dialog(Dialog::DeleteBranch { name, force, remote: None, delete_remote: false }, shared)
+            }
+            RemoteOp::DeleteRemoteBranch { remote, branch } => {
+                self.execute_dialog(Dialog::DeleteRemoteBranch { remote, branch }, shared)
             }
             RemoteOp::PushBranch { name, remote } => {
                 self.op_push(shared, remote, name.clone(), name, true, false, false)

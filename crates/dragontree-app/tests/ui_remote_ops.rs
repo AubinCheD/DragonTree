@@ -1,6 +1,6 @@
 //! Opérations demandées à distance par un hôte (le téléphone de la suite) : lancées par la file de l'onglet comme ses
 //! boutons, avec leurs notifications et leurs résultats ; une fusion arrêtée sur un conflit s'affiche dans le bandeau
-//! de l'onglet, se résout et se poursuit à distance.
+//! de l'onglet, se résout et se poursuit à distance ; une branche distante se supprime du serveur.
 
 mod common;
 
@@ -108,4 +108,36 @@ fn remote_operations_run_through_the_tab_queue() {
     assert_eq!(std::fs::read_to_string(work.join("a.txt")).unwrap(), "un\nquatre\n");
     assert!(h.state_mut().queue_operation(&work, RemoteOp::Continue).is_err(), "plus rien en cours");
     assert!(!h.state().cancel_operation(&work, 999), "rien à annuler");
+}
+
+/// « Supprimer sur le remote… » demandé à distance : comme le dialogue une fois confirmé, par la file de l'onglet ;
+/// la branche disparaît du serveur, puis des branches distantes de l'onglet, et la notification est sur le PC.
+#[test]
+fn a_remote_branch_is_deleted_on_the_server_from_afar() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = tmp.path().join("remote.git");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "-b", "main"]);
+    let url = format!("file:///{}", bare.display().to_string().replace('\\', "/"));
+    let work = tmp.path().join("travail");
+    git(tmp.path(), &["clone", "-q", &url, work.to_str().unwrap()]);
+    configure(&work);
+    commit_file(&work, "a.txt", "un\n", "premier");
+    git(&work, &["push", "-q", "-u", "origin", "main", "main:feature/x"]);
+    git(&work, &["fetch", "-q", "origin"]);
+
+    let mut h = harness(start(tmp.path()));
+    h.state_mut().open_repo_tab(&work);
+    let remote_x = |h: &H| tab(h, &work).refs.as_ref().map(|r| r.remotes.iter().any(|b| b.full == "origin/feature/x"));
+    wait_until(&mut h, "origin/feature/x lue", |h| remote_x(h) == Some(true));
+
+    let delete = RemoteOp::DeleteRemoteBranch { remote: "origin".into(), branch: "feature/x".into() };
+    let id = h.state_mut().queue_operation(&work, delete).unwrap();
+    assert!(tab(&h, &work).running.iter().any(|o| o.id == id), "en cours dans l'onglet");
+    assert_eq!(outcome(&mut h, &work, id), Ok(Some("origin/feature/x supprimée".into())));
+    assert!(try_git(&bare, &["rev-parse", "--verify", "-q", "refs/heads/feature/x"]).is_none(), "plus sur le serveur");
+    assert!(try_git(&bare, &["rev-parse", "--verify", "-q", "refs/heads/main"]).is_some(), "main reste");
+    wait_until(&mut h, "origin/feature/x plus lue", |h| remote_x(h) == Some(false));
+    h.state_mut().show_repo(&work);
+    wait_until(&mut h, "notification", |h| shows_containing(h, "origin/feature/x supprimée"));
 }
