@@ -1,18 +1,62 @@
 //! Ce qu'un hôte qui pilote DragonTree à distance (le téléphone de la suite) lit de lui : ses dépôts, tels qu'il les
-//! connaît en mémoire, et leur état rapide.
+//! connaît en mémoire, et leur état rapide ; et DragonTree masqué chez lui, qui vit quand même.
 
 mod common;
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use common::{commit_file, git, harness, init_repo, start, wait_until};
+use dragontree_app::DragonTreeApp;
 use dragontree_app::settings::{Settings, path_key};
 use dragontree_app::workspaces::TabColor;
 use dragontree_git::HeadState;
+use egui_kittest::Harness;
 
 fn repo_with_commit(dir: &Path) {
     init_repo(dir);
     commit_file(dir, "a.txt", "un\n", "premier");
+}
+
+/// Un hôte où DragonTree est masqué : sa logique tourne à chaque image, suivie de `background_tick` ; jamais `ui`.
+struct Hidden(DragonTreeApp);
+
+impl eframe::App for Hidden {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        eframe::App::logic(&mut self.0, ctx, frame);
+        self.0.background_tick();
+    }
+
+    fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
+}
+
+type HiddenHarness = Harness<'static, Hidden>;
+
+fn hidden(base: &Path) -> HiddenHarness {
+    let start = start(base);
+    Harness::builder().with_size(egui::vec2(900.0, 700.0)).build_eframe(move |cc| Hidden(DragonTreeApp::new(cc, start)))
+}
+
+/// Fait tourner l'hôte jusqu'à ce que `cond` soit vraie.
+fn run_until(h: &mut HiddenHarness, what: &str, mut cond: impl FnMut(&DragonTreeApp) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while Instant::now() < deadline {
+        h.step();
+        if cond(&h.state().0) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("délai dépassé en attendant : {what}");
+}
+
+/// Fait tourner l'hôte pendant `duration`.
+fn run_for(h: &mut HiddenHarness, duration: Duration) {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        h.step();
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 /// Ses onglets, favoris, récents, masqués, dossiers racines et couleurs d'onglets, et les dépôts trouvés sous les
@@ -77,4 +121,43 @@ fn the_repo_directory_is_what_dragontree_knows_now() {
             .repo_quick_status(&elsewhere)
             .is_some_and(|(s, head)| s.dirty == 0 && head == Some(HeadState::Branch("feature/x".into())))
     });
+}
+
+/// Masqué chez son hôte (pas de `ui`), DragonTree vit : ses réglages modifiés sont enregistrés, et l'onglet que l'hôte
+/// regarde à distance relit un changement sur le disque, comme l'onglet affiché ; un onglet de fond que personne ne
+/// regarde attend de l'être.
+#[test]
+fn hidden_dragontree_keeps_the_watched_tab_fresh_and_saves_its_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("depot");
+    repo_with_commit(&repo);
+    let mut h = hidden(tmp.path());
+    h.step();
+    h.state_mut().0.open_repo_tab(&repo);
+    run_until(&mut h, "dépôt lu", |a| a.repo_tab(&repo).is_some_and(|t| t.status.is_some() && t.refs.is_some()));
+    assert!(h.state().0.active_repo_dir().is_none(), "en fond");
+    let file = tmp.path().join("profil").join("settings.json");
+    let saved = || serde_json::from_slice::<Settings>(&std::fs::read(&file).unwrap_or_default()).ok();
+    assert!(
+        saved().is_some_and(|s| s.open_tabs.iter().any(|p| path_key(p) == path_key(&repo))),
+        "l'onglet ouvert est enregistré sans `ui`"
+    );
+
+    let sees = |a: &DragonTreeApp, name: &str| {
+        let status = a.repo_tab(&repo).and_then(|t| t.status.clone());
+        status.is_some_and(|s| s.entries.iter().any(|e| e.path == name))
+    };
+    std::fs::write(repo.join("b.txt"), "b\n").unwrap();
+    run_for(&mut h, Duration::from_secs(2));
+    assert!(!sees(&h.state().0, "b.txt"), "onglet de fond que personne ne regarde : pas relu");
+    // Regardé à distance : ce qui attendait est relu, puis chaque changement.
+    h.state_mut().0.set_remote_focus(Some(&repo));
+    run_until(&mut h, "b.txt relu", |a| sees(a, "b.txt"));
+    std::fs::write(repo.join("c.txt"), "c\n").unwrap();
+    run_until(&mut h, "c.txt relu", |a| sees(a, "c.txt"));
+    // Plus regardé : il attend de nouveau.
+    h.state_mut().0.set_remote_focus(None);
+    std::fs::write(repo.join("d.txt"), "d\n").unwrap();
+    run_for(&mut h, Duration::from_secs(2));
+    assert!(!sees(&h.state().0, "d.txt"), "plus regardé : pas relu");
 }

@@ -519,6 +519,9 @@ pub struct DragonTreeApp {
     settings_link: Option<Box<dyn Fn()>>,
     /// Brouillon des réglages dessinés dans la page d'un hôte (voir `settings_ui`).
     settings_panel: Option<SettingsWindow>,
+    /// Le dépôt (clé de chemin) qu'un hôte regarde à distance : son onglet est traité comme l'onglet affiché (voir
+    /// `set_remote_focus`).
+    remote_focus: Option<String>,
 }
 
 impl DragonTreeApp {
@@ -623,6 +626,7 @@ impl DragonTreeApp {
             accounts_link: None,
             settings_link: None,
             settings_panel: None,
+            remote_focus: None,
         };
 
         // Onglets : ceux de la ligne de commande, sinon ceux de la dernière session.
@@ -778,6 +782,39 @@ impl DragonTreeApp {
     /// relevés par la liste des dépôts ; `None` : il n'en sait rien (pas encore lu, ni dans la liste).
     pub fn repo_quick_status(&self, repo: &Path) -> Option<(QuickStatus, Option<HeadState>)> {
         self.repo_tab(repo).and_then(RepoTab::summary).or_else(|| self.repo_list.status_of(repo))
+    }
+
+    /// Le dépôt que l'hôte regarde à distance (`None` : aucun) : son onglet est traité comme l'onglet affiché, un
+    /// changement sur le disque y est relu aussitôt, affiché ou masqué (voir `background_tick`).
+    pub fn set_remote_focus(&mut self, repo: Option<&Path>) {
+        self.remote_focus = repo.map(path_key);
+    }
+
+    /// DragonTree masqué chez son hôte, qui n'appelle plus `ui` : ce qu'elle fait d'ordinaire hors de l'affichage. Les
+    /// minuteries de chaque onglet de dépôt tournent (relecture après un changement sur le disque, fetch automatique ;
+    /// l'onglet affiché et celui que l'hôte regarde à distance sont traités comme actifs), et les réglages modifiés
+    /// sont enregistrés. Rien n'est affiché ni demandé : les actions qui ouvrent une fenêtre (sélecteur de dossier…)
+    /// attendent que DragonTree soit de nouveau affiché. À appeler après `logic`, à chaque image où `ui` ne l'est pas.
+    pub fn background_tick(&mut self) {
+        self.tick_tabs();
+        if self.shared.settings_dirty {
+            self.shared.save_settings();
+        }
+    }
+
+    /// Les minuteries des onglets de dépôt (voir `RepoTab::tick`) : l'onglet affiché et celui que l'hôte regarde à
+    /// distance sont actifs. Une fois la fermeture décidée, plus de rafraîchissement ni de fetch automatique.
+    fn tick_tabs(&mut self) {
+        if self.closing.quitting() {
+            return;
+        }
+        let focus = self.remote_focus.as_deref();
+        for (i, tab) in self.tabs.iter_mut().enumerate() {
+            if let TabKind::Repo(r) = &mut tab.kind {
+                let watched = focus.is_some_and(|k| k == path_key(&r.path));
+                r.tick(&mut self.shared, i == self.active || watched);
+            }
+        }
     }
 
     /// Ouvre `repo` dans un onglet s'il ne l'est pas, sans changer l'onglet affiché : DragonTree le lit (état,
@@ -1744,14 +1781,7 @@ impl eframe::App for DragonTreeApp {
 
         egui::CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ui, |ui| {
             let active = self.active;
-            // Fermeture décidée : plus de rafraîchissement ni de fetch automatique.
-            if !self.closing.quitting() {
-                for (i, tab) in self.tabs.iter_mut().enumerate() {
-                    if let TabKind::Repo(r) = &mut tab.kind {
-                        r.tick(&mut self.shared, i == active);
-                    }
-                }
-            }
+            self.tick_tabs();
             match self.tabs.get_mut(active).map(|t| &mut t.kind) {
                 Some(TabKind::Repo(r)) => r.ui(ui, &mut self.shared),
                 Some(TabKind::Welcome) | None => {
