@@ -1,6 +1,8 @@
 //! Compte associé au dépôt (Dépôt › Utiliser le compte… / Ne plus utiliser de compte, réglages du dépôt) : son
 //! jeton authentifie fetch, pull et push (voir `actions::auth_env`), sans rien écrire dans `.git/config`. Sans
-//! association, git garde sa configuration habituelle (Gestionnaire d'identifiants…).
+//! association, le seul compte qui correspond aux remotes du dépôt (un dépôt Azure DevOps prend le compte de son
+//! organisation, un dépôt GitHub le compte GitHub) ; « Ne plus utiliser de compte » laisse git à sa configuration
+//! habituelle (Gestionnaire d'identifiants…).
 
 use dragontree_forges::{Account, ForgeKind, account_matches_url};
 use dragontree_git::Remote;
@@ -9,9 +11,31 @@ use egui::{RichText, Ui};
 
 use super::{Dialog, RepoTab};
 use crate::app::{AppAction, Shared};
-use crate::settings::Settings;
+use crate::settings::{NO_ACCOUNT, Settings};
 use crate::theme::Palette;
 use crate::toasts::Toast;
+
+/// Le premier remote dont une URL (fetch ou push) relève du compte.
+fn matching_remote<'r>(account: &Account, remotes: &'r [Remote]) -> Option<&'r Remote> {
+    remotes.iter().find(|r| [&r.fetch_url, &r.push_url].into_iter().any(|url| account_matches_url(account, url)))
+}
+
+/// Compte en vigueur : celui choisi pour le dépôt (`chosen`, voir [`Settings::repo_account_choice`] ; `Some(None)` :
+/// aucun, git seul), sinon le seul des comptes enregistrés qui corresponde à l'un de ses remotes. Plusieurs comptes
+/// possibles (un remote sur chaque forge, deux comptes GitHub…) : aucun d'office, l'utilisateur choisit (Dépôt ›
+/// Utiliser le compte…).
+pub fn effective_account<'a>(
+    accounts: &'a [Account],
+    chosen: Option<Option<&'a Account>>,
+    remotes: &[Remote],
+) -> Option<&'a Account> {
+    if let Some(chosen) = chosen {
+        return chosen;
+    }
+    let mut matching = accounts.iter().filter(|a| matching_remote(a, remotes).is_some());
+    let only = matching.next()?;
+    matching.next().is_none().then_some(only)
+}
 
 /// Compte proposé pour le dépôt ; `remote` : le premier remote dont une URL (fetch ou push) relève du compte.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,15 +49,14 @@ pub struct AccountChoice {
 /// Comptes proposés pour un dépôt : ceux qui correspondent à l'un de ses remotes d'abord, puis les autres (leur
 /// jeton ne serait envoyé à aucun de ces remotes), chaque groupe dans l'ordre des réglages.
 pub fn account_choices(accounts: &[Account], remotes: &[Remote]) -> Vec<AccountChoice> {
-    let remote_of = |account: &Account| {
-        remotes
-            .iter()
-            .find(|r| [&r.fetch_url, &r.push_url].into_iter().any(|url| account_matches_url(account, url)))
-            .map(|r| r.name.clone())
-    };
     let mut choices: Vec<AccountChoice> = accounts
         .iter()
-        .map(|a| AccountChoice { id: a.id.clone(), title: a.title(), kind: a.kind, remote: remote_of(a) })
+        .map(|a| AccountChoice {
+            id: a.id.clone(),
+            title: a.title(),
+            kind: a.kind,
+            remote: matching_remote(a, remotes).map(|r| r.name.clone()),
+        })
         .collect();
     // Tri stable : l'ordre des réglages reste celui de chaque groupe.
     choices.sort_by_key(|c| c.remote.is_none());
@@ -85,19 +108,15 @@ pub(super) fn account_picker(
 }
 
 impl RepoTab {
-    /// Compte en vigueur pour le dépôt, dont le jeton authentifie les opérations réseau : le sien (voir
-    /// [`RepoTab::own_account`]), sinon, pour un worktree lié, celui de la copie de travail principale.
+    /// Compte en vigueur pour le dépôt, dont le jeton authentifie les opérations réseau (voir [`effective_account`]) :
+    /// celui choisi pour lui (racine de la copie de travail, sinon dossier de l'onglet), sinon, pour un worktree lié,
+    /// celui choisi pour la copie de travail principale, sinon le seul compte qui corresponde à ses remotes.
     pub fn account<'s>(&self, settings: &'s Settings) -> Option<&'s Account> {
-        self.own_account(settings).or_else(|| {
-            let main = self.repo.as_ref()?.main_workdir()?;
-            settings.account_for_repo(&main)
-        })
-    }
-
-    /// Compte associé à ce dépôt lui-même (racine de la copie de travail, sinon dossier de l'onglet) : c'est celui
-    /// que « Ne plus utiliser de compte » retire.
-    pub fn own_account<'s>(&self, settings: &'s Settings) -> Option<&'s Account> {
-        settings.account_for_repo(&self.workdir()).or_else(|| settings.account_for_repo(&self.path))
+        let chosen = settings
+            .repo_account_choice(&self.workdir())
+            .or_else(|| settings.repo_account_choice(&self.path))
+            .or_else(|| settings.repo_account_choice(&self.repo.as_ref()?.main_workdir()?));
+        effective_account(&settings.accounts, chosen, &self.remotes)
     }
 
     /// Dépôt › Utiliser le compte… : le dialogue de choix ; sans compte enregistré, la fenêtre Comptes s'ouvre pour
@@ -114,12 +133,13 @@ impl RepoTab {
         self.dialog = Some(Dialog::UseAccount { choices, chosen });
     }
 
-    /// Associe le compte `id` au dépôt, ou retire l'association (`None`) ; une notification le confirme.
+    /// Associe le compte `id` au dépôt, ou « aucun compte » (`None`, git seul, même si un compte correspond à ses
+    /// remotes) ; une notification le confirme.
     pub(super) fn set_account(&mut self, shared: &mut Shared, id: Option<String>) {
         let before = self.account(&shared.settings).map(Account::title);
         // Une seule entrée, sous la racine de la copie de travail (comme après un clonage).
         shared.settings.set_account_for_repo(&self.path, None);
-        shared.settings.set_account_for_repo(&self.workdir(), id.as_deref());
+        shared.settings.set_account_for_repo(&self.workdir(), Some(id.as_deref().unwrap_or(NO_ACCOUNT)));
         shared.settings_dirty = true;
         match (before, self.account(&shared.settings).map(Account::title)) {
             (_, Some(account)) => {
@@ -209,6 +229,39 @@ mod tests {
         assert_eq!(preselected(&choices, None).as_deref(), Some("gitlab"), "sinon celui du remote");
         assert_eq!(preselected(&choices, Some("supprimé")).as_deref(), Some("gitlab"), "un compte disparu est ignoré");
         assert_eq!(preselected(&[choice("github", None)], None), None, "aucun remote correspondant : rien de coché");
+    }
+
+    #[test]
+    fn without_a_choice_the_only_account_matching_a_remote_is_used() {
+        let accounts = [
+            account("github", ForgeKind::GitHub, "github.com", "AubinCheD", &[]),
+            account("azure", ForgeKind::AzureDevOps, "dev.azure.com", "aubin", &["dev-xelya"]),
+        ];
+        let ado = [remote("origin", "https://dev-xelya.visualstudio.com/Ozmo/_git/Ozmo", "")];
+        let github = [remote("origin", "https://github.com/AubinCheD/Eyrie.git", "")];
+        let id = |remotes: &[Remote]| effective_account(&accounts, None, remotes).map(|a| a.id.as_str());
+        assert_eq!(id(&ado), Some("azure"), "dépôt Azure DevOps : le compte de son organisation");
+        assert_eq!(id(&github), Some("github"), "dépôt GitHub : le compte GitHub");
+        assert_eq!(id(&[remote("origin", r"C:\DEV\depot-local", "")]), None, "aucun compte ne correspond");
+        assert_eq!(id(&[remote("origin", "https://akprojectmanagement.visualstudio.com/c/_git/c", "")]), None);
+        assert_eq!(id(&[]), None, "remotes pas encore lus");
+        // Deux comptes possibles (un remote sur chaque forge, ou deux comptes GitHub) : aucun n'est choisi d'office,
+        // l'utilisateur choisit.
+        assert_eq!(id(&[ado[0].clone(), remote("github", "https://github.com/AubinCheD/Ozmo.git", "")]), None);
+        let two_github = [accounts[0].clone(), account("github-2", ForgeKind::GitHub, "github.com", "ada", &[])];
+        assert!(effective_account(&two_github, None, &github).is_none());
+    }
+
+    #[test]
+    fn a_choice_made_for_the_repo_wins_over_the_matching_account() {
+        let accounts = [
+            account("github", ForgeKind::GitHub, "github.com", "AubinCheD", &[]),
+            account("azure", ForgeKind::AzureDevOps, "dev.azure.com", "aubin", &["dev-xelya"]),
+        ];
+        let ado = [remote("origin", "https://dev-xelya.visualstudio.com/Ozmo/_git/Ozmo", "")];
+        let chosen = effective_account(&accounts, Some(Some(&accounts[0])), &ado);
+        assert_eq!(chosen.map(|a| a.id.as_str()), Some("github"), "le compte choisi, même sans remote correspondant");
+        assert!(effective_account(&accounts, Some(None), &ado).is_none(), "« aucun compte » : git seul");
     }
 
     #[test]

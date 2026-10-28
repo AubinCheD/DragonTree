@@ -1,13 +1,14 @@
-//! Compte associé à un dépôt existant : Dépôt › Utiliser le compte… propose d'abord les comptes qui correspondent à un
-//! remote, Dépôt › Ne plus utiliser de compte retire l'association, les réglages du dépôt la changent aussi. Comptes
-//! fictifs, sans jeton (associer un compte ne lit pas le Gestionnaire d'identifiants), aucune requête réseau.
+//! Compte d'un dépôt existant : sans association, le compte qui correspond à son remote ; Dépôt › Utiliser le compte…
+//! propose d'abord les comptes qui correspondent à un remote, Dépôt › Ne plus utiliser de compte ne lui en laisse
+//! aucun, les réglages du dépôt changent aussi le choix. Comptes fictifs, sans jeton (associer un compte ne lit pas le
+//! Gestionnaire d'identifiants), aucune requête réseau.
 
 mod common;
 
 use std::path::{Path, PathBuf};
 
 use common::*;
-use dragontree_app::settings::Settings;
+use dragontree_app::settings::{NO_ACCOUNT, Settings};
 use dragontree_app::{DragonTreeApp, StartOptions};
 use dragontree_forges::{Account, ForgeKind};
 use egui_kittest::Harness;
@@ -100,35 +101,39 @@ const GITLAB_TITLE: &str = "GitLab · jsmith (gitlab.contoso.test)";
 const GITHUB_TITLE: &str = "GitHub · ada";
 
 #[test]
-fn the_repository_menu_associates_an_account_matching_the_remote_then_dissociates_it() {
+fn the_account_matching_the_remote_is_used_until_the_repository_menu_changes_it() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = repo(tmp.path());
     seed(tmp.path(), two_accounts(), None);
     let mut h = open(tmp.path(), &repo);
+    // Sans association, le compte qui correspond au remote est en vigueur, affiché dans la barre d'outils.
+    wait_until(&mut h, "compte du remote affiché", |h| shows_account(h, GITLAB_TITLE));
+    assert!(saved_associations(tmp.path()).is_empty(), "rien d'enregistré pour autant");
 
     open_menu(&mut h, "Dépôt");
-    assert!(menu_item_disabled(&h, "Ne plus utiliser de compte"), "aucun compte associé : rien à retirer");
+    assert!(!menu_item_disabled(&h, "Ne plus utiliser de compte"), "un compte est en vigueur : il peut être retiré");
     click_menu_item(&mut h, "Utiliser le compte…");
     wait_until(&mut h, "dialogue", |h| h.query_by_label("Utiliser").is_some());
     // Le compte du remote passe devant, présélectionné, avec le nom du remote.
     assert!(radio_y(&h, GITLAB_TITLE) < radio_y(&h, GITHUB_TITLE), "le compte qui correspond au remote d'abord");
     assert!(is_selected(&h, GITLAB_TITLE));
     assert!(h.query_by_label("(origin)").is_some());
-    // Un compte qui ne correspond à aucun remote est signalé.
+    // Un compte qui ne correspond à aucun remote est signalé, mais il peut être choisi.
     let warning = "ne correspond à aucun remote :";
     assert!(h.query_by_label_contains(warning).is_none());
     click_radio(&mut h, GITHUB_TITLE);
     wait_until(&mut h, "avertissement", |h| h.query_by_label_contains(warning).is_some());
-    click_radio(&mut h, GITLAB_TITLE);
     click_label(&mut h, "Utiliser");
-    wait_until(&mut h, "association enregistrée", |_| saved_associations(tmp.path()) == [GITLAB]);
-    // Le compte est affiché dans la barre d'outils de l'onglet.
-    wait_until(&mut h, "compte affiché", |h| shows_account(h, GITLAB_TITLE));
+    wait_until(&mut h, "association enregistrée", |_| saved_associations(tmp.path()) == [GITHUB]);
+    wait_until(&mut h, "compte choisi affiché", |h| shows_account(h, GITHUB_TITLE));
+    assert!(!shows_account(&h, GITLAB_TITLE));
 
+    // « Aucun compte » est un choix : le compte du remote ne revient pas.
     open_menu(&mut h, "Dépôt");
     click_menu_item(&mut h, "Ne plus utiliser de compte");
-    wait_until(&mut h, "association retirée", |_| saved_associations(tmp.path()).is_empty());
-    wait_until(&mut h, "compte retiré de la barre d'outils", |h| !shows_account(h, GITLAB_TITLE));
+    wait_until(&mut h, "aucun compte enregistré", |_| saved_associations(tmp.path()) == [NO_ACCOUNT]);
+    wait_until(&mut h, "compte retiré de la barre d'outils", |h| !shows_account(h, GITHUB_TITLE));
+    assert!(!shows_account(&h, GITLAB_TITLE));
     open_menu(&mut h, "Dépôt");
     assert!(menu_item_disabled(&h, "Ne plus utiliser de compte"));
 }
@@ -147,7 +152,8 @@ fn the_repository_settings_dialog_changes_or_removes_the_account() {
     assert!(is_selected(&h, GITLAB_TITLE), "le compte associé est coché");
     click_radio(&mut h, "Aucun : configuration habituelle de git");
     click_label(&mut h, "Enregistrer");
-    wait_until(&mut h, "association retirée", |_| saved_associations(tmp.path()).is_empty());
+    wait_until(&mut h, "aucun compte enregistré", |_| saved_associations(tmp.path()) == [NO_ACCOUNT]);
+    wait_until(&mut h, "compte retiré de la barre d'outils", |h| !shows_account(h, GITLAB_TITLE));
 
     open_menu(&mut h, "Dépôt");
     click_menu_item(&mut h, "Réglages du dépôt…");
@@ -167,11 +173,9 @@ fn a_linked_worktree_uses_the_account_of_the_main_repository_unless_it_has_its_o
     seed(tmp.path(), two_accounts(), Some((&repo, GITLAB)));
     let mut h = open(tmp.path(), &wt);
     wait_until(&mut h, "compte du dépôt principal affiché", |h| shows_account(h, GITLAB_TITLE));
-    // Rien à retirer sur le worktree lui-même : l'association est celle du dépôt principal.
-    open_menu(&mut h, "Dépôt");
-    assert!(menu_item_disabled(&h, "Ne plus utiliser de compte"));
 
     // Son propre compte passe devant celui du dépôt principal…
+    open_menu(&mut h, "Dépôt");
     click_menu_item(&mut h, "Utiliser le compte…");
     wait_until(&mut h, "dialogue", |h| h.query_by_label("Utiliser").is_some());
     assert!(is_selected(&h, GITLAB_TITLE), "le compte en vigueur est coché");
@@ -186,11 +190,17 @@ fn a_linked_worktree_uses_the_account_of_the_main_repository_unless_it_has_its_o
     wait_until(&mut h, "compte du worktree affiché", |h| shows_account(h, GITHUB_TITLE));
     assert!(!shows_account(&h, GITLAB_TITLE));
 
-    // … et la retirer rend celui du dépôt principal.
+    // … et « Ne plus utiliser de compte » ne vaut que pour lui : le dépôt principal garde le sien.
     open_menu(&mut h, "Dépôt");
     click_menu_item(&mut h, "Ne plus utiliser de compte");
-    wait_until(&mut h, "association du worktree retirée", |_| saved_associations(tmp.path()) == [GITLAB]);
-    wait_until(&mut h, "compte du dépôt principal de nouveau", |h| shows_account(h, GITLAB_TITLE));
+    let none_here = |base: &Path| {
+        let mut ids = saved_associations(base);
+        ids.sort();
+        ids == [NO_ACCOUNT, GITLAB]
+    };
+    wait_until(&mut h, "aucun compte pour le worktree", |_| none_here(tmp.path()));
+    wait_until(&mut h, "compte retiré de la barre d'outils", |h| !shows_account(h, GITHUB_TITLE));
+    assert!(!shows_account(&h, GITLAB_TITLE));
 }
 
 #[test]

@@ -62,6 +62,10 @@ pub const RECENT_REPOS_MAX: usize = 20;
 /// Nombre de messages de commit gardés par dépôt (« Messages récents »).
 pub const RECENT_MESSAGES_MAX: usize = 20;
 
+/// « Aucun compte » dans [`Settings::repo_accounts`] (Ne plus utiliser de compte) : git garde sa configuration
+/// habituelle, même si un compte correspond aux remotes du dépôt.
+pub const NO_ACCOUNT: &str = "";
+
 /// Message de commit déjà utilisé (résumé et description), proposé par « Messages récents ».
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RecentMessage {
@@ -142,8 +146,9 @@ pub struct Settings {
     /// suite n'a pas réussi (voir `accounts::migrate_accounts`).
     #[serde(rename = "accounts", skip_serializing_if = "Vec::is_empty")]
     pub legacy_accounts: Vec<Account>,
-    /// Dépôt (chemin) → identifiant du compte utilisé pour fetch/pull/push : rempli par un clonage depuis un compte,
-    /// par Dépôt › Utiliser le compte… et par les réglages du dépôt (la fenêtre Réglages ne l'édite pas).
+    /// Dépôt (chemin) → identifiant du compte utilisé pour fetch/pull/push, ou [`NO_ACCOUNT`] : rempli par un clonage
+    /// depuis un compte, par Dépôt › Utiliser le compte… / Ne plus utiliser de compte et par les réglages du dépôt (la
+    /// fenêtre Réglages ne l'édite pas). Sans entrée, le compte qui correspond aux remotes du dépôt.
     pub repo_accounts: BTreeMap<String, String>,
     pub diff_context: u32,
     pub ignore_whitespace: bool,
@@ -670,17 +675,29 @@ impl Settings {
         }
     }
 
-    /// Compte associé au dépôt `path` (voir [`Settings::repo_accounts`]) : `None` sans association, ou si le compte
-    /// n'existe plus. Le chemin est comparé en forme longue ([`long_path_key`]) ; une association enregistrée avant
-    /// sous un chemin court est encore trouvée par ce même chemin.
+    /// Compte associé au dépôt `path` (voir [`Settings::repo_accounts`]) : `None` sans association, avec « aucun
+    /// compte » ([`NO_ACCOUNT`]), ou si le compte n'existe plus. Le chemin est comparé en forme longue
+    /// ([`long_path_key`]) ; une association enregistrée avant sous un chemin court est encore trouvée par ce même
+    /// chemin.
     pub fn account_for_repo(&self, path: &Path) -> Option<&Account> {
-        let id = self.repo_accounts.get(&long_path_key(path)).or_else(|| self.repo_accounts.get(&path_key(path)))?;
-        self.accounts.iter().find(|a| &a.id == id)
+        self.repo_account_choice(path).flatten()
     }
 
-    /// Associe le compte `account_id` au dépôt `path` (fetch, pull et push s'authentifient avec son jeton), ou
-    /// retire l'association (`None`) : git reprend alors sa configuration habituelle. L'entrée est rangée sous le
-    /// chemin en forme longue, celle d'avant sous un chemin court est retirée.
+    /// Choix enregistré pour le dépôt `path` : `Some(Some(compte))`, `Some(None)` pour « aucun compte »
+    /// ([`NO_ACCOUNT`]), `None` sans choix (ou pour un compte qui n'existe plus) : le compte qui correspond aux
+    /// remotes s'applique alors (voir `repo::repo_account::effective_account`).
+    pub fn repo_account_choice(&self, path: &Path) -> Option<Option<&Account>> {
+        let id = self.repo_accounts.get(&long_path_key(path)).or_else(|| self.repo_accounts.get(&path_key(path)))?;
+        if id == NO_ACCOUNT {
+            return Some(None);
+        }
+        self.accounts.iter().find(|a| &a.id == id).map(Some)
+    }
+
+    /// Associe le compte `account_id` au dépôt `path` (fetch, pull et push s'authentifient avec son jeton ;
+    /// [`NO_ACCOUNT`] : aucun, git reprend sa configuration habituelle), ou retire l'entrée (`None`) : le compte qui
+    /// correspond aux remotes s'applique alors. L'entrée est rangée sous le chemin en forme longue, celle d'avant sous
+    /// un chemin court est retirée.
     pub fn set_account_for_repo(&mut self, path: &Path, account_id: Option<&str>) {
         let (long, plain) = (long_path_key(path), path_key(path));
         if plain != long {
@@ -1186,6 +1203,20 @@ mod tests {
         s.set_account_for_repo(repo, None);
         assert!(s.account_for_repo(repo).is_none());
         assert!(s.repo_accounts.is_empty(), "plus d'entrée pour un dépôt dissocié");
+    }
+
+    #[test]
+    fn no_account_is_a_choice_kept_for_the_repo() {
+        let mut s = Settings { accounts: vec![account("compte-a")], ..Settings::default() };
+        let repo = Path::new(r"C:\DEV\Fabrikam");
+        assert_eq!(s.repo_account_choice(repo), None, "aucun choix : le compte du remote s'appliquera");
+        s.set_account_for_repo(repo, Some(NO_ACCOUNT));
+        assert_eq!(s.repo_account_choice(repo), Some(None), "« aucun compte » est un choix");
+        assert!(s.account_for_repo(repo).is_none());
+        s.set_account_for_repo(repo, Some("compte-a"));
+        assert_eq!(s.repo_account_choice(repo).flatten().map(|a| a.id.as_str()), Some("compte-a"));
+        s.set_account_for_repo(repo, Some("supprimé"));
+        assert_eq!(s.repo_account_choice(repo), None, "un compte disparu ne compte pas comme un choix");
     }
 
     /// Le nom court Windows d'un dossier existant (`DPTAU~1`), ou le chemin tel quel si le volume n'en crée pas.

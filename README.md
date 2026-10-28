@@ -251,10 +251,12 @@ page Comptes d'Eyrie.
 Sécurité : les jetons sont stockés dans le **Gestionnaire d'identifiants Windows** (service « EyrieSuite » ; l'ancien
 service « DragonTree » est encore relu), jamais dans les réglages ni dans les URL. Pour un clone fait depuis un compte, puis pour les fetch/pull/push de ce
 dépôt, DragonTree transmet l'authentification à git par variables d'environnement (`http.<origine>.extraHeader`) :
-rien n'est écrit dans `.git/config`. Les autres dépôts utilisent votre configuration git habituelle, sauf si vous leur
-associez un compte : **Dépôt › Utiliser le compte…** (ou les réglages du dépôt) propose d'abord les comptes qui
-correspondent à un remote, **Dépôt › Ne plus utiliser de compte** retire l'association. Le compte associé est affiché
-dans la barre d'outils de l'onglet ; un worktree lié sans compte propre utilise celui du dépôt principal.
+rien n'est écrit dans `.git/config`. Les autres dépôts utilisent d'office le seul compte enregistré qui correspond à
+leurs remotes (un dépôt Azure DevOps celui de son organisation, un dépôt GitHub le compte GitHub) ; si aucun ne
+correspond, ou si plusieurs correspondent, votre configuration git habituelle. **Dépôt › Utiliser le compte…** (ou les
+réglages du dépôt) choisit un autre compte, en proposant d'abord ceux qui correspondent à un remote ; **Dépôt › Ne plus
+utiliser de compte** rend le dépôt à votre configuration git habituelle. Le compte en vigueur est affiché dans la barre
+d'outils de l'onglet ; un worktree lié sans choix propre utilise celui du dépôt principal.
 
 Proxy : les appels aux API des forges (vérification d'un compte, listes de dépôts et de pull requests) passent par le
 proxy des variables d'environnement (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`) s'il y en a un, avec les exclusions de

@@ -905,10 +905,9 @@ impl Command {
             Scope::Repo if self == Command::AiReviewBranch => {
                 cx.settings.ai_enabled && cx.repo.is_some_and(|tab| tab.can_run(self))
             }
-            // Aucun compte associé au dépôt lui-même (un worktree lié peut reprendre celui du dépôt principal) :
-            // rien à retirer.
+            // Aucun compte en vigueur (ni choisi, ni d'après les remotes) : rien à retirer.
             Scope::Repo if self == Command::StopUsingAccount => {
-                cx.repo.is_some_and(|tab| tab.can_run(self) && tab.own_account(cx.settings).is_some())
+                cx.repo.is_some_and(|tab| tab.can_run(self) && tab.account(cx.settings).is_some())
             }
             // Rien à réafficher : l'entrée est grisée.
             Scope::Repo if self == Command::ShowHiddenRefs => {

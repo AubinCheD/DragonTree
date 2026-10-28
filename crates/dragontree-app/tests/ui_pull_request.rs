@@ -99,7 +99,8 @@ fn with_a_matching_account_the_api_is_the_main_action_and_the_browser_stays_avai
     let repo = repo(tmp.path());
     let mut h = open(tmp.path(), &repo);
     open_dialog(&mut h);
-    assert!(h.query_by_label_contains("GitHub · jsmith").is_some(), "le compte est affiché");
+    // Dans le dialogue (la barre d'outils de l'onglet l'affiche aussi : il correspond au remote).
+    assert!(h.query_by_label("Compte : GitHub · jsmith").is_some(), "le compte est affiché");
     assert!(h.query_by_label("Créer la pull request").is_some());
     // La branche n'a pas de branche suivie : le dialogue propose de la pousser d'abord.
     assert!(h.query_by_label_contains("Pousser d'abord « topic » vers origin").is_some());
