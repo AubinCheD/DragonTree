@@ -1,5 +1,6 @@
 //! Ce qu'un hôte qui pilote DragonTree à distance (le téléphone de la suite) lit de lui : ses dépôts, tels qu'il les
-//! connaît en mémoire, et leur état rapide ; et DragonTree masqué chez lui, qui vit quand même.
+//! connaît en mémoire, leur état rapide, les lectures ratées d'un onglet ; et DragonTree masqué chez lui, qui vit quand
+//! même.
 
 mod common;
 
@@ -8,9 +9,10 @@ use std::time::{Duration, Instant};
 
 use common::{commit_file, git, harness, init_repo, start, wait_until};
 use dragontree_app::DragonTreeApp;
+use dragontree_app::repo::Refresh;
 use dragontree_app::settings::{Settings, path_key};
 use dragontree_app::workspaces::TabColor;
-use dragontree_git::HeadState;
+use dragontree_git::{GitError, HeadState};
 use egui_kittest::Harness;
 
 fn repo_with_commit(dir: &Path) {
@@ -160,4 +162,41 @@ fn hidden_dragontree_keeps_the_watched_tab_fresh_and_saves_its_settings() {
     std::fs::write(repo.join("d.txt"), "d\n").unwrap();
     run_for(&mut h, Duration::from_secs(2));
     assert!(!sees(&h.state().0, "d.txt"), "plus regardé : pas relu");
+}
+
+/// Ce que sait l'onglet de `repo` : son état est lu, ses branches aussi ; ses lectures ratées.
+fn reads(app: &DragonTreeApp, repo: &Path) -> (bool, bool, Option<String>, Option<String>) {
+    let t = app.repo_tab(repo).expect("onglet ouvert");
+    let error = |e: &Option<GitError>| e.as_ref().map(ToString::to_string);
+    (t.status.is_some(), t.refs.is_some(), error(&t.status_error), error(&t.refs_error))
+}
+
+/// Une lecture ratée de l'état ou des branches est gardée sur l'onglet (et notifiée, comme avant), avec ce qu'il avait
+/// lu avant ; la lecture réussie suivante l'efface. Un hôte peut dire pourquoi au lieu de « lecture… ».
+#[test]
+fn a_failed_read_is_kept_on_the_tab_until_the_next_good_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("depot");
+    repo_with_commit(&repo);
+    let mut h = harness(start(tmp.path()));
+    h.state_mut().open_repo_tab(&repo);
+    let all_read = (true, true, None, None);
+    wait_until(&mut h, "dépôt lu", |h| reads(h.state(), &repo) == all_read);
+
+    // HEAD et index illisibles : les deux lectures échouent.
+    let (head, index) = (repo.join(".git").join("HEAD"), repo.join(".git").join("index"));
+    let (head_was, index_was) = (std::fs::read(&head).unwrap(), std::fs::read(&index).unwrap());
+    std::fs::write(&head, "illisible\n").unwrap();
+    std::fs::write(&index, "illisible").unwrap();
+    h.state_mut().refresh_repo(&repo, Refresh::ALL);
+    wait_until(&mut h, "lectures ratées", |h| matches!(reads(h.state(), &repo), (_, _, Some(_), Some(_))));
+    let (status, refs, _, refs_error) = reads(h.state(), &repo);
+    assert!(status && refs, "les lectures d'avant restent");
+    assert!(refs_error.as_ref().is_some_and(|e| e.contains("HEAD")), "{refs_error:?}");
+
+    // Réparé : la lecture suivante efface les erreurs.
+    std::fs::write(&head, head_was).unwrap();
+    std::fs::write(&index, index_was).unwrap();
+    h.state_mut().refresh_repo(&repo, Refresh::ALL);
+    wait_until(&mut h, "relu", |h| reads(h.state(), &repo) == all_read);
 }

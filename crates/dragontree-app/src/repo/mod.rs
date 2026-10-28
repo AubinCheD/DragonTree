@@ -482,6 +482,12 @@ pub struct RepoTab {
     pub open_error: Option<GitError>,
     pub refs: Option<Arc<RefsSnapshot>>,
     pub status: Option<Arc<StatusSnapshot>>,
+    /// La dernière lecture des branches a échoué : pourquoi (notifié aussi). `refs` garde la lecture d'avant, s'il y en
+    /// a une ; effacé à la lecture réussie suivante.
+    pub refs_error: Option<GitError>,
+    /// La dernière lecture de l'état a échoué : pourquoi (notifié aussi). `status` garde la lecture d'avant, s'il y en
+    /// a une ; effacé à la lecture réussie suivante.
+    pub status_error: Option<GitError>,
     pub op_state: OpState,
     /// Session de bisect en cours (lue avec l'état du dépôt).
     pub bisect: Option<BisectState>,
@@ -562,6 +568,8 @@ impl RepoTab {
             open_error: None,
             refs: None,
             status: None,
+            refs_error: None,
+            status_error: None,
             op_state: OpState::None,
             bisect: None,
             stashes: Arc::new(Vec::new()),
@@ -976,6 +984,7 @@ impl RepoTab {
                     }
                     let first_refs = self.refs.is_none();
                     self.refs = Some(Arc::new(refs));
+                    self.refs_error = None;
                     self.quick_dirty = true;
                     // Le repli épargne HEAD (`fold_roots`) : un repli demandé avant la première lecture des
                     // références l'a calculé sans lui ; le journal n'est pas relu ici, on le refait.
@@ -983,7 +992,10 @@ impl RepoTab {
                         self.refold(shared, false);
                     }
                 }
-                Err(e) => shared.toast(Toast::error(tr!("Lecture des branches impossible"), e.to_string())),
+                Err(e) => {
+                    shared.toast(Toast::error(tr!("Lecture des branches impossible"), e.to_string()));
+                    self.refs_error = Some(e);
+                }
             },
             RepoEvent::Status(g, res) if g == self.gens.status => match res {
                 Ok((status, op, bisect, lfs)) => {
@@ -991,10 +1003,14 @@ impl RepoTab {
                     self.lfs_files = lfs;
                     self.op_state = op;
                     self.status = Some(Arc::new(status));
+                    self.status_error = None;
                     self.quick_dirty = true;
                     self.after_status_refresh(shared);
                 }
-                Err(e) => shared.toast(Toast::error(tr!("Lecture de l'état impossible"), e.to_string())),
+                Err(e) => {
+                    shared.toast(Toast::error(tr!("Lecture de l'état impossible"), e.to_string()));
+                    self.status_error = Some(e);
+                }
             },
             RepoEvent::Log { generation, complete, result } if generation == self.gens.log => {
                 self.history.loading = !complete;
