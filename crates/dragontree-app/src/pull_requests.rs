@@ -6,6 +6,10 @@
 //! texte. Une pull request s'ouvre dans le navigateur, et son dépôt dans un onglet quand une copie locale le désigne
 //! (remotes lus sur disque, en tâche de fond).
 //!
+//! Un hôte qui pilote DragonTree à distance (le téléphone de la suite) les fait relire sans fenêtre
+//! ([`PullRequestsWindow::refresh_in_background`]) et lit ce qui l'a été ([`PullRequestsSnapshot`]) : la même lecture
+//! que la fenêtre, ouverte ou non.
+//!
 //! Les jetons ne sont lus que dans les tâches de fond (Gestionnaire d'identifiants) et n'apparaissent jamais dans les
 //! erreurs affichées.
 
@@ -68,8 +72,45 @@ struct AccountLoad {
     error: Option<String>,
     /// Lecture partielle : organisations Azure DevOps en échec (nom, erreur affichée) alors qu'une autre a répondu.
     failed_orgs: Vec<(String, String)>,
-    /// Copie locale du dépôt de chaque pull request (même ordre que `prs`).
-    local: Vec<Option<PathBuf>>,
+    /// Copies locales du dépôt de chaque pull request (même ordre que `prs`), la préférée d'abord.
+    local: Vec<Vec<PathBuf>>,
+}
+
+/// Les pull requests telles que DragonTree les a lues, pour un hôte (voir `DragonTreeApp::pull_requests`).
+#[derive(Debug, Clone, Default)]
+pub struct PullRequestsSnapshot {
+    /// Chaque compte des réglages, dans leur ordre, et où en est sa lecture.
+    pub accounts: Vec<AccountPullRequests>,
+    /// Les pull requests de tous les comptes, de la plus récemment mise à jour à la plus ancienne.
+    pub prs: Vec<ListedPullRequest>,
+    /// Une lecture est en cours.
+    pub loading: bool,
+    /// Le dernier rafraîchissement lancé (fenêtre ou hôte), et son heure en secondes Unix ; `None` : jamais lues.
+    pub refreshed: Option<Instant>,
+    pub refreshed_at: Option<i64>,
+}
+
+/// Où en est la lecture des pull requests d'un compte.
+#[derive(Debug, Clone)]
+pub struct AccountPullRequests {
+    pub account: Account,
+    /// Lecture demandée au moins une fois (sinon : compte ajouté depuis le dernier rafraîchissement).
+    pub read: bool,
+    pub loading: bool,
+    /// Pourquoi ses pull requests manquent (jeton refusé, compte Azure DevOps sans organisation…).
+    pub error: Option<String>,
+    /// Organisations Azure DevOps qui n'ont pas répondu alors qu'une autre l'a fait (nom, erreur).
+    pub failed_orgs: Vec<(String, String)>,
+}
+
+/// Une pull request lue, avec son compte et ses copies locales.
+#[derive(Debug, Clone)]
+pub struct ListedPullRequest {
+    /// Identifiant du compte qui l'a lue.
+    pub account: String,
+    pub pr: PullRequest,
+    /// Les copies locales de son dépôt (dépôts récents d'abord, puis ceux de la liste) ; vide : pas clonée.
+    pub local: Vec<PathBuf>,
 }
 
 /// Filtre principal de la liste.
@@ -98,6 +139,8 @@ pub struct PullRequestsWindow {
     /// Compte choisi ; `None` : tous.
     account_filter: Option<String>,
     text: String,
+    /// Un hôte les a fait relire (`refresh_in_background`) : les copies locales sont relues même fenêtre fermée.
+    hosted: bool,
 }
 
 impl PullRequestsWindow {
@@ -114,6 +157,7 @@ impl PullRequestsWindow {
             filter: PrFilter::All,
             account_filter: None,
             text: String::new(),
+            hosted: false,
         }
     }
 
@@ -174,10 +218,51 @@ impl PullRequestsWindow {
         self.index_local_clones(shared, repos);
     }
 
+    /// Relève, pour un hôte, les pull requests de chaque compte et les copies locales, comme à l'ouverture de la
+    /// fenêtre, qui peut rester fermée (ouverte, elle montre la même lecture) ; faux si une lecture est déjà en cours :
+    /// ses réponses arrivent. Les copies locales sont ensuite relues aussi à la fin de chaque scan, fenêtre fermée.
+    pub fn refresh_in_background(&mut self, shared: &Shared, repos: &[FoundRepo]) -> bool {
+        if self.loading() {
+            return false;
+        }
+        self.hosted = true;
+        self.refresh(shared, repos);
+        true
+    }
+
+    /// Ce qui a été lu, pour un hôte ; `accounts` : comptes des réglages. Sans filtre : toutes les pull requests des
+    /// comptes, de la plus récemment mise à jour à la plus ancienne.
+    pub fn snapshot(&self, accounts: &[Account]) -> PullRequestsSnapshot {
+        let mut prs = Vec::new();
+        let mut states = Vec::new();
+        for account in accounts {
+            let load = self.loads.get(&account.id);
+            states.push(AccountPullRequests {
+                account: account.clone(),
+                read: load.is_some(),
+                loading: load.is_some_and(|l| l.loading),
+                error: load.and_then(|l| l.error.clone()),
+                failed_orgs: load.map(|l| l.failed_orgs.clone()).unwrap_or_default(),
+            });
+            for (i, pr) in load.map(|l| l.prs.as_slice()).unwrap_or_default().iter().enumerate() {
+                let local = load.and_then(|l| l.local.get(i)).cloned().unwrap_or_default();
+                prs.push(ListedPullRequest { account: account.id.clone(), pr: pr.clone(), local });
+            }
+        }
+        prs.sort_by_key(|p| std::cmp::Reverse(p.pr.updated_timestamp()));
+        PullRequestsSnapshot {
+            accounts: states,
+            prs,
+            loading: self.loading(),
+            refreshed: self.last_refresh,
+            refreshed_at: self.refreshed_at,
+        }
+    }
+
     /// Relit les remotes des copies locales (dépôts récents, puis ceux de la liste) en tâche de fond. Sans effet
-    /// quand la fenêtre est fermée ; appelée aussi à la fin d'un scan de la liste des dépôts.
+    /// quand la fenêtre est fermée, sauf pour un hôte ; appelée aussi à la fin d'un scan de la liste des dépôts.
     pub fn index_local_clones(&mut self, shared: &Shared, repos: &[FoundRepo]) {
-        if !self.open || shared.settings.accounts.is_empty() {
+        if !(self.open || self.hosted) || shared.settings.accounts.is_empty() {
             return;
         }
         self.clones_generation += 1;
@@ -238,7 +323,7 @@ impl PullRequestsWindow {
             let Some(load) = self.loads.get(&account.id) else { continue };
             for (i, pr) in load.prs.iter().enumerate() {
                 if passes(pr, self.filter, &self.text) {
-                    let local = load.local.get(i).and_then(Option::as_deref);
+                    let local = load.local.get(i).and_then(|l| l.first()).map(PathBuf::as_path);
                     rows.push(Row { account, pr, local });
                 }
             }
@@ -528,9 +613,10 @@ fn local_candidates(recent: &[PathBuf], repos: &[FoundRepo]) -> Vec<PathBuf> {
     recent.iter().chain(main_first.map(|r| &r.path)).filter(|path| seen.insert(path_key(path))).cloned().collect()
 }
 
-/// Copie locale de chaque pull request : la première dont un remote désigne son dépôt (même forge, hôte et noms, sans
-/// la casse). Le compte de la pull request décide de la forge d'un hôte auto-hébergé.
-fn link_local_clones(prs: &[PullRequest], account: Option<&Account>, clones: &[LocalClone]) -> Vec<Option<PathBuf>> {
+/// Copies locales de chaque pull request : celles dont un remote désigne son dépôt (même forge, hôte et noms, sans la
+/// casse), dans l'ordre de `clones` ; la fenêtre ouvre la première. Le compte de la pull request décide de la forge d'un
+/// hôte auto-hébergé.
+fn link_local_clones(prs: &[PullRequest], account: Option<&Account>, clones: &[LocalClone]) -> Vec<Vec<PathBuf>> {
     if prs.is_empty() {
         return Vec::new();
     }
@@ -542,8 +628,9 @@ fn link_local_clones(prs: &[PullRequest], account: Option<&Account>, clones: &[L
         .map(|pr| {
             parsed
                 .iter()
-                .find(|(_, locations)| locations.iter().any(|l| l.same_repo(&pr.repo)))
+                .filter(|(_, locations)| locations.iter().any(|l| l.same_repo(&pr.repo)))
                 .map(|(path, _)| path.to_path_buf())
+                .collect()
         })
         .collect()
 }
@@ -607,15 +694,14 @@ mod tests {
             clone("C:/depots/autre", &["https://github.com/fabrikam/northwind.git"]),
             clone("C:/depots/northwind", &["git@github.com:Contoso/Northwind.git"]),
             clone("C:/depots/outils", &["https://git.contoso.test/Equipe/outils.git"]),
+            clone("C:/depots/northwind-2", &["https://github.com/contoso/northwind"]),
         ];
         let gh = account("gh", ForgeKind::GitHub, "github.com");
-        assert_eq!(
-            link_local_clones(&prs, Some(&gh), &clones),
-            [Some(PathBuf::from("C:/depots/northwind")), None, None]
-        );
+        let northwind = vec![PathBuf::from("C:/depots/northwind"), PathBuf::from("C:/depots/northwind-2")];
+        assert_eq!(link_local_clones(&prs, Some(&gh), &clones), [northwind, vec![], vec![]], "chaque copie, en ordre");
         // Hôte auto-hébergé sans « gitlab » dans le nom : reconnu grâce au compte GitLab de la pull request.
         let gl = account("gl", ForgeKind::GitLab, "git.contoso.test");
-        assert_eq!(link_local_clones(&prs[2..], Some(&gl), &clones), [Some(PathBuf::from("C:/depots/outils"))]);
+        assert_eq!(link_local_clones(&prs[2..], Some(&gl), &clones), [vec![PathBuf::from("C:/depots/outils")]]);
         assert!(link_local_clones(&[], Some(&gl), &clones).is_empty());
     }
 

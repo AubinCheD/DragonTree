@@ -16,7 +16,7 @@ use crate::closed_tabs::ClosedTabs;
 use crate::closing::Operations;
 use crate::commands::{self, Command, CommandContext, Scope};
 use crate::jobs::Jobs;
-use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsWindow};
+use crate::pull_requests::{PullRequestEvent, PullRequestSource, PullRequestsSnapshot, PullRequestsWindow};
 use crate::repo::{Refresh, RemoteOp, RepoEvent, RepoTab};
 use crate::repo_list::{QuickStatus, RepoDirectory, RepoListState, ScanEvent};
 use crate::settings::{Pending, Saved, Settings, SettingsFile, ThemeChoice, path_key};
@@ -942,6 +942,19 @@ impl DragonTreeApp {
                 self.repo_list.start_scan(&self.shared);
             }
         }
+    }
+
+    /// Relit en fond, pour un hôte, les pull requests de chaque compte et leurs copies locales, comme la fenêtre « Pull
+    /// requests » à son ouverture (elle peut rester fermée) ; faux si une lecture est déjà en cours (ses réponses
+    /// arrivent). Ce qui a été lu est dans `pull_requests`.
+    pub fn refresh_pull_requests(&mut self) -> bool {
+        self.pull_requests.refresh_in_background(&self.shared, &self.repo_list.repos)
+    }
+
+    /// Les pull requests telles que DragonTree les a lues (voir `refresh_pull_requests`) : par compte, l'état de sa
+    /// lecture ; toutes, de la plus récemment mise à jour à la plus ancienne, avec leurs copies locales.
+    pub fn pull_requests(&self) -> PullRequestsSnapshot {
+        self.pull_requests.snapshot(&self.shared.settings.accounts)
     }
 
     /// Affiche l'onglet de `repo` (ouvert au besoin), comme un dépôt choisi dans la liste.

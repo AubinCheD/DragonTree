@@ -251,3 +251,41 @@ fn without_any_account_the_window_offers_to_add_one() {
     click_label_containing(&mut h, "Ajouter un compte…");
     wait_until(&mut h, "fenêtre Comptes", |h| h.query_by_label("Aucun compte pour l'instant.").is_some());
 }
+
+/// Un hôte (le téléphone de la suite) fait relire les pull requests sans ouvrir la fenêtre et lit ce qui l'a été :
+/// chaque compte et son erreur à sa place, toutes les pull requests de la plus récente à la plus ancienne, avec les
+/// copies locales de leur dépôt (relues fenêtre fermée) ; une seconde demande pendant la lecture n'en lance pas une
+/// autre.
+#[test]
+fn a_host_reads_the_pull_requests_without_the_window() {
+    let tmp = tempfile::tempdir().unwrap();
+    let clone = local_clone(tmp.path());
+    seed(tmp.path(), three_accounts());
+    let mut h = harness(StartOptions { pull_request_source: Some(fake_forges), ..start(tmp.path()) });
+    wait_until(&mut h, "comptes lus", |h| h.state().pull_requests().accounts.len() == 3);
+    let before = h.state().pull_requests();
+    assert!(before.prs.is_empty() && before.refreshed.is_none(), "rien de lu sans demande");
+    assert!(before.accounts.iter().all(|a| !a.read && !a.loading));
+
+    assert!(h.state_mut().refresh_pull_requests());
+    assert!(h.state().pull_requests().loading);
+    assert!(!h.state_mut().refresh_pull_requests(), "une lecture est déjà en cours");
+    wait_until(&mut h, "pull requests lues", |h| {
+        let s = h.state().pull_requests();
+        !s.loading && s.prs.len() == 3
+    });
+    let s = h.state().pull_requests();
+    let titles: Vec<&str> = s.prs.iter().map(|p| p.pr.title.as_str()).collect();
+    assert_eq!(titles, [HOME, RELEASE, DISCOUNTS], "de la plus récente à la plus ancienne");
+    assert_eq!(s.prs[0].account, "compte-github");
+    assert!(s.refreshed.is_some() && s.refreshed_at.is_some());
+    let gitlab = &s.accounts[1];
+    assert!(gitlab.read && gitlab.error.as_deref().is_some_and(|e| e.contains("Accès refusé")), "{gitlab:?}");
+    assert_eq!(s.accounts[2].failed_orgs.iter().map(|(org, _)| org.as_str()).collect::<Vec<_>>(), ["contoso"]);
+    // La copie locale du dépôt de la première, relue fenêtre fermée (aussi à la fin du scan des dépôts).
+    wait_until(&mut h, "copie locale reconnue", |h| {
+        h.state().pull_requests().prs[0].local.iter().any(|p| path_key(p) == path_key(&clone))
+    });
+    assert!(h.state().pull_requests().prs[1].local.is_empty(), "pas clonée");
+    assert!(h.query_by_label("3 pull requests").is_none(), "la fenêtre reste fermée");
+}
