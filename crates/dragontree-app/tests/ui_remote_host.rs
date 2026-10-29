@@ -347,9 +347,19 @@ fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
         assert!(h.state_mut().0.clone_remote(bad.clone()).is_err(), "{bad:?}");
     }
     // Ni secrets ni configuration, comme pour le pont d'Eyrie : un dossier de clés ou de jetons où qu'il soit, sans
-    // casse, un dossier dont le nom commence par un point (`.config`, `.claude`…), qu'un outil lirait.
+    // casse, un dossier dont le nom commence par un point (`.config`, `.claude`…), qu'un outil lirait ; une
+    // destination qui existe déjà est jugée résolue : une jonction (ou un nom court, `AWS~1`) ne cache pas un tel
+    // dossier, vide.
     let keys = tmp.path().join(".AWS");
     std::fs::create_dir_all(&keys).unwrap();
+    let link = parent.join("lien");
+    let linked = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&link)
+        .arg(&keys)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    assert!(linked, "jonction {} → {}", link.display(), keys.display());
     for bad in [
         CloneRequest { folder: ".ssh".into(), ..request.clone() },
         CloneRequest { folder: ".GnuPG".into(), ..request.clone() },
@@ -357,6 +367,7 @@ fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
         CloneRequest { folder: ".claude".into(), ..request.clone() },
         CloneRequest { folder: "System Volume Information".into(), ..request.clone() },
         CloneRequest { parent: keys.clone(), ..request.clone() },
+        CloneRequest { folder: "lien".into(), ..request.clone() },
     ] {
         let e = h.state_mut().0.clone_remote(bad.clone()).unwrap_err();
         assert!(e.contains("protégé"), "{bad:?} : {e}");

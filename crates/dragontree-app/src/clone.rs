@@ -261,12 +261,13 @@ pub(crate) fn check_request(req: &CloneRequest, accounts: &[Account]) -> Result<
         return Err(tr!("Dossier parent introuvable : {path}", path = req.parent.display()));
     }
     let dest = req.parent.join(folder);
-    // Écrite telle quelle et sous son parent résolu : une jonction ou un nom court ne cache pas un dossier protégé.
-    // Un nom qui commence par un point est celui d'un dossier de configuration (`.config`, `.vscode`…), qu'un outil
-    // lirait.
+    // Écrite telle quelle, sous son parent résolu, et résolue elle-même si elle existe déjà : une jonction ou un nom
+    // court (`AWS~1` pour `.aws`) ne cache pas un dossier protégé. Un nom qui commence par un point est celui d'un
+    // dossier de configuration (`.config`, `.vscode`…), qu'un outil lirait.
     let (homes, documents) = user_dirs();
-    let written_and_resolved = [Some(dest.clone()), resolved(&req.parent).map(|p| p.join(folder))];
-    if folder.starts_with('.') || written_and_resolved.iter().flatten().any(|d| protected_dest(d, &homes, &documents)) {
+    let written_and_resolved = [Some(dest.clone()), resolved(&req.parent).map(|p| p.join(folder)), resolved(&dest)];
+    let dotted = |d: &PathBuf| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+    if written_and_resolved.iter().flatten().any(|d| dotted(d) || protected_dest(d, &homes, &documents)) {
         return Err(tr!("Dossier protégé (secrets ou configuration) : {path}", path = dest.display()));
     }
     let empty = || std::fs::read_dir(&dest).is_ok_and(|mut d| d.next().is_none());
