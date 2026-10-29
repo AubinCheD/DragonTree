@@ -4,7 +4,7 @@ use common::TestRepo;
 use dragontree_git::graph::GraphBuilder;
 use dragontree_git::{
     CancelToken, ChangeKind, DiffOptions, FileState, GitError, HeadState, LineKind, LogOptions, MergeMode, Oid,
-    OpState, Repo, ResetMode,
+    OpState, Repo, ResetMode, valid_ref_name,
 };
 
 fn open(t: &TestRepo) -> Repo {
@@ -216,6 +216,16 @@ fn a_name_or_revision_never_reaches_git_as_an_option() {
     assert!(refs.locals.iter().any(|b| b.name == "fix_é"), "{refs:?}");
     assert_eq!(refs.tags.len(), 2);
     assert_eq!(repo.remotes().unwrap().len(), 2);
+
+    // Rien de plus que git : un nom qu'il accepte passe (espace insécable ou idéographique, caractère de contrôle hors
+    // ASCII, plus de 255 octets), qu'il vienne d'ailleurs ou soit déjà là (une release à finir, une branche à suivre).
+    let long = vec!["abcdefghij".repeat(6); 5].join("/");
+    for name in ["a\u{a0}b", "a\u{3000}b", "a\u{85}b", "a\u{90}b", &long] {
+        assert!(t.try_run(&["check-ref-format", "--branch", name]).is_ok(), "accepté par git : {name:?}");
+        assert!(valid_ref_name(name), "{name:?}");
+    }
+    repo.create_branch("a\u{a0}b", "HEAD", false).unwrap();
+    repo.create_tag("v1\u{3000}0", "HEAD", Some("Version 1")).unwrap();
 }
 
 #[test]

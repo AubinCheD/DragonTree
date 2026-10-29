@@ -9,7 +9,7 @@
 use dragontree_i18n::tr;
 
 use crate::error::GitError;
-use crate::ops::MergeMode;
+use crate::ops::{MergeMode, valid_ref_name};
 use crate::repo::{OpState, Repo};
 
 /// Nature d'une branche de travail de Git Flow.
@@ -266,6 +266,10 @@ impl Repo {
             if !self.branch_exists(permanent) {
                 return refuse(tr!("La branche « {name} » n'existe pas", name = permanent));
             }
+        }
+        // Un tag que `create_tag` refuserait l'est ici, avant que la production soit fusionnée sans lui.
+        if kind != FlowKind::Feature && !valid_ref_name(&cfg.tag(name)) {
+            return refuse(tr!("Nom de tag invalide : « {name} »", name = cfg.tag(name)));
         }
         if kind != FlowKind::Feature && self.ref_exists(&format!("refs/tags/{}", cfg.tag(name))) {
             return refuse(tr!("Le tag « {name} » existe déjà", name = cfg.tag(name)));

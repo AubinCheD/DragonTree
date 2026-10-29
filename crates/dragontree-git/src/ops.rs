@@ -34,15 +34,16 @@ fn nul_joined(paths: &[String]) -> Vec<u8> {
 }
 
 /// Un nom de branche, de tag ou de remote que git accepte (`git check-ref-format --branch`) et qui ne peut pas passer
-/// pour une option : ni `-` au début, ni espace ou caractère de contrôle, ni `~^:?*[\`, ni `..` ou `@{`, ni `@` seul, ni
-/// `/` au début, à la fin ou doublé, ni élément qui commence par un point ou finit par `.lock`, ni point final. Les mêmes
-/// règles que pour un nom saisi sur le téléphone de la suite (`ref_name_ok` dans `crates/modules/dragontree` d'Eyrie) :
-/// à changer ensemble.
+/// pour une option : ni `-` au début, ni espace ou caractère de contrôle ASCII, ni `~^:?*[\`, ni `..` ou `@{`, ni `@`
+/// seul (il se lirait `HEAD`), ni `/` au début, à la fin ou doublé, ni élément qui commence par un point ou finit par
+/// `.lock`, ni point final. Rien de plus que git, `@` mis à part : un nom qu'il accepte, venu d'ailleurs ou déjà là
+/// (une release à finir), passe. Les mêmes règles que pour un nom saisi sur le téléphone de la suite (`ref_name_ok`
+/// dans `crates/modules/dragontree` d'Eyrie), qui refuse en plus toute espace ou tout caractère de contrôle Unicode
+/// (comme les dialogues) et plus de 255 octets : à changer ensemble.
 pub fn valid_ref_name(name: &str) -> bool {
-    let bad_char = |c: char| c.is_whitespace() || c.is_control() || "~^:?*[\\".contains(c);
+    let bad_char = |c: char| c == ' ' || c.is_ascii_control() || "~^:?*[\\".contains(c);
     let bad_part = |p: &str| p.is_empty() || p.starts_with('.') || p.ends_with(".lock");
-    name.len() <= 255
-        && !name.starts_with('-')
+    !name.starts_with('-')
         && !name.ends_with('.')
         && name != "@"
         && !name.contains("..")

@@ -242,6 +242,32 @@ fn finishing_is_refused_before_any_change_when_it_cannot_complete() {
     assert!(matches!(repo.gitflow_finish(&cfg, FlowKind::Release, "1.0", false), Err(GitError::Refused(_))));
 }
 
+/// Un tag que DragonTree ne crée pas (`@` seul, qui se lirait `HEAD`) est refusé avant la première fusion : la
+/// production n'est pas fusionnée sans son tag.
+#[test]
+fn a_tag_name_refused_stops_the_finish_before_any_merge() {
+    let (t, repo, cfg) = flow_repo();
+    assert_eq!(repo.gitflow_start(&cfg, FlowKind::Release, "@").unwrap(), "release/@");
+    t.write("v.txt", "1\n");
+    t.commit_all("Release");
+    let main_before = t.run(&["rev-parse", "main"]);
+    assert!(matches!(repo.gitflow_finish(&cfg, FlowKind::Release, "@", false), Err(GitError::Refused(_))));
+    assert_eq!(t.run(&["rev-parse", "main"]), main_before);
+    assert_eq!(current(&t), "release/@");
+}
+
+/// Une release au nom que git accepte, même inhabituel (une espace insécable), va jusqu'à son tag.
+#[test]
+fn a_release_named_as_git_allows_is_tagged_when_finished() {
+    let (t, repo, cfg) = flow_repo();
+    let name = "1\u{a0}0";
+    assert_eq!(repo.gitflow_start(&cfg, FlowKind::Release, name).unwrap(), format!("release/{name}"));
+    t.write("v.txt", "1\n");
+    t.commit_all("Release");
+    assert_eq!(repo.gitflow_finish(&cfg, FlowKind::Release, name, true).unwrap(), FinishOutcome::Done);
+    assert_eq!(t.run(&["tag", "-l"]).trim(), name);
+}
+
 #[test]
 fn a_permanent_branch_held_by_another_worktree_is_refused_before_any_command() {
     let (t, repo, cfg) = flow_repo();
