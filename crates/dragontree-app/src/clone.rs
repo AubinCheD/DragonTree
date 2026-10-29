@@ -229,13 +229,13 @@ fn inside(p: &Path, zone: &Path) -> bool {
     !zone.is_empty() && (p == zone || p.starts_with(&format!("{zone}/")))
 }
 
-/// Les zones où un hôte ne fait jamais cloner, et tout ce qu'elles contiennent, chacune telle qu'écrite et résolue :
-/// Windows, les programmes, les données des applications (`%APPDATA%`, où est le dossier Démarrage dont Windows lance
-/// le contenu, `%LOCALAPPDATA%`, le dossier `AppData` du profil ; celles de la suite comprises) et `profile`, celui de
-/// DragonTree (sinon celui par défaut). Copie de `forbidden_zones` du module DragonTree d'Eyrie
-/// (`crates/modules/dragontree/src/mobile.rs`, que DragonTree ne lit pas ; les profils de PowerShell y sont aussi, ici
-/// dans [`protected_dest`]) : à changer ensemble. Les données des applications y sont de plus telles que Windows les
-/// connaît, si leurs variables d'environnement disent autre chose.
+/// Les zones où un hôte ne fait jamais cloner, et tout ce qu'elles contiennent, chacune telle qu'écrite et résolue
+/// (absente, par son plus proche parent : [`resolved_zone`]) : Windows, les programmes, les données des applications
+/// (`%APPDATA%`, où est le dossier Démarrage dont Windows lance le contenu, `%LOCALAPPDATA%`, le dossier `AppData` du
+/// profil ; celles de la suite comprises) et `profile`, celui de DragonTree (sinon celui par défaut). Copie de
+/// `forbidden_zones` du module DragonTree d'Eyrie (`crates/modules/dragontree/src/mobile.rs`, que DragonTree ne lit
+/// pas ; les profils de PowerShell y sont aussi, ici dans [`protected_dest`]) : à changer ensemble. Les données des
+/// applications y sont de plus telles que Windows les connaît, si leurs variables d'environnement disent autre chose.
 fn forbidden_zones(profile: Option<&Path>) -> Vec<PathBuf> {
     let vars = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"];
     let vars = vars.into_iter().chain(["APPDATA", "LOCALAPPDATA"]);
@@ -255,9 +255,50 @@ fn resolved(dir: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text)))
 }
 
-/// Les dossiers de `list` résolus, quand ils existent, suivis de `list` telle qu'écrite.
+/// Une zone résolue (noms courts 8.3, jonctions, liens), sans le préfixe `\\?\`. Absente, elle l'est par son plus
+/// proche parent qui existe, suivi des noms qui manquent : le profil de DragonTree, créé au premier enregistrement, ou
+/// un dossier de la suite pas encore créé, écrits par une jonction ou sous un nom court, se reconnaissent aussi là où
+/// ils mènent. `None` : rien du chemin ne se résout. Copie de `resolved_zone` d'Eyrie
+/// (`crates/suite-mobile/src/paths.rs`, que DragonTree ne lit pas) : à changer ensemble.
+fn resolved_zone(zone: &Path) -> Option<PathBuf> {
+    let mut missing = Vec::new();
+    let mut at = zone;
+    loop {
+        if let Ok(full) = std::fs::canonicalize(at) {
+            let text = full.to_string_lossy();
+            let mut out = PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text));
+            out.extend(missing.iter().rev());
+            return Some(out);
+        }
+        missing.push(at.file_name()?);
+        at = at.parent()?;
+    }
+}
+
+/// Les dossiers de `list` résolus (absents, par leur plus proche parent qui existe : [`resolved_zone`]), suivis de
+/// `list` telle qu'écrite.
 fn with_resolved(list: Vec<PathBuf>) -> Vec<PathBuf> {
-    list.iter().filter_map(|d| resolved(d)).chain(list.clone()).collect()
+    list.iter().filter_map(|d| resolved_zone(d)).chain(list.clone()).collect()
+}
+
+/// Un chemin `X:\…` d'un disque : ni réseau, ni `\\?\` ou `\\.\`, ni flux (`:` après le lecteur), ni `..`, ni nom
+/// réservé de Windows (`CON`, `NUL`, `COM1`…, extension comprise). Copie de `drive_path` du module DragonTree d'Eyrie
+/// (`crates/modules/dragontree/src/mobile.rs`, que DragonTree ne lit pas) : à changer ensemble.
+fn drive_path(text: &str) -> bool {
+    let reserved = |name: &str| {
+        let stem = name.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
+        let numbered = |p: &str| stem.strip_prefix(p).is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']));
+        matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || numbered("COM") || numbered("LPT")
+    };
+    let b = text.as_bytes();
+    let drive = b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/');
+    drive
+        && !text[2..].contains(':')
+        && Path::new(text).components().all(|c| match c {
+            Component::ParentDir => false,
+            Component::Normal(n) => !reserved(&n.to_string_lossy()),
+            _ => true,
+        })
 }
 
 /// Les profils et les Documents où [`protected_dest`] cherche : celui de l'utilisateur, ses Documents (ceux du profil,
@@ -269,7 +310,8 @@ fn user_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
 }
 
 /// La destination d'une demande de clonage d'un hôte (`parent\folder`), ou pourquoi elle ne part pas : URL vide, nom de
-/// dossier qui n'est pas un simple nom, dossier parent qui n'existe pas (ou chemin relatif), dossier protégé
+/// dossier qui n'est pas un simple nom, chemin qui n'est pas un dossier d'un disque du PC, écrit ou résolu
+/// ([`drive_path`] : relatif, réseau…), dossier parent qui n'existe pas, dossier protégé
 /// (secrets ou configuration, [`protected_dest`], ou nom qui commence par un point ; Windows, programmes ou données
 /// des applications, [`forbidden_zones`], `profile` compris : celui de DragonTree), destination déjà occupée (un
 /// dossier vide convient, comme dans la fenêtre), branche vide ou qui serait lue comme une option, compte inconnu.
@@ -287,15 +329,29 @@ pub(crate) fn check_request(
     if !single || folder.contains(['/', '\\', ':']) {
         return Err(tr!("Nom de dossier invalide : « {name} »", name = folder));
     }
-    if !req.parent.is_absolute() || !req.parent.is_dir() {
-        return Err(tr!("Dossier parent introuvable : {path}", path = req.parent.display()));
+    // Un dossier d'un disque du PC, écrit et résolu, comme pour le pont d'Eyrie : par le réseau, même vers ce PC
+    // (`\\localhost\C$\…`, ou un lecteur réseau, qui se résout en `\\?\UNC\…`), un dossier protégé n'est nommé ni
+    // écrit ni résolu. Écrit, contrôlé avant d'aller sur le disque : un chemin réseau n'est pas même ouvert. (Hors de
+    // Windows, un chemin absolu.)
+    let on_disk = |p: &Path| if cfg!(windows) { drive_path(&p.to_string_lossy()) } else { p.is_absolute() };
+    let path = req.parent.display();
+    let refused = || tr!("Chemin refusé, un dossier d'un disque du PC est attendu (C:\\…) : {path}", path);
+    if !on_disk(&req.parent) {
+        return Err(refused());
+    }
+    if !req.parent.is_dir() {
+        return Err(tr!("Dossier parent introuvable : {path}", path));
     }
     let dest = req.parent.join(folder);
+    let (full_parent, full_dest) = (resolved(&req.parent), resolved(&dest));
+    if !full_parent.as_deref().is_some_and(on_disk) || full_dest.as_deref().is_some_and(|d| !on_disk(d)) {
+        return Err(refused());
+    }
     // Écrite telle quelle, sous son parent résolu, et résolue elle-même si elle existe déjà : une jonction ou un nom
     // court (`AWS~1` pour `.aws`) ne cache pas un dossier protégé. Un nom qui commence par un point est celui d'un
     // dossier de configuration (`.config`, `.vscode`…), qu'un outil lirait.
     let (homes, documents) = user_dirs();
-    let written_and_resolved = [Some(dest.clone()), resolved(&req.parent).map(|p| p.join(folder)), resolved(&dest)];
+    let written_and_resolved = [Some(dest.clone()), full_parent.map(|p| p.join(folder)), full_dest];
     let dotted = |d: &PathBuf| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
     if written_and_resolved.iter().flatten().any(|d| dotted(d) || protected_dest(d, &homes, &documents)) {
         return Err(tr!("Dossier protégé (secrets ou configuration) : {path}", path = dest.display()));
@@ -1134,6 +1190,48 @@ mod tests {
         ];
         for p in &allowed {
             assert!(!held(p), "{}", p.display());
+        }
+    }
+
+    /// Une zone qui n'existe pas encore (le profil de DragonTree, créé au premier enregistrement), écrite par une
+    /// jonction ou un nom court, est aussi là où elle mène : par son plus proche parent qui existe, résolu, suivi des
+    /// noms qui manquent, comme pour le pont d'Eyrie.
+    #[test]
+    fn an_absent_zone_is_held_where_its_nearest_parent_leads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (real, link) = (tmp.path().join("reel"), tmp.path().join("lien"));
+        std::fs::create_dir_all(&real).unwrap();
+        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&real).output();
+        assert!(made.is_ok_and(|o| o.status.success()), "jonction {} → {}", link.display(), real.display());
+        let zones = super::forbidden_zones(Some(&link.join(r"profil\DragonTree")));
+        let long = super::path_key(&super::resolved(&real).unwrap().join(r"profil\DragonTree"));
+        assert!(zones.iter().any(|z| super::path_key(z) == long), "{long} absent de {zones:?}");
+    }
+
+    /// Comme pour le pont d'Eyrie, un hôte ne fait cloner que dans un dossier `X:\…` d'un disque : ni par le réseau,
+    /// même vers ce PC (`\\localhost\C$\…`, ou un lecteur réseau, résolu en `\\?\UNC\…`), ni `\\?\` ou `\\.\`, ni `..`,
+    /// flux ou nom réservé de Windows.
+    #[test]
+    fn a_host_clones_only_into_a_folder_of_a_pc_disk() {
+        for good in [r"C:\dev\depot", "D:/sources/x", r"C:\dev\com10", r"C:\dev\console", r"C:\Users\CLBR-A~1\x"] {
+            assert!(super::drive_path(good), "{good}");
+        }
+        for bad in [
+            r"\\serveur\partage",
+            r"\\localhost\C$\x",
+            r"\\?\UNC\s\sh",
+            r"UNC\localhost\C$\x",
+            r"\\?\C:\dev",
+            r"\\.\C:\dev",
+            "C:relatif",
+            r"C:\dev\..\x",
+            r"C:\dev\depot:flux",
+            r"C:\dev\nul",
+            r"C:\dev\COM1.txt",
+            "depot",
+            "",
+        ] {
+            assert!(!super::drive_path(bad), "{bad}");
         }
     }
 

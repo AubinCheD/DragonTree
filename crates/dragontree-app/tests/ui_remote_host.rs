@@ -392,6 +392,21 @@ fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
         let e = h.state_mut().0.clone_remote(bad.clone()).unwrap_err();
         assert!(e.contains("protégé"), "{bad:?} : {e}");
     }
+    // Ni par le réseau, même vers ce PC, comme pour le pont d'Eyrie : `\\localhost\C$\…`, écrit ou résolu, ne nomme
+    // aucun dossier protégé, et y mènerait quand même (le dossier Démarrage, ici). Essayé là où le partage du disque
+    // est ouvert.
+    let network = |p: &Path| PathBuf::from(format!(r"\\localhost\{}", p.display().to_string().replacen(':', "$", 1)));
+    let programs = var("APPDATA").join(r"Microsoft\Windows\Start Menu\Programs");
+    for bad in [
+        CloneRequest { parent: network(&parent), ..unlaunched.clone() },
+        CloneRequest { parent: network(&programs), folder: "Startup".into(), ..unlaunched.clone() },
+    ] {
+        if !bad.parent.is_dir() {
+            continue;
+        }
+        let e = h.state_mut().0.clone_remote(bad.clone()).unwrap_err();
+        assert!(e.contains("disque du PC"), "{bad:?} : {e}");
+    }
     assert!(h.state().0.host_jobs().is_empty(), "rien de lancé");
 
     let id = h.state_mut().0.clone_remote(request.clone()).unwrap();

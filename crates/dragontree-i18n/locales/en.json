@@ -1427,5 +1427,6 @@
   "Nom de remote invalide : « {name} »": "Invalid remote name: “{name}”",
   "Révision invalide : « {rev} »": "Invalid revision: “{rev}”",
   "Dossier protégé (secrets ou configuration) : {path}": "Protected folder (secrets or configuration): {path}",
-  "Dossier protégé (Windows, programmes ou données des applications) : {path}": "Protected folder (Windows, programs or application data): {path}"
+  "Dossier protégé (Windows, programmes ou données des applications) : {path}": "Protected folder (Windows, programs or application data): {path}",
+  "Chemin refusé, un dossier d'un disque du PC est attendu (C:\\…) : {path}": "Path refused, a folder on a disk of the PC is expected (C:\\…): {path}"
 }
