@@ -897,7 +897,8 @@ impl DragonTreeApp {
     /// (git introuvable, demande incomplète, destination occupée, compte inconnu, clonage déjà en cours vers elle).
     pub fn clone_remote(&mut self, req: CloneRequest) -> Result<u64, String> {
         let git = self.shared.git.clone().ok_or_else(|| tr!("git est introuvable.").to_string())?;
-        let dest = crate::clone::check_request(&req, &self.shared.settings.accounts)?;
+        let profile = self.shared.profile_dir.as_deref();
+        let dest = crate::clone::check_request(&req, &self.shared.settings.accounts, profile)?;
         if self.host_jobs.iter().any(|j| j.result.is_none() && path_key(&j.dest) == path_key(&dest)) {
             return Err(tr!("Un clonage vers ce dossier est déjà en cours.").into());
         }

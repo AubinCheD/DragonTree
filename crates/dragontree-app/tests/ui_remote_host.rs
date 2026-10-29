@@ -289,7 +289,8 @@ fn the_host_closes_its_background_tab_unless_shown_or_busy() {
 /// même DragonTree masqué. Annulé, son dossier partiel est supprimé.
 #[test]
 fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
-    let tmp = tempfile::tempdir().unwrap();
+    // Hors du dossier temporaire de Windows, qui est dans `%LOCALAPPDATA%` : un hôte n'y clone pas.
+    let tmp = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let source = tmp.path().join("source");
     repo_with_commit(&source);
     let (root, parent, shown) = (tmp.path().join("racine"), tmp.path().join("clones"), tmp.path().join("affiche"));
@@ -352,14 +353,11 @@ fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
     // dossier, vide.
     let keys = tmp.path().join(".AWS");
     std::fs::create_dir_all(&keys).unwrap();
-    let link = parent.join("lien");
-    let linked = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(&link)
-        .arg(&keys)
-        .output()
-        .is_ok_and(|o| o.status.success());
-    assert!(linked, "jonction {} → {}", link.display(), keys.display());
+    let junction = |link: &Path, target: &Path| {
+        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(link).arg(target).output();
+        assert!(made.is_ok_and(|o| o.status.success()), "jonction {} → {}", link.display(), target.display());
+    };
+    junction(&parent.join("lien"), &keys);
     for bad in [
         CloneRequest { folder: ".ssh".into(), ..request.clone() },
         CloneRequest { folder: ".GnuPG".into(), ..request.clone() },
@@ -368,6 +366,28 @@ fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
         CloneRequest { folder: "System Volume Information".into(), ..request.clone() },
         CloneRequest { parent: keys.clone(), ..request.clone() },
         CloneRequest { folder: "lien".into(), ..request.clone() },
+    ] {
+        let e = h.state_mut().0.clone_remote(bad.clone()).unwrap_err();
+        assert!(e.contains("protégé"), "{bad:?} : {e}");
+    }
+    // Ni Windows, ni les programmes, ni les données des applications (`%APPDATA%`, où est le dossier Démarrage dont
+    // Windows lance le contenu, `%LOCALAPPDATA%`), ni le profil de DragonTree, comme pour le pont d'Eyrie : écrits
+    // tels quels, ou atteints par une jonction (vers le profil, ici). La branche est refusée ensuite : si l'un d'eux
+    // passait quand même, rien ne serait cloné dans les vrais dossiers du PC. (Par leurs variables : le profil de
+    // l'utilisateur est changé pour git, Windows n'y trouve plus ses dossiers.)
+    junction(&parent.join("profil"), &profile);
+    let unlaunched = CloneRequest { branch: Some("-x".into()), ..request.clone() };
+    let var = |name: &str| PathBuf::from(std::env::var_os(name).unwrap());
+    for bad in [
+        CloneRequest {
+            parent: var("APPDATA").join(r"Microsoft\Windows\Start Menu\Programs"),
+            folder: "Startup".into(),
+            ..unlaunched.clone()
+        },
+        CloneRequest { parent: var("LOCALAPPDATA"), ..unlaunched.clone() },
+        CloneRequest { parent: profile.clone(), ..unlaunched.clone() },
+        CloneRequest { parent: parent.join("profil"), ..unlaunched.clone() },
+        CloneRequest { folder: "profil".into(), ..unlaunched.clone() },
     ] {
         let e = h.state_mut().0.clone_remote(bad.clone()).unwrap_err();
         assert!(e.contains("protégé"), "{bad:?} : {e}");

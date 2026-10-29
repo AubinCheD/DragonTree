@@ -219,12 +219,33 @@ fn protected_dest(dest: &Path, homes: &[PathBuf], documents: &[PathBuf]) -> bool
         let rest = key.strip_prefix(&home).and_then(|r| r.strip_prefix('/'));
         !home.is_empty() && rest.is_some_and(|r| r.starts_with('.'))
     };
-    let inside = |zone: PathBuf| {
-        let zone = path_key(&zone);
-        key == zone || key.starts_with(&format!("{zone}/"))
-    };
-    let powershell = |d: &PathBuf| inside(d.join("PowerShell")) || inside(d.join("WindowsPowerShell"));
+    let powershell = |d: &PathBuf| inside(dest, &d.join("PowerShell")) || inside(dest, &d.join("WindowsPowerShell"));
     dest.components().any(named) || homes.iter().any(in_dot_folder) || documents.iter().any(powershell)
+}
+
+/// `p` est `zone` ou en dessous (sans casse, `\` ou `/`).
+fn inside(p: &Path, zone: &Path) -> bool {
+    let (p, zone) = (path_key(p), path_key(zone));
+    !zone.is_empty() && (p == zone || p.starts_with(&format!("{zone}/")))
+}
+
+/// Les zones où un hôte ne fait jamais cloner, et tout ce qu'elles contiennent, chacune telle qu'écrite et résolue :
+/// Windows, les programmes, les données des applications (`%APPDATA%`, où est le dossier Démarrage dont Windows lance
+/// le contenu, `%LOCALAPPDATA%`, le dossier `AppData` du profil ; celles de la suite comprises) et `profile`, celui de
+/// DragonTree (sinon celui par défaut). Copie de `forbidden_zones` du module DragonTree d'Eyrie
+/// (`crates/modules/dragontree/src/mobile.rs`, que DragonTree ne lit pas ; les profils de PowerShell y sont aussi, ici
+/// dans [`protected_dest`]) : à changer ensemble. Les données des applications y sont de plus telles que Windows les
+/// connaît, si leurs variables d'environnement disent autre chose.
+fn forbidden_zones(profile: Option<&Path>) -> Vec<PathBuf> {
+    let vars = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"];
+    let vars = vars.into_iter().chain(["APPDATA", "LOCALAPPDATA"]);
+    let mut zones: Vec<PathBuf> =
+        vars.filter_map(|v| std::env::var_os(v).filter(|d| !d.is_empty())).map(PathBuf::from).collect();
+    zones.extend(dirs::config_dir().into_iter().chain(dirs::data_local_dir()));
+    zones.extend(dirs::home_dir().map(|h| h.join("AppData")));
+    zones.extend([suite_accounts::suite_dir(), suite_accounts::local_suite_dir()]);
+    zones.push(profile.map_or_else(crate::settings::config_dir, Path::to_path_buf));
+    with_resolved(zones)
 }
 
 /// `dir` résolu (noms courts, jonctions, liens), sans le préfixe `\\?\` ; `None` : il n'existe pas.
@@ -234,10 +255,14 @@ fn resolved(dir: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text)))
 }
 
+/// Les dossiers de `list` résolus, quand ils existent, suivis de `list` telle qu'écrite.
+fn with_resolved(list: Vec<PathBuf>) -> Vec<PathBuf> {
+    list.iter().filter_map(|d| resolved(d)).chain(list.clone()).collect()
+}
+
 /// Les profils et les Documents où [`protected_dest`] cherche : celui de l'utilisateur, ses Documents (ceux du profil,
 /// et ceux que Windows connaît : OneDrive les déplace), chacun tel qu'écrit et résolu.
 fn user_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let with_resolved = |list: Vec<PathBuf>| list.iter().filter_map(|d| resolved(d)).chain(list.clone()).collect();
     let home = dirs::home_dir();
     let documents = home.iter().map(|h| h.join("Documents")).chain(dirs::document_dir()).collect();
     (with_resolved(home.into_iter().collect()), with_resolved(documents))
@@ -245,9 +270,14 @@ fn user_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
 
 /// La destination d'une demande de clonage d'un hôte (`parent\folder`), ou pourquoi elle ne part pas : URL vide, nom de
 /// dossier qui n'est pas un simple nom, dossier parent qui n'existe pas (ou chemin relatif), dossier protégé
-/// (secrets ou configuration, [`protected_dest`], ou nom qui commence par un point), destination déjà occupée (un
+/// (secrets ou configuration, [`protected_dest`], ou nom qui commence par un point ; Windows, programmes ou données
+/// des applications, [`forbidden_zones`], `profile` compris : celui de DragonTree), destination déjà occupée (un
 /// dossier vide convient, comme dans la fenêtre), branche vide ou qui serait lue comme une option, compte inconnu.
-pub(crate) fn check_request(req: &CloneRequest, accounts: &[Account]) -> Result<PathBuf, String> {
+pub(crate) fn check_request(
+    req: &CloneRequest,
+    accounts: &[Account],
+    profile: Option<&Path>,
+) -> Result<PathBuf, String> {
     let url = req.url.trim();
     if url.is_empty() || url.starts_with('-') {
         return Err(tr!("URL du dépôt invalide : « {url} »", url));
@@ -269,6 +299,11 @@ pub(crate) fn check_request(req: &CloneRequest, accounts: &[Account]) -> Result<
     let dotted = |d: &PathBuf| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
     if written_and_resolved.iter().flatten().any(|d| dotted(d) || protected_dest(d, &homes, &documents)) {
         return Err(tr!("Dossier protégé (secrets ou configuration) : {path}", path = dest.display()));
+    }
+    let zones = forbidden_zones(profile);
+    if written_and_resolved.iter().flatten().any(|d| zones.iter().any(|z| inside(d, z))) {
+        let path = dest.display();
+        return Err(tr!("Dossier protégé (Windows, programmes ou données des applications) : {path}", path));
     }
     let empty = || std::fs::read_dir(&dest).is_ok_and(|mut d| d.next().is_none());
     if dest.exists() && !(dest.is_dir() && empty()) {
@@ -1059,6 +1094,46 @@ mod tests {
         ];
         for p in allowed {
             assert!(!protected(p), "{p}");
+        }
+    }
+
+    /// Comme pour le pont d'Eyrie, sur le vrai PC : Windows, les programmes, les données des applications (le dossier
+    /// Démarrage compris), par leurs variables d'environnement ou tels que Windows les connaît, les dossiers de la suite,
+    /// le profil de DragonTree, et ce qu'ils contiennent, sans casse ; pas un dossier voisin au nom proche.
+    #[test]
+    fn a_clone_never_lands_in_windows_programs_or_application_data() {
+        use std::path::{Path, PathBuf};
+        let profile = PathBuf::from(r"D:\Profils\DragonTree");
+        let zones = super::forbidden_zones(Some(&profile));
+        let held = |p: &Path| zones.iter().any(|z| super::inside(p, z));
+        let var = |name: &str| PathBuf::from(std::env::var_os(name).unwrap());
+        let home = dirs::home_dir().unwrap();
+        let startup = dirs::config_dir().unwrap().join(r"Microsoft\Windows\Start Menu\Programs\Startup");
+        let refused = [
+            startup.clone(),
+            PathBuf::from(startup.to_string_lossy().to_uppercase().replace('\\', "/")),
+            var("APPDATA").join("depot"),
+            dirs::data_local_dir().unwrap().join(r"Programs\outil"),
+            var("LOCALAPPDATA").join(r"Microsoft\WindowsApps"),
+            home.join(r"AppData\LocalLow\depot"),
+            var("SystemRoot").join(r"System32\Tasks"),
+            var("ProgramFiles").join("Git"),
+            var("ProgramData").join(r"Microsoft\Windows\Start Menu\Programs\StartUp"),
+            suite_accounts::suite_dir().join("depot"),
+            suite_accounts::local_suite_dir(),
+            profile.join("depot"),
+        ];
+        for p in &refused {
+            assert!(held(p), "{}", p.display());
+        }
+        let allowed = [
+            home.join(r"source\repos\depot"),
+            home.join("AppDataOutils"),
+            PathBuf::from(r"D:\Profils\DragonTree2"),
+            PathBuf::from(r"D:\Programmes\depot"),
+        ];
+        for p in &allowed {
+            assert!(!held(p), "{}", p.display());
         }
     }
 

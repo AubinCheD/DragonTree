@@ -1426,5 +1426,6 @@
   "Nom de tag invalide : « {name} »": "Invalid tag name: “{name}”",
   "Nom de remote invalide : « {name} »": "Invalid remote name: “{name}”",
   "Révision invalide : « {rev} »": "Invalid revision: “{rev}”",
-  "Dossier protégé (secrets ou configuration) : {path}": "Protected folder (secrets or configuration): {path}"
+  "Dossier protégé (secrets ou configuration) : {path}": "Protected folder (secrets or configuration): {path}",
+  "Dossier protégé (Windows, programmes ou données des applications) : {path}": "Protected folder (Windows, programs or application data): {path}"
 }
