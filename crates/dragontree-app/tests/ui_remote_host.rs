@@ -346,6 +346,21 @@ fn the_host_clones_without_a_window_and_the_clone_opens_in_the_background() {
     ] {
         assert!(h.state_mut().0.clone_remote(bad.clone()).is_err(), "{bad:?}");
     }
+    // Ni secrets ni configuration, comme pour le pont d'Eyrie : un dossier de clés ou de jetons où qu'il soit, sans
+    // casse, un dossier dont le nom commence par un point (`.config`, `.claude`…), qu'un outil lirait.
+    let keys = tmp.path().join(".AWS");
+    std::fs::create_dir_all(&keys).unwrap();
+    for bad in [
+        CloneRequest { folder: ".ssh".into(), ..request.clone() },
+        CloneRequest { folder: ".GnuPG".into(), ..request.clone() },
+        CloneRequest { folder: ".config".into(), ..request.clone() },
+        CloneRequest { folder: ".claude".into(), ..request.clone() },
+        CloneRequest { folder: "System Volume Information".into(), ..request.clone() },
+        CloneRequest { parent: keys.clone(), ..request.clone() },
+    ] {
+        let e = h.state_mut().0.clone_remote(bad.clone()).unwrap_err();
+        assert!(e.contains("protégé"), "{bad:?} : {e}");
+    }
     assert!(h.state().0.host_jobs().is_empty(), "rien de lancé");
 
     let id = h.state_mut().0.clone_remote(request.clone()).unwrap();

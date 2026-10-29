@@ -191,9 +191,62 @@ pub fn default_parent(shared: &Shared) -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Noms de dossiers où un hôte ne fait jamais cloner, où qu'ils soient, en minuscules : secrets (clés, jetons,
+/// configurations qui lancent des commandes) et dossiers du système. Copie de `PROTECTED_NAMES` d'Eyrie
+/// (`crates/suite-mobile/src/paths.rs`, que DragonTree ne lit pas) : à changer ensemble.
+const PROTECTED_NAMES: [&str; 9] = [
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".kube",
+    ".docker",
+    ".password-store",
+    "$recycle.bin",
+    "system volume information",
+];
+
+/// `dest`, la destination d'un clonage d'un hôte, est un dossier protégé ou dedans, comme pour le pont d'Eyrie
+/// (`crates/suite-mobile/src/paths.rs`) : un des [`PROTECTED_NAMES`] dans son chemin, un dossier d'un des profils
+/// `homes` dont le nom commence par un point (`.config`, `.claude`… : git, les shells, Claude Code les lisent
+/// d'eux-mêmes, et certains y trouvent des commandes à lancer), ou un profil de PowerShell d'un des `documents` (son
+/// `profile.ps1` est lancé à chaque démarrage de PowerShell). Sans casse, `\` ou `/`.
+fn protected_dest(dest: &Path, homes: &[PathBuf], documents: &[PathBuf]) -> bool {
+    let key = path_key(dest);
+    let named = |c: Component| PROTECTED_NAMES.contains(&c.as_os_str().to_string_lossy().to_lowercase().as_str());
+    let in_dot_folder = |home: &PathBuf| {
+        let home = path_key(home);
+        let rest = key.strip_prefix(&home).and_then(|r| r.strip_prefix('/'));
+        !home.is_empty() && rest.is_some_and(|r| r.starts_with('.'))
+    };
+    let inside = |zone: PathBuf| {
+        let zone = path_key(&zone);
+        key == zone || key.starts_with(&format!("{zone}/"))
+    };
+    let powershell = |d: &PathBuf| inside(d.join("PowerShell")) || inside(d.join("WindowsPowerShell"));
+    dest.components().any(named) || homes.iter().any(in_dot_folder) || documents.iter().any(powershell)
+}
+
+/// `dir` résolu (noms courts, jonctions, liens), sans le préfixe `\\?\` ; `None` : il n'existe pas.
+fn resolved(dir: &Path) -> Option<PathBuf> {
+    let full = std::fs::canonicalize(dir).ok()?;
+    let text = full.to_string_lossy();
+    Some(PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text)))
+}
+
+/// Les profils et les Documents où [`protected_dest`] cherche : celui de l'utilisateur, ses Documents (ceux du profil,
+/// et ceux que Windows connaît : OneDrive les déplace), chacun tel qu'écrit et résolu.
+fn user_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let with_resolved = |list: Vec<PathBuf>| list.iter().filter_map(|d| resolved(d)).chain(list.clone()).collect();
+    let home = dirs::home_dir();
+    let documents = home.iter().map(|h| h.join("Documents")).chain(dirs::document_dir()).collect();
+    (with_resolved(home.into_iter().collect()), with_resolved(documents))
+}
+
 /// La destination d'une demande de clonage d'un hôte (`parent\folder`), ou pourquoi elle ne part pas : URL vide, nom de
-/// dossier qui n'est pas un simple nom, dossier parent qui n'existe pas (ou chemin relatif), destination déjà occupée
-/// (un dossier vide convient, comme dans la fenêtre), branche vide ou qui serait lue comme une option, compte inconnu.
+/// dossier qui n'est pas un simple nom, dossier parent qui n'existe pas (ou chemin relatif), dossier protégé
+/// (secrets ou configuration, [`protected_dest`], ou nom qui commence par un point), destination déjà occupée (un
+/// dossier vide convient, comme dans la fenêtre), branche vide ou qui serait lue comme une option, compte inconnu.
 pub(crate) fn check_request(req: &CloneRequest, accounts: &[Account]) -> Result<PathBuf, String> {
     let url = req.url.trim();
     if url.is_empty() || url.starts_with('-') {
@@ -208,6 +261,14 @@ pub(crate) fn check_request(req: &CloneRequest, accounts: &[Account]) -> Result<
         return Err(tr!("Dossier parent introuvable : {path}", path = req.parent.display()));
     }
     let dest = req.parent.join(folder);
+    // Écrite telle quelle et sous son parent résolu : une jonction ou un nom court ne cache pas un dossier protégé.
+    // Un nom qui commence par un point est celui d'un dossier de configuration (`.config`, `.vscode`…), qu'un outil
+    // lirait.
+    let (homes, documents) = user_dirs();
+    let written_and_resolved = [Some(dest.clone()), resolved(&req.parent).map(|p| p.join(folder))];
+    if folder.starts_with('.') || written_and_resolved.iter().flatten().any(|d| protected_dest(d, &homes, &documents)) {
+        return Err(tr!("Dossier protégé (secrets ou configuration) : {path}", path = dest.display()));
+    }
     let empty = || std::fs::read_dir(&dest).is_ok_and(|mut d| d.next().is_none());
     if dest.exists() && !(dest.is_dir() && empty()) {
         return Err(tr!("Ce dossier existe déjà et n'est pas vide.").into());
@@ -964,6 +1025,40 @@ mod tests {
     fn the_window_stays_compact_in_a_large_main_window() {
         let (window, _) = clone_window_in([1600.0, 1000.0], 200);
         assert!(window.width() <= 680.0 && window.height() <= 600.0, "{window:?}");
+    }
+
+    /// Comme pour le pont d'Eyrie : un dossier de secrets où qu'il soit, un dossier de configuration du profil, un
+    /// profil de PowerShell des Documents, et ce qu'ils contiennent, sans casse ; pas un dossier voisin au nom proche,
+    /// ni un dossier à point hors du profil, ni un dépôt « PowerShell » hors des Documents.
+    #[test]
+    fn a_clone_never_lands_in_a_secrets_or_configuration_folder() {
+        use std::path::{Path, PathBuf};
+        let homes = [PathBuf::from(r"C:\Users\ada")];
+        let documents = [PathBuf::from(r"C:\Users\ada\Documents"), PathBuf::from(r"D:\OneDrive\Documents")];
+        let protected = |p: &str| super::protected_dest(Path::new(p), &homes, &documents);
+        let refused = [
+            r"D:\depots\.ssh",
+            r"D:\.AWS\depot",
+            r"E:\$Recycle.Bin\depot",
+            r"C:\Users\ada\.config\git",
+            r"c:/users/ADA/.claude",
+            r"C:\Users\ada\Documents\PowerShell",
+            r"D:\OneDrive\Documents\WindowsPowerShell\Modules\depot",
+        ];
+        for p in refused {
+            assert!(protected(p), "{p}");
+        }
+        let allowed = [
+            r"C:\Users\ada\source\repos\depot",
+            r"C:\Users\adam\.config",
+            r"D:\DEV\.outils\depot",
+            r"D:\DEV\PowerShell",
+            r"C:\Users\ada\Documents\PowerShellTools",
+            r"D:\depots\aws",
+        ];
+        for p in allowed {
+            assert!(!protected(p), "{p}");
+        }
     }
 
     #[test]

@@ -1425,5 +1425,6 @@
   "Un clonage vers ce dossier est déjà en cours.": "A clone into this folder is already running.",
   "Nom de tag invalide : « {name} »": "Invalid tag name: “{name}”",
   "Nom de remote invalide : « {name} »": "Invalid remote name: “{name}”",
-  "Révision invalide : « {rev} »": "Invalid revision: “{rev}”"
+  "Révision invalide : « {rev} »": "Invalid revision: “{rev}”",
+  "Dossier protégé (secrets ou configuration) : {path}": "Protected folder (secrets or configuration): {path}"
 }
