@@ -157,6 +157,67 @@ fn branch_create_checkout_rename_delete() {
     assert_eq!(refs.head, HeadState::Branch("main".into()));
 }
 
+/// Un nom de branche, de tag ou de remote, une révision, une URL partent en argument de git : jamais lus comme une
+/// option (`-f`, `--force`, `--file=…`), d'où qu'ils viennent (un dialogue, un hôte comme le téléphone de la suite). Un
+/// nouveau nom que git refuserait l'est avant lui ; ailleurs, `--` en fait un simple argument, que git refuse.
+#[test]
+fn a_name_or_revision_never_reaches_git_as_an_option() {
+    let t = TestRepo::new();
+    t.write("a", "1\n");
+    t.commit_all("1");
+    t.run(&["branch", "autre"]);
+    t.run(&["remote", "add", "amont", "https://example.com/r.git"]);
+    t.write("a", "local\n");
+    let repo = open(&t);
+    let state = || (repo.refs().unwrap(), repo.remotes().unwrap(), t.read("a"));
+    let before = state();
+    let refused = |r: Result<(), GitError>| matches!(r, Err(GitError::Refused(_)));
+    let names = ["-f", "--force", "-mautre", "--file=a", "a b", "a..b", "a//b", "x.lock", "x.lock/y", ".x", "a/.b"];
+    for bad in names.into_iter().chain(["@", "a@{1}", "a~1", "a:b", "x/", "/x", "x.", ""]) {
+        assert!(refused(repo.create_branch(bad, "HEAD", false)), "branche {bad:?}");
+        assert!(refused(repo.create_branch(bad, "HEAD", true)), "branche sortie {bad:?}");
+        assert!(refused(repo.rename_branch("autre", bad)), "renommage {bad:?}");
+        assert!(refused(repo.checkout_new_tracking("autre", bad)), "suivi {bad:?}");
+        assert!(refused(repo.create_tag(bad, "HEAD", None)), "tag {bad:?}");
+        assert!(refused(repo.create_tag(bad, "HEAD", Some("message"))), "tag annoté {bad:?}");
+        assert!(refused(repo.add_remote(bad, "https://example.com/r.git")), "remote {bad:?}");
+    }
+    // Une révision ou une URL là où git lit encore des options (`checkout`, `reset`, avant `--`) : refusée avant lui.
+    for option in ["-f", "--force", "--hard", "--orphan=x"] {
+        assert!(refused(repo.checkout(option)), "checkout {option}");
+        assert!(refused(repo.create_branch("neuve", option, true)), "départ {option}");
+        assert!(refused(repo.checkout_new_tracking(option, "neuve")), "suivi de {option}");
+        assert!(refused(repo.reset(option, ResetMode::Soft)), "reset {option}");
+        assert!(refused(repo.restore_file(option, "a")), "remise de a à {option}");
+        assert!(refused(repo.add_remote("neuf", option)), "URL {option}");
+        assert!(refused(repo.set_remote_urls("amont", option, None)), "URL {option}");
+        assert!(refused(repo.set_remote_urls("amont", "https://example.com/r.git", Some(option))), "push {option}");
+    }
+    // Ailleurs, après `--` : un nom existant ou une révision qui commence par `-` n'est qu'un argument, introuvable.
+    for option in ["-f", "--force", "-D", "-r"] {
+        assert!(repo.create_branch("neuve", option, false).is_err(), "départ {option}");
+        assert!(repo.create_tag("neuf", option, None).is_err(), "tag sur {option}");
+        assert!(repo.delete_branch(option, true).is_err(), "suppression {option}");
+        assert!(repo.delete_tag(option).is_err(), "suppression du tag {option}");
+        assert!(repo.remove_remote(option).is_err(), "remote {option}");
+        assert!(repo.set_upstream(option, "autre").is_err(), "suivi par {option}");
+        assert!(repo.merge(option, MergeMode::Default).is_err(), "fusion de {option}");
+        assert!(repo.rebase(option).is_err(), "rebase sur {option}");
+    }
+    assert_eq!(state(), before, "rien n'a bougé : branches, tags, remotes, modification locale");
+
+    // Des noms ordinaires passent toujours.
+    repo.create_branch("feature/x-1", "HEAD", false).unwrap();
+    repo.rename_branch("feature/x-1", "fix_é").unwrap();
+    repo.create_tag("v1.2.0", "HEAD", None).unwrap();
+    repo.create_tag("@v1", "HEAD", Some("Version 1")).unwrap();
+    repo.add_remote("origine/miroir", "https://example.com/m.git").unwrap();
+    let refs = repo.refs().unwrap();
+    assert!(refs.locals.iter().any(|b| b.name == "fix_é"), "{refs:?}");
+    assert_eq!(refs.tags.len(), 2);
+    assert_eq!(repo.remotes().unwrap().len(), 2);
+}
+
 #[test]
 fn checkout_detached_commit() {
     let t = TestRepo::new();

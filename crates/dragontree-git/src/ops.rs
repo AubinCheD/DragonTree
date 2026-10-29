@@ -33,6 +33,48 @@ fn nul_joined(paths: &[String]) -> Vec<u8> {
     out
 }
 
+/// Un nom de branche, de tag ou de remote que git accepte (`git check-ref-format --branch`) et qui ne peut pas passer
+/// pour une option : ni `-` au début, ni espace ou caractère de contrôle, ni `~^:?*[\`, ni `..` ou `@{`, ni `@` seul, ni
+/// `/` au début, à la fin ou doublé, ni élément qui commence par un point ou finit par `.lock`, ni point final. Les mêmes
+/// règles que pour un nom saisi sur le téléphone de la suite (`ref_name_ok` dans `crates/modules/dragontree` d'Eyrie) :
+/// à changer ensemble.
+pub fn valid_ref_name(name: &str) -> bool {
+    let bad_char = |c: char| c.is_whitespace() || c.is_control() || "~^:?*[\\".contains(c);
+    let bad_part = |p: &str| p.is_empty() || p.starts_with('.') || p.ends_with(".lock");
+    name.len() <= 255
+        && !name.starts_with('-')
+        && !name.ends_with('.')
+        && name != "@"
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.chars().any(bad_char)
+        && !name.split('/').any(bad_part)
+}
+
+/// Un nouveau nom de branche part tel quel en argument de git : un [`valid_ref_name`], sinon refusé avant lui.
+fn checked_branch(name: &str) -> Result<(), GitError> {
+    if valid_ref_name(name) {
+        Ok(())
+    } else {
+        Err(GitError::Refused(tr!("Nom de branche invalide : « {name} »", name)))
+    }
+}
+
+/// Une révision là où git lit encore des options (`checkout`, `reset`, avant `--`) : jamais une option.
+fn checked_rev(rev: &str) -> Result<(), GitError> {
+    if rev.starts_with('-') { Err(GitError::Refused(tr!("Révision invalide : « {rev} »", rev))) } else { Ok(()) }
+}
+
+/// Une URL de remote : jamais une option, ni ici (après `--`, git la prendrait telle quelle) ni pour les commandes qui
+/// la lisent ensuite.
+fn checked_url(url: &str) -> Result<(), GitError> {
+    if url.starts_with('-') {
+        Err(GitError::Refused(tr!("URL du dépôt invalide : « {url} »", url)))
+    } else {
+        Ok(())
+    }
+}
+
 impl Repo {
     /// Commande d'écriture : jamais d'éditeur interactif.
     pub(crate) fn write(&self) -> GitCommand {
@@ -156,6 +198,7 @@ impl Repo {
     /// Checkout. Une branche locale déjà sortie dans un autre worktree est refusée par git : l'erreur nomme ce
     /// worktree, lu dans la liste des worktrees (le message de git dépend de sa langue).
     pub fn checkout(&self, target: &str) -> Result<(), GitError> {
+        checked_rev(target)?;
         self.run_write(["checkout", target, "--"]).map_err(|e| match (&e, self.worktree_holding(target)) {
             (GitError::Failed { .. }, Some(wt)) => {
                 GitError::CheckedOutElsewhere { branch: target.to_string(), path: wt.path }
@@ -164,20 +207,33 @@ impl Repo {
         })
     }
 
+    /// Crée la branche `local` qui suit `remote_branch` et la sort. `checkout` lit des options jusqu'à `--` : les deux
+    /// noms sont contrôlés avant.
     pub fn checkout_new_tracking(&self, remote_branch: &str, local: &str) -> Result<(), GitError> {
-        self.run_write(["checkout", "-b", local, "--track", remote_branch])
+        checked_branch(local)?;
+        checked_rev(remote_branch)?;
+        self.run_write(["checkout", "-b", local, "--track", remote_branch, "--"])
     }
 
+    /// Crée la branche `name` sur `start`, sortie ou non. Ses noms ne sont jamais lus comme des options : contrôlés
+    /// avant `checkout`, placés après `--` pour `branch`.
     pub fn create_branch(&self, name: &str, start: &str, checkout: bool) -> Result<(), GitError> {
-        if checkout { self.run_write(["checkout", "-b", name, start]) } else { self.run_write(["branch", name, start]) }
+        checked_branch(name)?;
+        if checkout {
+            checked_rev(start)?;
+            self.run_write(["checkout", "-b", name, start, "--"])
+        } else {
+            self.run_write(["branch", "--", name, start])
+        }
     }
 
     pub fn rename_branch(&self, old: &str, new: &str) -> Result<(), GitError> {
-        self.run_write(["branch", "-m", old, new])
+        checked_branch(new)?;
+        self.run_write(["branch", "-m", "--", old, new])
     }
 
     pub fn delete_branch(&self, name: &str, force: bool) -> Result<(), GitError> {
-        self.run_write(["branch", if force { "-D" } else { "-d" }, name])
+        self.run_write(["branch", if force { "-D" } else { "-d" }, "--", name])
     }
 
     /// Le fichier `path` a des modifications locales qu'une remise écraserait : modifié, indexé, non suivi ou
@@ -195,20 +251,21 @@ impl Repo {
     /// travail est écrasé et le résultat est aussi indexé, comme le fait git. `<sha>^` donne la version d'avant un
     /// commit ; un fichier absent de `rev` est une erreur (rien n'est modifié).
     pub fn restore_file(&self, rev: &str, path: &str) -> Result<(), GitError> {
+        checked_rev(rev)?;
         self.write_paths().args(["checkout", rev, "--", path]).run().map(|_| ())
     }
 
     pub fn merge(&self, rev: &str, mode: MergeMode) -> Result<(), GitError> {
         match mode {
-            MergeMode::Default => self.run_write(["merge", "--no-edit", rev]),
-            MergeMode::NoFf => self.run_write(["merge", "--no-edit", "--no-ff", rev]),
-            MergeMode::FfOnly => self.run_write(["merge", "--ff-only", rev]),
-            MergeMode::Squash => self.run_write(["merge", "--squash", rev]),
+            MergeMode::Default => self.run_write(["merge", "--no-edit", "--", rev]),
+            MergeMode::NoFf => self.run_write(["merge", "--no-edit", "--no-ff", "--", rev]),
+            MergeMode::FfOnly => self.run_write(["merge", "--ff-only", "--", rev]),
+            MergeMode::Squash => self.run_write(["merge", "--squash", "--", rev]),
         }
     }
 
     pub fn rebase(&self, onto: &str) -> Result<(), GitError> {
-        self.run_write(["rebase", onto])
+        self.run_write(["rebase", "--", onto])
     }
 
     pub fn cherry_pick(&self, ids: &[Oid]) -> Result<(), GitError> {
@@ -225,7 +282,8 @@ impl Repo {
             ResetMode::Mixed => "--mixed",
             ResetMode::Hard => "--hard",
         };
-        self.run_write(["reset", "-q", flag, rev])
+        checked_rev(rev)?;
+        self.run_write(["reset", "-q", flag, rev, "--"])
     }
 
     pub fn continue_op(&self, state: OpState) -> Result<(), GitError> {
@@ -259,17 +317,22 @@ impl Repo {
         result
     }
 
+    /// Crée le tag `name` sur `rev`, annoté s'il a un message : un nom [`valid_ref_name`], placé après `--` avec `rev`.
     pub fn create_tag(&self, name: &str, rev: &str, message: Option<&str>) -> Result<(), GitError> {
+        if !valid_ref_name(name) {
+            return Err(GitError::Refused(tr!("Nom de tag invalide : « {name} »", name)));
+        }
         match message {
             Some(msg) => {
-                self.write().args(["tag", "-a", name, rev, "-F", "-"]).stdin(msg.as_bytes().to_vec()).run().map(|_| ())
+                let args = ["tag", "-a", "-F", "-", "--", name, rev];
+                self.write().args(args).stdin(msg.as_bytes().to_vec()).run().map(|_| ())
             }
-            None => self.run_write(["tag", name, rev]),
+            None => self.run_write(["tag", "--", name, rev]),
         }
     }
 
     pub fn delete_tag(&self, name: &str) -> Result<(), GitError> {
-        self.run_write(["tag", "-d", name])
+        self.run_write(["tag", "-d", "--", name])
     }
 
     pub fn stash_save(&self, message: Option<&str>, include_untracked: bool, keep_index: bool) -> Result<(), GitError> {
@@ -390,21 +453,29 @@ impl Repo {
         self.run_write(["stash", "drop", &format!("stash@{{{index}}}")])
     }
 
+    /// Ajoute le remote `name` : un nom [`valid_ref_name`] et une URL qui n'est pas une option, après `--`.
     pub fn add_remote(&self, name: &str, url: &str) -> Result<(), GitError> {
-        self.run_write(["remote", "add", name, url])
+        if !valid_ref_name(name) {
+            return Err(GitError::Refused(tr!("Nom de remote invalide : « {name} »", name)));
+        }
+        checked_url(url)?;
+        self.run_write(["remote", "add", "--", name, url])
     }
 
     pub fn remove_remote(&self, name: &str) -> Result<(), GitError> {
-        self.run_write(["remote", "remove", name])
+        self.run_write(["remote", "remove", "--", name])
     }
 
     /// Change l'URL de lecture d'un remote (`git remote set-url`) et, selon `push`, son URL de push : `Some(url)`
     /// distincte de `fetch` la fixe (`--push`), `None` ou une valeur vide ou égale à `fetch` retire l'URL de push
     /// propre (le push reprend alors l'URL de lecture).
     pub fn set_remote_urls(&self, name: &str, fetch: &str, push: Option<&str>) -> Result<(), GitError> {
-        self.run_write(["remote", "set-url", name, fetch])?;
-        match push.map(str::trim).filter(|p| !p.is_empty() && *p != fetch) {
-            Some(push) => self.run_write(["remote", "set-url", "--push", name, push]),
+        let push = push.map(str::trim).filter(|p| !p.is_empty() && *p != fetch);
+        checked_url(fetch)?;
+        push.map_or(Ok(()), checked_url)?;
+        self.run_write(["remote", "set-url", "--", name, fetch])?;
+        match push {
+            Some(push) => self.run_write(["remote", "set-url", "--push", "--", name, push]),
             None => self
                 .write()
                 .args(["config", "--unset-all", &format!("remote.{name}.pushurl")])
@@ -415,7 +486,7 @@ impl Repo {
     }
 
     pub fn set_upstream(&self, local: &str, remote_branch: &str) -> Result<(), GitError> {
-        self.run_write(["branch", &format!("--set-upstream-to={remote_branch}"), local])
+        self.run_write(["branch", &format!("--set-upstream-to={remote_branch}"), "--", local])
     }
 
     /// Vérifie un nom de branche (`git check-ref-format --branch`).

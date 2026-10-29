@@ -1422,5 +1422,8 @@
   "Dossier parent introuvable : {path}": "Parent folder not found: {path}",
   "Compte inconnu : {id}": "Unknown account: {id}",
   "Clonage de {name}": "Cloning {name}",
-  "Un clonage vers ce dossier est déjà en cours.": "A clone into this folder is already running."
+  "Un clonage vers ce dossier est déjà en cours.": "A clone into this folder is already running.",
+  "Nom de tag invalide : « {name} »": "Invalid tag name: “{name}”",
+  "Nom de remote invalide : « {name} »": "Invalid remote name: “{name}”",
+  "Révision invalide : « {rev} »": "Invalid revision: “{rev}”"
 }

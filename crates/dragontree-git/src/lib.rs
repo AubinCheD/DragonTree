@@ -54,7 +54,7 @@ pub use lfs::{LfsLock, lfs_available, parse_lfs_patterns, parse_locks};
 pub use log::{Commit, CommitSearch, LogOptions, LogOrder, LogParser, LogScope, LostCommits, RefSelection};
 pub use net::{NetOptions, clone_repo, init_repo, trust_directory};
 pub use oid::Oid;
-pub use ops::{MergeMode, ResetMode};
+pub use ops::{MergeMode, ResetMode, valid_ref_name};
 pub use patch::{
     HunkSelection, PatchMode, build_patch, build_patch_ignoring_whitespace, whole_hunk_changes_whitespace,
 };
